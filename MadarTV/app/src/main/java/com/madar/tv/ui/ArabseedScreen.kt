@@ -63,6 +63,7 @@ import com.madar.tv.ui.theme.MashadColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -80,6 +81,9 @@ fun CinemaSection(
     var searchQuery by rememberSaveable { mutableStateOf("") }
 
     var allItems by remember { mutableStateOf(emptyList<ArabseedItem>()) }
+    var activeEpisodes by remember { mutableStateOf<List<ArabseedEpisode>>(emptyList()) }
+    var currentEpisodeIndex by remember { mutableStateOf(-1) }
+    val scope = rememberCoroutineScope()
 
     val currentItem = remember(openedItem, allItems) {
         allItems.firstOrNull { it.pageUrl == openedItem }
@@ -95,6 +99,56 @@ fun CinemaSection(
                 MashadPlayerScreen(
                     detail = detail,
                     onBack = { openedDetail = null },
+                    hasPrev = currentEpisodeIndex > 0,
+                    hasNext = currentEpisodeIndex in 0 until activeEpisodes.size - 1,
+                    onPrev = {
+                        if (currentEpisodeIndex > 0) {
+                            val prevIdx = currentEpisodeIndex - 1
+                            val prevEp = activeEpisodes[prevIdx]
+                            currentEpisodeIndex = prevIdx
+                            scope.launch {
+                                val srvs = withContext(Dispatchers.IO) {
+                                    ArabseedRepository.fetchEpisodeServers(prevEp.pageUrl)
+                                }
+                                if (srvs.isNotEmpty()) {
+                                    val preRes = withContext(Dispatchers.IO) {
+                                        ArabseedRepository.resolveDirectStream(srvs.first().embedUrl)
+                                    }
+                                    val newItem = detail.item.copy(
+                                        id = prevEp.pageUrl.trimEnd('/').substringAfterLast('/'),
+                                        title = prevEp.title,
+                                        arabicTitle = prevEp.title,
+                                        pageUrl = prevEp.pageUrl,
+                                    )
+                                    openedDetail = ArabseedDetail(newItem, srvs, preRes)
+                                }
+                            }
+                        }
+                    },
+                    onNext = {
+                        if (currentEpisodeIndex in 0 until activeEpisodes.size - 1) {
+                            val nextIdx = currentEpisodeIndex + 1
+                            val nextEp = activeEpisodes[nextIdx]
+                            currentEpisodeIndex = nextIdx
+                            scope.launch {
+                                val srvs = withContext(Dispatchers.IO) {
+                                    ArabseedRepository.fetchEpisodeServers(nextEp.pageUrl)
+                                }
+                                if (srvs.isNotEmpty()) {
+                                    val preRes = withContext(Dispatchers.IO) {
+                                        ArabseedRepository.resolveDirectStream(srvs.first().embedUrl)
+                                    }
+                                    val newItem = detail.item.copy(
+                                        id = nextEp.pageUrl.trimEnd('/').substringAfterLast('/'),
+                                        title = nextEp.title,
+                                        arabicTitle = nextEp.title,
+                                        pageUrl = nextEp.pageUrl,
+                                    )
+                                    openedDetail = ArabseedDetail(newItem, srvs, preRes)
+                                }
+                            }
+                        }
+                    }
                 )
             }
 
@@ -102,7 +156,11 @@ fun CinemaSection(
                 MashadDetailScreen(
                     item = currentItem,
                     onBack = { openedItem = null },
-                    onPlay = { d -> openedDetail = d },
+                    onPlay = { d, eps, epIdx ->
+                        openedDetail = d
+                        activeEpisodes = eps
+                        currentEpisodeIndex = epIdx
+                    },
                 )
             }
 
@@ -724,7 +782,7 @@ private fun MashadCard(item: ArabseedItem, onClick: () -> Unit) {
 private fun MashadDetailScreen(
     item: ArabseedItem,
     onBack: () -> Unit,
-    onPlay: (ArabseedDetail) -> Unit,
+    onPlay: (ArabseedDetail, List<ArabseedEpisode>, Int) -> Unit,
 ) {
     val cachedDetail = remember(item.pageUrl) { ArabseedRepository.getCachedDetail(item.pageUrl) }
     var detail by remember(item.pageUrl) { mutableStateOf(cachedDetail) }
@@ -777,33 +835,34 @@ private fun MashadDetailScreen(
         }
     }
 
-    // When episode chosen, fetch its servers and auto-play
-    LaunchedEffect(episodeItem) {
-        val ep = episodeItem ?: return@LaunchedEffect
-        loadingEpisode = true
-        try {
-            val servers = withContext(Dispatchers.IO) {
-                ArabseedRepository.fetchEpisodeServers(ep.pageUrl)
-            }
-            episodeServers = servers
-            if (servers.isNotEmpty()) {
-                val preRes = withContext(Dispatchers.IO) {
-                    ArabseedRepository.resolveDirectStream(servers.first().embedUrl)
-                }
-                onPlay(ArabseedDetail(ep, servers, preRes))
-            }
-        } catch (_: Exception) {
-        } finally {
-            loadingEpisode = false
-        }
-    }
-
     val displayOverview = fullStory.ifBlank { item.overview }
     val servers = detail?.servers ?: emptyList()
     val bundle = seasonBundle
     val seasons = bundle?.seasons ?: emptyList()
     val currentSeason = seasons.getOrNull(selectedSeason)
     val allEpisodes = seasons.flatMap { it.episodes }
+
+    // When episode chosen, fetch its servers and auto-play
+    LaunchedEffect(episodeItem) {
+        val ep = episodeItem ?: return@LaunchedEffect
+        loadingEpisode = true
+        try {
+            val srvs = withContext(Dispatchers.IO) {
+                ArabseedRepository.fetchEpisodeServers(ep.pageUrl)
+            }
+            episodeServers = srvs
+            if (srvs.isNotEmpty()) {
+                val preRes = withContext(Dispatchers.IO) {
+                    ArabseedRepository.resolveDirectStream(srvs.first().embedUrl)
+                }
+                val epIdx = allEpisodes.indexOfFirst { it.pageUrl == ep.pageUrl }.coerceAtLeast(0)
+                onPlay(ArabseedDetail(ep, srvs, preRes), allEpisodes, epIdx)
+            }
+        } catch (_: Exception) {
+        } finally {
+            loadingEpisode = false
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(MashadColors.Background)) {
         // Top Back Row
@@ -875,7 +934,7 @@ private fun MashadDetailScreen(
                                             category = item.category,
                                         )
                                     } else if (servers.isNotEmpty()) {
-                                        onPlay((detail ?: ArabseedDetail(item, servers)).copy(preResolvedStream = preResolvedStream))
+                                        onPlay((detail ?: ArabseedDetail(item, servers)).copy(preResolvedStream = preResolvedStream), emptyList(), -1)
                                     }
                                 }
                                 .padding(vertical = 12.dp),
@@ -1104,7 +1163,7 @@ private fun MashadDetailScreen(
                                                     servers = listOf(server) + (servers - server),
                                                     preResolvedStream = if (isFirst) preResolvedStream else null,
                                                 )
-                                            onPlay(targetDetail)
+                                            onPlay(targetDetail, emptyList(), -1)
                                         }
                                         .padding(horizontal = 14.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -1201,6 +1260,10 @@ private fun MashadDetailScreen(
 private fun MashadPlayerScreen(
     detail: ArabseedDetail,
     onBack: () -> Unit,
+    hasPrev: Boolean = false,
+    hasNext: Boolean = false,
+    onPrev: (() -> Unit)? = null,
+    onNext: (() -> Unit)? = null,
 ) {
     var activeServer by remember(detail) { mutableStateOf(detail.servers.firstOrNull()) }
     val resolvedCache = remember { mutableMapOf<String, String>() }
@@ -1337,6 +1400,53 @@ private fun MashadPlayerScreen(
                         }
                     },
                 )
+            }
+        }
+
+        // Episode Navigation Bar (Previous / Next Episode)
+        if (hasPrev || hasNext) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0F141C))
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (hasPrev && onPrev != null) {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MashadColors.SurfaceCard)
+                            .border(1.dp, MashadColors.Border, RoundedCornerShape(8.dp))
+                            .clickable(onClick = onPrev)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("→", color = MashadColors.GoldLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("الحلقة السابقة", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    Spacer(Modifier.width(1.dp))
+                }
+
+                if (hasNext && onNext != null) {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MashadColors.Gold)
+                            .clickable(onClick = onNext)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("الحلقة التالية", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("←", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Spacer(Modifier.width(1.dp))
+                }
             }
         }
 
