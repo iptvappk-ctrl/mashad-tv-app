@@ -48,17 +48,20 @@ const HOSTS = [
   "http://def.yacinelive.com/api",
 ];
 
-// In-memory caches
+// In-memory caches with high TTL
 let cachedCategories: YacineCategory[] = [];
 let categoriesFetchTime = 0;
-const CATEGORIES_TTL = 10 * 60 * 1000; // 10 minutes
+const CATEGORIES_TTL = 15 * 60 * 1000; // 15 minutes
 
 const channelCache = new Map<number, { data: YacineChannel[]; time: number }>();
-const CHANNEL_TTL = 10 * 60 * 1000;
+const CHANNEL_TTL = 15 * 60 * 1000;
 
 let cachedEvents: YacineEvent[] = [];
 let eventsFetchTime = 0;
 const EVENTS_TTL = 45 * 1000; // 45 seconds
+
+const streamCache = new Map<string, { data: YacineStream[]; time: number }>();
+const STREAM_TTL = 3 * 60 * 1000; // 3 minutes
 
 function decrypt(body: string, tHeader: string): string {
   const key = Buffer.from(HARDCODED_KEY + tHeader, "utf8");
@@ -74,6 +77,9 @@ async function fetchFromYacine(endpoint: string): Promise<string> {
   let lastError: Error | null = null;
 
   for (const host of HOSTS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+
     try {
       const url = `${host}/${endpoint}`;
       const res = await fetch(url, {
@@ -81,7 +87,9 @@ async function fetchFromYacine(endpoint: string): Promise<string> {
           "User-Agent": UA,
           Accept: "application/json",
           "x-android-package": PKG_NAME,
+          Connection: "keep-alive",
         },
+        signal: controller.signal,
         cache: "no-store",
       });
 
@@ -92,6 +100,8 @@ async function fetchFromYacine(endpoint: string): Promise<string> {
       return decrypt(body, tHeader);
     } catch (err: any) {
       lastError = err;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -192,26 +202,48 @@ export async function getYacineEvents(force = false): Promise<YacineEvent[]> {
 }
 
 export async function getStreamsForChannel(channelId: number): Promise<YacineStream[]> {
+  const cacheKey = `channel:${channelId}`;
+  const now = Date.now();
+  const cached = streamCache.get(cacheKey);
+  if (cached && now - cached.time < STREAM_TTL) {
+    return cached.data;
+  }
+
   try {
     const raw = await fetchFromYacine(`channel/${channelId}`);
     const json = JSON.parse(raw);
     const list = Array.isArray(json.data) ? json.data : [];
-    return parseStreams(list);
+    const parsed = parseStreams(list);
+    if (parsed.length > 0) {
+      streamCache.set(cacheKey, { data: parsed, time: now });
+    }
+    return parsed;
   } catch (err) {
     console.error(`Yacine channel streams error (${channelId}):`, err);
-    return [];
+    return cached ? cached.data : [];
   }
 }
 
 export async function getStreamsForEvent(eventId: number): Promise<YacineStream[]> {
+  const cacheKey = `event:${eventId}`;
+  const now = Date.now();
+  const cached = streamCache.get(cacheKey);
+  if (cached && now - cached.time < STREAM_TTL) {
+    return cached.data;
+  }
+
   try {
     const raw = await fetchFromYacine(`event/${eventId}`);
     const json = JSON.parse(raw);
     const list = Array.isArray(json.data) ? json.data : [];
-    return parseStreams(list);
+    const parsed = parseStreams(list);
+    if (parsed.length > 0) {
+      streamCache.set(cacheKey, { data: parsed, time: now });
+    }
+    return parsed;
   } catch (err) {
     console.error(`Yacine event streams error (${eventId}):`, err);
-    return [];
+    return cached ? cached.data : [];
   }
 }
 

@@ -427,6 +427,9 @@ export default function DetailView({
               <div
                 key={rec.id}
                 onClick={() => onSelectRecommendation(rec)}
+                onMouseEnter={() => {
+                  fetch(`/api/cinema/detail?url=${encodeURIComponent(rec.pageUrl)}`, { priority: "low" }).catch(() => {});
+                }}
                 className="bg-[#121A28] border border-[#1E293B] rounded-2xl overflow-hidden cursor-pointer flex flex-col group wecima-card-hover relative"
               >
                 <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#151E2D]">

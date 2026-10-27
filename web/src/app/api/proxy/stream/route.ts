@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const ip = req.headers.get("x-forwarded-for") || "127.0.0.1";
-  if (!checkRateLimit(ip, 600, 60000)) {
+  if (!checkRateLimit(ip, 1200, 60000)) {
     return new NextResponse("Too Many Requests", { status: 429 });
   }
 
@@ -29,9 +29,12 @@ export async function GET(req: NextRequest) {
   try {
     const upstreamHeaders: Record<string, string> = {
       "User-Agent": userAgent,
+      Connection: "keep-alive",
     };
     if (referer) {
       upstreamHeaders["Referer"] = referer;
+    } else if (targetUrl.includes("datahowa.asia") || targetUrl.includes("govid.live")) {
+      upstreamHeaders["Referer"] = "https://govid.live/";
     }
 
     // Forward range header if browser requests partial video bytes
@@ -45,7 +48,7 @@ export async function GET(req: NextRequest) {
       redirect: "follow",
     });
 
-    const contentType = response.headers.get("content-type") || "";
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
     const isM3u8 =
       targetUrl.includes(".m3u8") ||
       contentType.includes("application/vnd.apple.mpegurl") ||
@@ -77,7 +80,7 @@ export async function GET(req: NextRequest) {
                     fullKeyUrl = uri;
                   }
                 }
-                const proxied = `/api/proxy/stream?url=${encodeURIComponent(fullKeyUrl)}&ua=${encodeURIComponent(userAgent)}&ref=${encodeURIComponent(referer)}`;
+                const proxied = `/api/proxy/stream?url=${encodeURIComponent(fullKeyUrl)}&ua=${encodeURIComponent(userAgent)}&ref=${encodeURIComponent(referer || parsedTarget.origin)}`;
                 return `URI="${proxied}"`;
               });
             }
@@ -89,7 +92,6 @@ export async function GET(req: NextRequest) {
           if (!trimmed.startsWith("http")) {
             try {
               const resolved = new URL(trimmed, parsedTarget.href);
-              // Crucial: preserve query parameters (security tokens like ?t=...&e=...)
               if (!resolved.search && parsedTarget.search) {
                 resolved.search = parsedTarget.search;
               }
@@ -99,7 +101,8 @@ export async function GET(req: NextRequest) {
             }
           }
 
-          return `/api/proxy/stream?url=${encodeURIComponent(fullSegmentUrl)}&ua=${encodeURIComponent(userAgent)}&ref=${encodeURIComponent(referer)}`;
+          const effectiveRef = referer || (targetUrl.includes("govid.live") ? "https://govid.live/" : "");
+          return `/api/proxy/stream?url=${encodeURIComponent(fullSegmentUrl)}&ua=${encodeURIComponent(userAgent)}&ref=${encodeURIComponent(effectiveRef)}`;
         })
         .join("\n");
 
@@ -109,37 +112,53 @@ export async function GET(req: NextRequest) {
           "Content-Type": "application/vnd.apple.mpegurl",
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Cache-Control": targetUrl.includes("live") ? "no-cache" : "public, max-age=30",
         },
       });
     }
 
-    // Case 2: Binary Video Chunk (.ts, .mp4, audio, .pdf disguised TS) -> Stream directly
+    // Case 2: Binary Video Chunk (.ts, .mp4, audio, disguised TS segments)
     const responseHeaders = new Headers();
     responseHeaders.set("Access-Control-Allow-Origin", "*");
     responseHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    responseHeaders.set("Cache-Control", "public, max-age=86400, immutable");
 
-    // Fix disguised .pdf/.js chunks -> must be served as video/mp2t for browsers and HLS.js
-    if (
+    const isTsChunk =
+      targetUrl.includes(".ts") ||
       targetUrl.includes(".pdf") ||
       targetUrl.includes(".js") ||
-      targetUrl.includes(".ts") ||
       targetUrl.includes("/0021012254/") ||
-      contentType.includes("pdf")
-    ) {
+      contentType.includes("video/mp2t") ||
+      contentType.includes("image/jpeg") ||
+      contentType.includes("application/octet-stream");
+
+    if (isTsChunk && response.ok) {
       responseHeaders.set("Content-Type", "video/mp2t");
-    } else if (contentType) {
-      responseHeaders.set("Content-Type", contentType);
+
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const syncByteIndex = buffer.indexOf(0x47);
+
+      // Strip any dummy junk bytes (e.g. 149-byte fake JPEG header prepended by govid/datahowa)
+      let finalBuffer = buffer;
+      if (syncByteIndex > 0) {
+        finalBuffer = buffer.subarray(syncByteIndex);
+      }
+
+      responseHeaders.set("Content-Length", finalBuffer.length.toString());
+
+      return new NextResponse(finalBuffer, {
+        status: response.status,
+        headers: responseHeaders,
+      });
     }
 
+    // Default binary streaming
+    if (contentType) {
+      responseHeaders.set("Content-Type", contentType);
+    }
     const contentLength = response.headers.get("content-length");
     if (contentLength) responseHeaders.set("Content-Length", contentLength);
-
-    const contentRange = response.headers.get("content-range");
-    if (contentRange) responseHeaders.set("Content-Range", contentRange);
-
-    const acceptRanges = response.headers.get("accept-ranges");
-    if (acceptRanges) responseHeaders.set("Accept-Ranges", acceptRanges);
 
     return new NextResponse(response.body, {
       status: response.status,

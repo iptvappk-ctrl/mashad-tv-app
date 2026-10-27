@@ -1265,8 +1265,17 @@ private fun MashadPlayerScreen(
     onPrev: (() -> Unit)? = null,
     onNext: (() -> Unit)? = null,
 ) {
+    val context = LocalContext.current
     var activeServer by remember(detail) { mutableStateOf(detail.servers.firstOrNull()) }
     val resolvedCache = remember { mutableMapOf<String, String>() }
+
+    // Auto rotate to landscape & hide system bars on enter, reset on exit
+    DisposableEffect(Unit) {
+        setScreenOrientation(context, true)
+        onDispose {
+            resetScreenOrientation(context)
+        }
+    }
 
     if (detail.preResolvedStream != null && detail.servers.isNotEmpty()) {
         resolvedCache[detail.servers.first().embedUrl] = detail.preResolvedStream
@@ -1277,6 +1286,15 @@ private fun MashadPlayerScreen(
     }
     var resolving by remember(activeServer) {
         mutableStateOf(resolvedStreamUrl == null)
+    }
+
+    // Auto-hiding controls (overlay)
+    var controlsVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(controlsVisible) {
+        if (controlsVisible) {
+            delay(4000)
+            controlsVisible = false
+        }
     }
 
     LaunchedEffect(activeServer) {
@@ -1302,36 +1320,20 @@ private fun MashadPlayerScreen(
         resolving = false
     }
 
-    Column(Modifier.fillMaxSize().background(Color.Black)) {
-        // Player Top Bar
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(36.dp).clip(CircleShape).background(Color(0x55000000)).border(1.dp, MashadColors.GoldBorder, CircleShape).clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("←", color = Color.White, fontSize = 18.sp)
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                detail.item.title,
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable { controlsVisible = !controlsVisible }
+    ) {
+        // ── 1. Video Player Surface (100% Fullscreen, Edge-to-Edge) ─────────
         val server = activeServer
         if (server == null) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("لا يوجد سيرفر تشغيل متاح", color = Color.White, fontSize = 14.sp)
             }
         } else if (resolving) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircularProgressIndicator(color = MashadColors.Gold)
                     Text("جاري تشغيل البث بأقصى سرعة...", color = MashadColors.GoldLight, fontSize = 12.sp)
@@ -1339,139 +1341,261 @@ private fun MashadPlayerScreen(
             }
         } else if (resolvedStreamUrl != null) {
             // 🚀 Native ExoPlayer: 100% ad-free, instant, ultra-fast!
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                NativeStreamPlayer(
-                    streamUrl = resolvedStreamUrl!!,
-                    onError = {
-                        resolvedStreamUrl = null
-                    }
-                )
-            }
+            NativeStreamPlayer(
+                streamUrl = resolvedStreamUrl!!,
+                onError = {
+                    resolvedStreamUrl = null
+                }
+            )
         } else {
-            // 🌐 Clean Web Embed Fallback
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            keepScreenOn = true
-                            setBackgroundColor(android.graphics.Color.BLACK)
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                databaseEnabled = true
-                                mediaPlaybackRequiresUserGesture = false
-                                @Suppress("DEPRECATION")
-                                allowContentAccess = true
-                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                useWideViewPort = true
-                                loadWithOverviewMode = true
-                                javaScriptCanOpenWindowsAutomatically = false
-                                setSupportMultipleWindows(false)
-                                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                            }
-                            webChromeClient = object : WebChromeClient() {
-                                override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean = false
-                                override fun onJsAlert(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean { result?.confirm(); return true }
-                                override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean { result?.confirm(); return true }
-                            }
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean {
-                                    val target = request.url.toString()
-                                    if (ArabseedRepository.isAd(target)) return true
-                                    return false
-                                }
-                                override fun onPageFinished(view: WebView, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    view.evaluateJavascript("""
+            // 🌐 Clean Web Embed Fallback (Forced Fullscreen via CSS/JS injection)
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        keepScreenOn = true
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            databaseEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            @Suppress("DEPRECATION")
+                            allowContentAccess = true
+                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
+                            javaScriptCanOpenWindowsAutomatically = false
+                            setSupportMultipleWindows(false)
+                            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                        }
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean = false
+                            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean { result?.confirm(); return true }
+                            override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean { result?.confirm(); return true }
+                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                super.onProgressChanged(view, newProgress)
+                                if (newProgress > 50) {
+                                    view?.evaluateJavascript("""
                                         (function(){
-                                            window.open = function(){ return null; };
-                                            window.alert = function(){ return true; };
+                                            var style = document.getElementById('mashad_fs_css');
+                                            if (!style) {
+                                                style = document.createElement('style');
+                                                style.id = 'mashad_fs_css';
+                                                style.innerHTML = `
+                                                    * { box-sizing: border-box !important; }
+                                                    html, body {
+                                                        width: 100vw !important;
+                                                        height: 100vh !important;
+                                                        margin: 0 !important;
+                                                        padding: 0 !important;
+                                                        overflow: hidden !important;
+                                                        background: #000 !important;
+                                                    }
+                                                    video {
+                                                        width: 100vw !important;
+                                                        height: 100vh !important;
+                                                        max-width: 100vw !important;
+                                                        max-height: 100vh !important;
+                                                        position: fixed !important;
+                                                        top: 0 !important;
+                                                        left: 0 !important;
+                                                        z-index: 999999 !important;
+                                                        object-fit: contain !important;
+                                                        background: #000 !important;
+                                                    }
+                                                    iframe, #player, .video-js, .jwplayer, div[id*="player"], div[class*="player"] {
+                                                        width: 100vw !important;
+                                                        height: 100vh !important;
+                                                        max-width: 100vw !important;
+                                                        max-height: 100vh !important;
+                                                        position: fixed !important;
+                                                        top: 0 !important;
+                                                        left: 0 !important;
+                                                        z-index: 99999 !important;
+                                                        background: #000 !important;
+                                                    }
+                                                    header, footer, nav, .ad, .banner, .ads, [id*="ad"], [class*="ad"] {
+                                                        display: none !important;
+                                                    }
+                                                `;
+                                                document.head.appendChild(style);
+                                            }
                                         })();
                                     """.trimIndent(), null)
                                 }
                             }
-                            loadUrl(server.embedUrl, ArabseedRepository.getEmbedHeaders())
                         }
-                    },
-                    update = { wv ->
-                        if (wv.url != server.embedUrl) {
-                            wv.loadUrl(server.embedUrl, ArabseedRepository.getEmbedHeaders())
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean {
+                                val target = request.url.toString()
+                                if (ArabseedRepository.isAd(target)) return true
+                                return false
+                            }
+                            override fun onPageFinished(view: WebView, url: String?) {
+                                super.onPageFinished(view, url)
+                                view.evaluateJavascript("""
+                                    (function(){
+                                        window.open = function(){ return null; };
+                                        window.alert = function(){ return true; };
+                                        var style = document.getElementById('mashad_fs_css');
+                                        if (!style) {
+                                            style = document.createElement('style');
+                                            style.id = 'mashad_fs_css';
+                                            style.innerHTML = `
+                                                * { box-sizing: border-box !important; }
+                                                html, body {
+                                                    width: 100vw !important;
+                                                    height: 100vh !important;
+                                                    margin: 0 !important;
+                                                    padding: 0 !important;
+                                                    overflow: hidden !important;
+                                                    background: #000 !important;
+                                                }
+                                                video {
+                                                    width: 100vw !important;
+                                                    height: 100vh !important;
+                                                    max-width: 100vw !important;
+                                                    max-height: 100vh !important;
+                                                    position: fixed !important;
+                                                    top: 0 !important;
+                                                    left: 0 !important;
+                                                    z-index: 999999 !important;
+                                                    object-fit: contain !important;
+                                                    background: #000 !important;
+                                                }
+                                                iframe, #player, .video-js, .jwplayer, div[id*="player"], div[class*="player"] {
+                                                    width: 100vw !important;
+                                                    height: 100vh !important;
+                                                    max-width: 100vw !important;
+                                                    max-height: 100vh !important;
+                                                    position: fixed !important;
+                                                    top: 0 !important;
+                                                    left: 0 !important;
+                                                    z-index: 99999 !important;
+                                                    background: #000 !important;
+                                                }
+                                                header, footer, nav, .ad, .banner, .ads, [id*="ad"], [class*="ad"] {
+                                                    display: none !important;
+                                                }
+                                            `;
+                                            document.head.appendChild(style);
+                                        }
+                                        var v = document.querySelector('video');
+                                        if (v) { v.play().catch(function(){}); }
+                                    })();
+                                """.trimIndent(), null)
+                            }
                         }
-                    },
-                )
-            }
+                        loadUrl(server.embedUrl, ArabseedRepository.getEmbedHeaders())
+                    }
+                },
+                update = { wv ->
+                    if (wv.url != server.embedUrl) {
+                        wv.loadUrl(server.embedUrl, ArabseedRepository.getEmbedHeaders())
+                    }
+                },
+            )
         }
 
-        // Episode Navigation Bar (Previous / Next Episode)
-        if (hasPrev || hasNext) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF0F141C))
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (hasPrev && onPrev != null) {
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MashadColors.SurfaceCard)
-                            .border(1.dp, MashadColors.Border, RoundedCornerShape(8.dp))
-                            .clickable(onClick = onPrev)
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text("→", color = MashadColors.GoldLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text("الحلقة السابقة", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                } else {
-                    Spacer(Modifier.width(1.dp))
-                }
-
-                if (hasNext && onNext != null) {
-                    Row(
-                        Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MashadColors.Gold)
-                            .clickable(onClick = onNext)
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text("الحلقة التالية", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("←", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-                } else {
-                    Spacer(Modifier.width(1.dp))
-                }
-            }
-        }
-
-        // Server Switcher Row
-        if (detail.servers.size > 1) {
-            LazyRow(
-                Modifier.fillMaxWidth().background(Color(0xFF141414)).padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(horizontal = 14.dp),
-            ) {
-                items(detail.servers) { srv ->
-                    val active = srv == activeServer
-                    Box(
-                        Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(if (active) MashadColors.Gold else MashadColors.SurfaceCard)
-                            .border(1.dp, if (active) MashadColors.Gold else MashadColors.Border, RoundedCornerShape(6.dp))
-                            .clickable { activeServer = srv }
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                    ) {
-                        Text(
-                            srv.name,
-                            color = if (active) Color.Black else Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+        // ── 2. Floating Animated Controls Overlay (Auto-hides after 4s) ──────
+        AnimatedVisibility(
+            visible = controlsVisible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                // Top Floating Bar (Back button + Title)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color(0xE6000000), Color(0x66000000), Color.Transparent)
+                            )
                         )
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x66000000))
+                            .border(1.dp, MashadColors.GoldBorder, CircleShape)
+                            .clickable {
+                                resetScreenOrientation(context)
+                                onBack()
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("←", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        detail.item.title,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Bottom Floating Bar: Episode Navigation (Previous / Next Episode)
+                if (hasPrev || hasNext) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color(0x66000000), Color(0xE6000000))
+                                )
+                            )
+                            .navigationBarsPadding()
+                            .padding(horizontal = 24.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (hasPrev && onPrev != null) {
+                            Row(
+                                Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xCC1A1F2C))
+                                    .border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(8.dp))
+                                    .clickable(onClick = onPrev)
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("→", color = MashadColors.GoldLight, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("الحلقة السابقة", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        } else {
+                            Spacer(Modifier.width(1.dp))
+                        }
+
+                        if (hasNext && onNext != null) {
+                            Row(
+                                Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MashadColors.Gold)
+                                    .clickable(onClick = onNext)
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("الحلقة التالية", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("←", color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Spacer(Modifier.width(1.dp))
+                        }
                     }
                 }
             }

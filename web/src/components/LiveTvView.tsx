@@ -197,18 +197,24 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
         return;
       }
 
-      // 2. Otherwise open beIN SPORTS 1 default live stream
-      const beInCat = categories.find((c) => c.name.toLowerCase().includes("1080") || c.name.includes("beIN"));
-      const catId = beInCat ? beInCat.id : 4;
+      // 2. Otherwise open beIN SPORTS 1 direct live stream (Instant Fast-Path)
+      const res = await fetch("/api/yacine/stream?type=channel&id=1424");
+      const data = await res.json();
 
-      const channelsRes = await fetch(`/api/yacine/channels?categoryId=${catId}`);
-      const channelsData = await channelsRes.json();
-      const firstChannel = channelsData.data?.[0];
+      if (data.success && data.data?.length > 0) {
+        const streams = data.data.map((s: any) => ({
+          name: s.name || "سيرفر البث",
+          url: s.playUrl,
+        }));
 
-      if (firstChannel) {
-        await handlePlayChannel(firstChannel);
+        onPlayStream({
+          title: `${m.homeTeam} ⚔️ ${m.awayTeam}`,
+          subtitle: `بث مباشر • beIN SPORTS 1 HD • ${m.leagueName}`,
+          poster: m.homeLogo || m.awayLogo || "/logo.jpg",
+          streams,
+        });
       } else {
-        alert(`جاري البحث عن بث لمباراة ${m.homeTeam} vs ${m.awayTeam}. يمكنك اختيار القناة الناقلة من قسم القنوات.`);
+        alert(`جاري تجهيز بث لمباراة ${m.homeTeam} vs ${m.awayTeam}. يمكنك اختيار القناة الناقلة من قسم القنوات.`);
       }
     } catch {
       alert("تعذر تشغيل البث المباشر.");

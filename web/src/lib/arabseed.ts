@@ -41,30 +41,41 @@ export interface ArabseedDetail {
 
 const BASE_URL = "https://arabseed.health";
 const GOVID_URL = "https://govid.live";
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// High performance in-memory caching
 const listingCache = new Map<string, { items: ArabseedItem[]; time: number }>();
 const detailCache = new Map<string, { data: ArabseedDetail; time: number }>();
-const streamCache = new Map<string, string>();
+const streamCache = new Map<string, { url: string; time: number }>();
 
-const LISTING_TTL = 5 * 60 * 1000; // 5 mins
-const DETAIL_TTL = 15 * 60 * 1000; // 15 mins
+const LISTING_TTL = 10 * 60 * 1000; // 10 mins
+const DETAIL_TTL = 30 * 60 * 1000; // 30 mins
+const STREAM_TTL = 2 * 60 * 60 * 1000; // 2 hours
 
-async function fetchHtml(url: string, referer = `${BASE_URL}/`): Promise<string> {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": UA,
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
-      Referer: referer,
-      Connection: "keep-alive",
-    },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch HTML: ${res.status} from ${url}`);
+async function fetchHtml(url: string, referer = `${BASE_URL}/`, timeoutMs = 6000): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": UA,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        Referer: referer,
+        Connection: "keep-alive",
+      },
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch HTML: ${res.status} from ${url}`);
+    }
+    return await res.text();
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return res.text();
 }
 
 function parseListing(html: string): ArabseedItem[] {
@@ -148,7 +159,10 @@ export async function getArabseedMovies(page = 1, force = false): Promise<Arabse
   }
 
   try {
-    const url = page <= 1 ? `${BASE_URL}/%d8%a7%d9%81%d9%84%d8%a7%d9%85/` : `${BASE_URL}/%d8%a7%d9%81%d9%84%d8%a7%d9%85/page/${page}/`;
+    const url =
+      page <= 1
+        ? `${BASE_URL}/%d8%a7%d9%81%d9%84%d8%a7%d9%85/`
+        : `${BASE_URL}/%d8%a7%d9%81%d9%84%d8%a7%d9%85/page/${page}/`;
     const html = await fetchHtml(url);
     const items = parseListing(html);
     if (items.length > 0) {
@@ -170,7 +184,10 @@ export async function getArabseedSeries(page = 1, force = false): Promise<Arabse
   }
 
   try {
-    const url = page <= 1 ? `${BASE_URL}/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/` : `${BASE_URL}/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/page/${page}/`;
+    const url =
+      page <= 1
+        ? `${BASE_URL}/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/`
+        : `${BASE_URL}/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/page/${page}/`;
     const html = await fetchHtml(url);
     const items = parseListing(html);
     if (items.length > 0) {
@@ -203,8 +220,16 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
   }
 
   try {
-    const html = await fetchHtml(pageUrl);
-    const $ = cheerio.load(html);
+    const cleanUrl = pageUrl.trim().replace(/\/$/, "");
+    const watchUrl = `${cleanUrl}/watch`;
+
+    // Fetch detail page and watch page IN PARALLEL for maximum speed
+    const [pageHtml, watchHtml] = await Promise.all([
+      fetchHtml(cleanUrl + "/"),
+      fetchHtml(watchUrl, cleanUrl + "/").catch(() => ""),
+    ]);
+
+    const $ = cheerio.load(pageHtml);
 
     // Title & basic info
     const title = $("h1, .EntryTitle, .Title").first().text().trim();
@@ -219,25 +244,29 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
         .text()
         .trim() || "لا يوجد وصف متوفر.";
 
-    // Servers from watch page or current page
+    // Parse Watch Servers from both watchHtml and pageHtml
     const servers: ArabseedServer[] = [];
-    let watchUrl = pageUrl.trim().replace(/\/$/, "") + "/watch";
+    const sourceHtml = watchHtml || pageHtml;
+    const $watch = cheerio.load(sourceHtml);
 
-    let watchHtml = "";
-    try {
-      watchHtml = await fetchHtml(watchUrl);
-    } catch {
-      watchHtml = html;
-    }
-
-    const $watch = cheerio.load(watchHtml);
-
-    $watch("[data-embed], [data-url], [data-src], iframe").each((_, el) => {
+    // 1. Parse server items from #watch li, ul.servers li with data-link
+    $watch(
+      "#watch li, ul.servers li, .watch-servers li, #servers li, [data-link], [data-embed], [data-url], iframe#videoIframe, iframe"
+    ).each((_, el) => {
       const s = $watch(el);
-      const embedUrl = s.attr("data-embed") || s.attr("data-url") || s.attr("data-src") || s.attr("src") || "";
-      const name = s.text().trim() || s.attr("title") || `سيرفر ${servers.length + 1}`;
+      const embedUrl =
+        s.attr("data-link") ||
+        s.attr("data-embed") ||
+        s.attr("data-url") ||
+        s.attr("data-server") ||
+        s.attr("src") ||
+        "";
+      let name = s.text().trim() || s.attr("title") || "";
 
       if (embedUrl && embedUrl.startsWith("http") && !servers.some((x) => x.embedUrl === embedUrl)) {
+        if (!name || name === "undefined") {
+          name = `سيرفر ${servers.length + 1}`;
+        }
         servers.push({ name, embedUrl });
       }
     });
@@ -269,10 +298,9 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
       }
     });
 
-    // Resolve direct stream from first server if possible
-    let directStream: string | undefined;
+    // Background pre-resolve the 1st server without blocking the detail response!
     if (servers.length > 0) {
-      directStream = await resolveDirectStream(servers[0].embedUrl);
+      resolveDirectStream(servers[0].embedUrl).catch(() => {});
     }
 
     const detail: ArabseedDetail = {
@@ -288,7 +316,6 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
       servers,
       seasons,
       episodes,
-      directStream,
     };
 
     detailCache.set(pageUrl, { data: detail, time: now });
@@ -301,36 +328,60 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
 
 /**
  * Resolves direct video stream link (.m3u8 or .mp4) from embed servers (Govid etc.)
- * Decodes Mohix hex parameter in the embed player.
+ * High performance resolution with caching.
  */
 export async function resolveDirectStream(serverUrl: string): Promise<string | undefined> {
   if (!serverUrl) return undefined;
-  if (streamCache.has(serverUrl)) {
-    return streamCache.get(serverUrl);
+
+  const now = Date.now();
+  const cached = streamCache.get(serverUrl);
+  if (cached && now - cached.time < STREAM_TTL) {
+    return cached.url;
   }
 
   try {
     if (serverUrl.includes(".m3u8") || serverUrl.includes(".mp4")) {
-      streamCache.set(serverUrl, serverUrl);
+      streamCache.set(serverUrl, { url: serverUrl, time: now });
       return serverUrl;
     }
 
-    if (serverUrl.includes("govid.live/play/")) {
-      const html = await fetchHtml(serverUrl, `${BASE_URL}/`);
-      const iframeMatch = html.match(/iframe[^>]+src=['"]([^'"]+)['"]/i);
-      const embedUrl = iframeMatch ? iframeMatch[1] : undefined;
+    // Govid.live resolver
+    if (serverUrl.includes("govid.live")) {
+      let embedPageUrl = serverUrl;
 
-      if (embedUrl) {
-        const embedHtml = await fetchHtml(embedUrl, `${GOVID_URL}/`);
-        const mohixMatch = embedHtml.match(/const\s+Mohix\s*=\s*['"]([0-9a-fA-F]+)['"]/i);
-
-        if (mohixMatch && mohixMatch[1]) {
-          const direct = hexToString(mohixMatch[1]);
-          if (direct && (direct.includes(".m3u8") || direct.includes(".mp4") || direct.startsWith("http"))) {
-            streamCache.set(serverUrl, direct);
-            return direct;
-          }
+      // If it's a /play/ URL, fetch play page to find the real /e/ iframe
+      if (serverUrl.includes("/play/")) {
+        const html = await fetchHtml(serverUrl, `${BASE_URL}/`, 4000);
+        const iframeMatch = html.match(/iframe[^>]+src=['"]([^'"]+)['"]/i);
+        if (iframeMatch && iframeMatch[1]) {
+          embedPageUrl = iframeMatch[1];
         }
+      }
+
+      // Now fetch the embed player page which contains the hex-encoded stream or Mohix variable
+      const embedHtml = await fetchHtml(embedPageUrl, `${GOVID_URL}/`, 4000);
+
+      // Check 1: Mohix hex variable
+      const mohixMatch = embedHtml.match(/const\s+Mohix\s*=\s*['"]([0-9a-fA-F]+)['"]/i);
+      if (mohixMatch && mohixMatch[1]) {
+        const direct = hexToString(mohixMatch[1]);
+        if (direct && (direct.includes(".m3u8") || direct.includes(".mp4") || direct.startsWith("http"))) {
+          streamCache.set(serverUrl, { url: direct, time: now });
+          return direct;
+        }
+      }
+
+      // Check 2: Direct m3u8 or mp4 in embed HTML
+      const m3u8Match = embedHtml.match(/https?:\/\/[^"']+\.m3u8[^"']*/i);
+      if (m3u8Match) {
+        streamCache.set(serverUrl, { url: m3u8Match[0], time: now });
+        return m3u8Match[0];
+      }
+
+      const mp4Match = embedHtml.match(/https?:\/\/[^"']+\.mp4[^"']*/i);
+      if (mp4Match) {
+        streamCache.set(serverUrl, { url: mp4Match[0], time: now });
+        return mp4Match[0];
       }
     }
   } catch (err) {

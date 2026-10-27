@@ -159,13 +159,14 @@ export default function HomePage() {
 
       const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(serverUrl)}`);
       const data = await res.json();
+      const playUrl = data.playUrl || data.data?.playUrl;
 
-      if (data.success && data.playUrl) {
+      if (data.success && playUrl) {
         handlePlayStream({
           title: selectedDetailItem?.title || "مشاهدة العرض",
           subtitle: serverName,
           poster: selectedDetailItem?.poster,
-          streams: [{ name: serverName, url: data.playUrl }],
+          streams: [{ name: serverName, url: playUrl }],
         });
       } else if (selectedDetailData?.proxiedStream) {
         handlePlayStream({

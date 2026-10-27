@@ -23,6 +23,8 @@ export async function GET(req: NextRequest) {
     const proxied = `/api/proxy/stream?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://govid.live/")}`;
     return NextResponse.json({
       success: true,
+      playUrl: proxied,
+      rawUrl: direct,
       data: {
         rawUrl: direct,
         playUrl: proxied,

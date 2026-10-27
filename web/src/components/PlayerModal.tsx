@@ -72,6 +72,7 @@ export default function PlayerModal({
   const [showControls, setShowControls] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isBuffering, setIsBuffering] = useState(true);
+  const [isAutoplayMuted, setIsAutoplayMuted] = useState(false);
 
   const currentStream = streams[currentIndex] || streams[0];
 
@@ -94,8 +95,18 @@ export default function PlayerModal({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
-        backBufferLength: 60,
-        maxBufferSize: 30 * 1024 * 1024,
+        startFragPrefetch: true, // Download next segment in parallel
+        liveSyncDurationCount: 1, // Start live stream immediately after FIRST chunk
+        liveMaxLatencyDurationCount: 3,
+        maxBufferLength: 8, // Instant response, no memory lag
+        maxMaxBufferLength: 16,
+        maxBufferSize: 12 * 1024 * 1024,
+        manifestLoadingTimeOut: 4500,
+        manifestLoadingMaxRetry: 2,
+        levelLoadingTimeOut: 4500,
+        fragLoadingTimeOut: 6500,
+        fragLoadingMaxRetry: 2,
+        progressive: true,
       });
 
       hlsRef.current = hls;
@@ -113,7 +124,17 @@ export default function PlayerModal({
         }));
         setQualities(parsedQualities);
 
-        video.play().catch(() => setIsPlaying(false));
+        // Attempt playback with sound first, fallback to muted autoplay if browser blocks
+        video.play().catch(() => {
+          video.muted = true;
+          setIsMuted(true);
+          setIsAutoplayMuted(true);
+          video.play().catch(() => setIsPlaying(false));
+        });
+      });
+
+      hls.on(Hls.Events.FRAG_LOADED, () => {
+        setIsBuffering(false);
       });
 
       hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
@@ -140,7 +161,12 @@ export default function PlayerModal({
       video.src = streamUrl;
       video.addEventListener("loadedmetadata", () => {
         setIsBuffering(false);
-        video.play().catch(() => setIsPlaying(false));
+        video.play().catch(() => {
+          video.muted = true;
+          setIsMuted(true);
+          setIsAutoplayMuted(true);
+          video.play().catch(() => setIsPlaying(false));
+        });
       });
     } else {
       video.src = streamUrl;
@@ -355,6 +381,24 @@ export default function PlayerModal({
           onClick={handlePlayPause}
           className="w-full h-full object-contain cursor-pointer"
         />
+
+        {/* Unmute prompt for blocked browser autoplay */}
+        {isAutoplayMuted && isPlaying && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (videoRef.current) {
+                videoRef.current.muted = false;
+                setIsMuted(false);
+                setIsAutoplayMuted(false);
+              }
+            }}
+            className="absolute top-20 right-6 z-30 flex items-center gap-2 px-4 py-2 rounded-2xl bg-[#2563EB] text-white text-xs font-black shadow-2xl hover:scale-105 transition-all animate-bounce border border-white/20"
+          >
+            <Volume2 size={16} />
+            <span>انقر لتشغيل الصوت 🔊</span>
+          </button>
+        )}
 
         {/* Mashad TV Dynamic Watermark (Masks Yacine & external stream logos) */}
         {isLive && (

@@ -169,13 +169,14 @@ export default function CinemaView({
           const srv = detail.servers[0];
           const resRes = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(srv.embedUrl)}`);
           const resData = await resRes.json();
+          const playUrl = resData.playUrl || resData.data?.playUrl;
 
-          if (resData.success && resData.playUrl) {
+          if (resData.success && playUrl) {
             onPlayStream({
               title: item.title,
               subtitle: srv.name,
               poster: item.poster,
-              streams: [{ name: srv.name, url: resData.playUrl }],
+              streams: [{ name: srv.name, url: playUrl }],
             });
             return;
           }
@@ -300,6 +301,9 @@ export default function CinemaView({
               <div
                 key={item.id}
                 onClick={() => onSelectItem(item)}
+                onMouseEnter={() => {
+                  fetch(`/api/cinema/detail?url=${encodeURIComponent(item.pageUrl)}`, { priority: "low" }).catch(() => {});
+                }}
                 className="group relative bg-[#121A28] rounded-2xl overflow-hidden border border-[#1E293B] hover:border-[#2563EB]/80 cursor-pointer shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1.5 flex flex-col select-none aspect-[2/3.1]"
               >
                 {/* Poster Image */}
