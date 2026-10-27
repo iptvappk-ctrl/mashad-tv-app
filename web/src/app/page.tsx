@@ -207,7 +207,7 @@ export default function HomePage() {
   return (
     <div
       dir="rtl"
-      className="min-h-screen flex flex-col bg-[#0B0F17] text-[#F3F4F6] selection:bg-[#2563EB] selection:text-white font-sans"
+      className="min-h-screen flex flex-col bg-[#07090E] text-[#F3F4F6] selection:bg-[#E5B842] selection:text-black font-sans"
     >
       {/* ── Top Navbar ────────────────────────────────────────────── */}
       <Navbar
@@ -285,7 +285,7 @@ export default function HomePage() {
                   </p>
                   <button
                     onClick={() => setActiveTab("home")}
-                    className="px-6 py-2.5 rounded-xl bg-[#2563EB] text-white text-xs font-bold hover:bg-[#1D4ED8] transition"
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black text-xs font-black hover:shadow-gold transition"
                   >
                     تصفح الأعمال الآن
                   </button>
@@ -296,7 +296,7 @@ export default function HomePage() {
                     <div
                       key={item.id}
                       onClick={() => handleSelectItem(item)}
-                      className="group relative bg-[#121A28] rounded-2xl overflow-hidden border border-[#1E293B] hover:border-[#2563EB]/80 cursor-pointer shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1.5 flex flex-col select-none aspect-[2/3.1]"
+                      className="group relative bg-[#0D111A] rounded-2xl overflow-hidden border border-[#1D273B] hover:border-[#E5B842]/80 cursor-pointer shadow-lg hover:shadow-gold transition-all duration-300 transform hover:-translate-y-1.5 flex flex-col select-none aspect-[2/3.1]"
                     >
                       <div className="relative w-full h-full overflow-hidden bg-black/40">
                         <img

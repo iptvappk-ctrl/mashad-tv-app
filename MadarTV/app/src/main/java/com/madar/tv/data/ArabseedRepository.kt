@@ -304,24 +304,60 @@ object ArabseedRepository {
             val html = fetchHtml(item.pageUrl)
             val doc = Jsoup.parse(html, BASE_URL)
 
-            // Try standard episode list containers used by Arabseed
+            val rawEpisodes = mutableListOf<Pair<String, String>>()
             val episodeSelectors = listOf(
+                "a.episode__item", ".episode__item a",
+                "a[href*='%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-']",
+                "a[href*='الحلقة']", ".Episodes--List a", ".EpisodeBlock a",
                 ".EpisodesList li a", ".eps-list li a", ".eps li a",
                 ".episodios li a", ".episodes-list li a", ".eplister li a",
                 "ul.season-list li a", ".Seasons li a", ".seasonDiv li a",
-                ".EntryHolder li a", ".season li a", ".eplist a",
+                ".EntryHolder li a", ".season li a", ".eplist a"
             )
-            val rawEpisodes = mutableListOf<Pair<String, String>>()
-            for (sel in episodeSelectors) {
-                val els = doc.select(sel)
-                if (els.isNotEmpty()) {
-                    for (el in els) {
+
+            fun collectEpisodes(d: org.jsoup.nodes.Document) {
+                for (sel in episodeSelectors) {
+                    val els = d.select(sel)
+                    if (els.isNotEmpty()) {
+                        for (el in els) {
+                            val href = el.attr("abs:href").ifBlank { el.attr("href") }
+                            val txt = el.text().trim()
+                            if (href.isNotBlank() && href.startsWith(P_HTTP) && txt.isNotBlank()) {
+                                if (rawEpisodes.none { it.second == href }) {
+                                    rawEpisodes += txt to href
+                                }
+                            }
+                        }
+                        if (rawEpisodes.size > 1) break
+                    }
+                }
+            }
+
+            collectEpisodes(doc)
+
+            // If few episodes found, search for breadcrumb / series parent page
+            if (rawEpisodes.size <= 1) {
+                val seriesLinkSelectors = listOf(
+                    ".breadcrumb a", "ol.breadcrumb a", "nav a",
+                    ".SeriesTitle a", ".series-title a", "a[href*='/series/']",
+                    ".entry-breadcrumb a", "a.SeriesLink"
+                )
+                for (sel in seriesLinkSelectors) {
+                    val links = doc.select(sel)
+                    val parent = links.lastOrNull { el ->
                         val href = el.attr("abs:href").ifBlank { el.attr("href") }
                         val txt = el.text().trim()
-                        if (href.isNotBlank() && href.startsWith(P_HTTP) && txt.isNotBlank())
-                            rawEpisodes += txt to href
+                        href.isNotBlank() && href.startsWith(P_HTTP) && href != item.pageUrl
+                            && !txt.contains("الرئيسية") && !txt.contains("home", ignoreCase = true)
                     }
-                    if (rawEpisodes.isNotEmpty()) break
+                    if (parent != null) {
+                        val parentHref = parent.attr("abs:href").ifBlank { parent.attr("href") }
+                        try {
+                            val parentDoc = Jsoup.parse(fetchHtml(parentHref), BASE_URL)
+                            collectEpisodes(parentDoc)
+                            if (rawEpisodes.size > 1) break
+                        } catch (_: Exception) {}
+                    }
                 }
             }
 
@@ -330,11 +366,11 @@ object ArabseedRepository {
             if (rawEpisodes.isNotEmpty()) {
                 val seasonMap = LinkedHashMap<Int, MutableList<ArabseedEpisode>>()
                 rawEpisodes.forEachIndexed { index, (title, url) ->
-                    val seasonNum = Regex("""(?:الموسم|season|s)[\s\-]?(\d+)""", RegexOption.IGNORE_CASE)
-                        .find(url + title)?.groupValues?.get(1)?.toIntOrNull() ?: 1
-                    val epNum = Regex("""(?:الحلقة|ep|e)[\s\-]?(\d+)""", RegexOption.IGNORE_CASE)
-                        .find(url + title)?.groupValues?.get(1)?.toIntOrNull()
-                        ?: Regex("""\b(\d+)\b""").findAll(title).lastOrNull()?.value?.toIntOrNull()
+                    val seasonNum = Regex("""(?:الموسم|season|s)[ -]?[0-9]+""", RegexOption.IGNORE_CASE)
+                        .find(url + " " + title)?.value?.filter { it.isDigit() }?.toIntOrNull() ?: 1
+                    val epNum = Regex("""(?:الحلقة|ep|e)[ -]?[0-9]+""", RegexOption.IGNORE_CASE)
+                        .find(url + " " + title)?.value?.filter { it.isDigit() }?.toIntOrNull()
+                        ?: Regex("[0-9]+").findAll(title).lastOrNull()?.value?.toIntOrNull()
                         ?: (index + 1)
                     seasonMap.getOrPut(seasonNum) { mutableListOf() }
                         .add(ArabseedEpisode(epNum, title, url, seasonNum))
@@ -344,7 +380,7 @@ object ArabseedRepository {
                         number = sNum,
                         title = when (sNum) {
                             1 -> "الموسم الأول"; 2 -> "الموسم الثاني"; 3 -> "الموسم الثالث"
-                            4 -> "الموسم الرابع"; 5 -> "الموسم الخامس"
+                            4 -> "الموسم الرابع"; 5 -> "الموسم الخامس"; 6 -> "الموسم السادس"
                             else -> "الموسم $sNum"
                         },
                         episodes = eps.sortedBy { it.number },
@@ -354,29 +390,58 @@ object ArabseedRepository {
 
             // Find related parts/seasons linked from the page
             val relatedParts = mutableListOf<ArabseedItem>()
-            for (sel in listOf(
-                ".RelatedPosts .post__item a", ".related-series a",
-                ".seasons-list a", ".parts-list a",
-                "a[href*='%d8%a7%d9%84%d8%ac%d8%b2%d8%a1']",
-                "a[href*='part']", "a[href*='season']",
-            )) {
+            val partSelectors = listOf(
+                "a[href*='/series/']", ".Seasons--List a", ".seasons-list a", ".parts-list a",
+                ".SeasonBlock a", ".RelatedPosts .post__item a", ".related-series a",
+                "a[href*='%d8%a7%d9%84%d8%ac%d8%b2%d8%a1']", "a[href*='الجزء']",
+                "a[href*='%d8%a7%d9%84%d9%85%d9%88%d8%b3%d9%85']", "a[href*='الموسم']",
+                "a[href*='part']", "a[href*='season']"
+            )
+            for (sel in partSelectors) {
                 for (el in doc.select(sel)) {
                     val href = el.attr("abs:href").ifBlank { el.attr("href") }
                     val txt = el.text().trim().ifBlank { el.attr("title").trim() }
                     if (href.isNotBlank() && href.startsWith(P_HTTP)
                         && href != item.pageUrl && txt.isNotBlank()
                     ) {
-                        relatedParts += ArabseedItem(
-                            id = href.trimEnd('/').substringAfterLast('/').take(80),
-                            title = txt, arabicTitle = txt,
-                            posterUrl = item.posterUrl, year = item.year,
-                            quality = item.quality, rating = item.rating,
-                            type = ArabseedType.SERIES, pageUrl = href,
-                            category = item.category,
-                        )
+                        val isPart = txt.contains("جزء") || txt.contains("موسم") || txt.contains("الجزء") || txt.contains("الموسم")
+                            || href.contains("season") || href.contains("part") || href.contains("/series/")
+                        if (isPart && relatedParts.none { it.pageUrl == href }) {
+                            relatedParts += ArabseedItem(
+                                id = href.trimEnd('/').substringAfterLast('/').take(80),
+                                title = txt, arabicTitle = txt,
+                                posterUrl = item.posterUrl, year = item.year,
+                                quality = item.quality, rating = item.rating,
+                                type = ArabseedType.SERIES, pageUrl = href,
+                                category = item.category,
+                            )
+                        }
                     }
                 }
                 if (relatedParts.isNotEmpty()) break
+            }
+
+            // Additional smart discovery: search for base title to discover all other seasons/parts
+            val cleanBaseTitle = item.title
+                .replace(Regex("""(?:الموسم|الجزء|موسم|جزء)[ -]?[0-9]+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""(?:الحلقة|حلقة)[ -]?[0-9]+.*""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("(?:مترجم|مدبلج|فيلم|مسلسل|WEB-DL|720p|1080p|HD).*", RegexOption.IGNORE_CASE), "")
+                .trim()
+
+            if (cleanBaseTitle.length >= 3) {
+                try {
+                    val searchResults = search(cleanBaseTitle)
+                    for (sr in searchResults) {
+                        if (sr.pageUrl != item.pageUrl && sr.title.contains(cleanBaseTitle, ignoreCase = true)) {
+                            val isRelevant = sr.title.contains("موسم") || sr.title.contains("الموسم")
+                                || sr.title.contains("جزء") || sr.title.contains("الجزء")
+                                || sr.title.contains("مسلسل") || !sr.title.contains("الحلقة")
+                            if (isRelevant && relatedParts.none { it.pageUrl == sr.pageUrl }) {
+                                relatedParts += sr
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
             }
 
             val bundle = ArabseedSeasonBundle(
@@ -488,9 +553,17 @@ object ArabseedRepository {
             val desc     = el.selectFirst(".post__info p, .desc, p")?.text()?.trim() ?: ""
             val year     = extractYear("$rawTitle $desc")
 
+            val isSeriesLike = href.contains("مسلسل") || href.contains("series")
+                || title.contains("مسلسل") || rawTitle.contains("مسلسل")
+                || title.contains("الحلقة") || rawTitle.contains("الحلقة")
+                || title.contains("الموسم") || rawTitle.contains("الموسم")
+                || title.contains("حلقة") || rawTitle.contains("حلقة")
+                || title.contains("موسم") || rawTitle.contains("موسم")
+                || href.contains("episode") || href.contains("season")
+
             val type = when {
+                isSeriesLike -> ArabseedType.SERIES
                 defaultType != null -> defaultType
-                href.contains("مسلسل") || href.contains("series") || title.contains("مسلسل") -> ArabseedType.SERIES
                 else -> ArabseedType.MOVIE
             }
 

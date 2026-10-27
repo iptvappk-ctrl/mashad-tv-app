@@ -83,7 +83,7 @@ function parseListing(html: string): ArabseedItem[] {
   const items: ArabseedItem[] = [];
 
   const elements = $(
-    "a.movie__block, .item__contents a, .movie-item a, article a, .postDiv a, .MovieBlock a, .Block--Item a, a.BlockItem, .Movie--Block a, .item a, .Movie--Block, .Film--Block, .Series--Block, .BlockItem"
+    "a.movie__block, .item__contents a, .movie-item a, article a, .postDiv a, .MovieBlock a, .Block--Item a, a.BlockItem, .Movie--Block a, .item a, .Movie--Block, .Film--Block, .Series--Block, .BlockItem, a.episode__item"
   );
 
   elements.each((_, el) => {
@@ -95,8 +95,6 @@ function parseListing(html: string): ArabseedItem[] {
     if (
       href === `${BASE_URL}/` ||
       href === BASE_URL ||
-      href.includes("/category/") ||
-      href.includes("/tag/") ||
       href.endsWith("/home/")
     )
       return;
@@ -105,6 +103,7 @@ function parseListing(html: string): ArabseedItem[] {
       a.find("h3, h2, h4, .Title, .title, .EntryTitle").first().text().trim() ||
       linkEl.attr("title") ||
       a.find("img").attr("alt") ||
+      a.text().trim() ||
       "";
 
     if (!rawTitle || rawTitle.length < 2) return;
@@ -127,7 +126,8 @@ function parseListing(html: string): ArabseedItem[] {
       href.includes("مسلسل") ||
       href.includes("series") ||
       rawTitle.includes("مسلسل") ||
-      rawTitle.includes("الموسم");
+      rawTitle.includes("الموسم") ||
+      rawTitle.includes("الحلقة");
 
     items.push({
       id: Buffer.from(href).toString("base64url").slice(0, 16),
@@ -150,8 +150,34 @@ function parseListing(html: string): ArabseedItem[] {
   });
 }
 
-export async function getArabseedMovies(page = 1, force = false): Promise<ArabseedItem[]> {
-  const cacheKey = `movies:${page}`;
+// Category mappings for Arabseed
+const CATEGORY_MAP: Record<string, string> = {
+  movies: "/%d8%a7%d9%81%d9%84%d8%a7%d9%85/",
+  series: "/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/",
+  foreign_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/",
+  arabic_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/",
+  turkish_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/",
+  asian_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/",
+  indian_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a/",
+  foreign_series: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/",
+  arabic_series: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b9%d8%b1%d8%a8%d9%8a/",
+  turkish_series: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/",
+  asian_series: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/",
+  ramadan: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2026/",
+  anime: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d9%86%d9%85%d9%8a/",
+  wrestling: "/category/%d8%b9%d8%b1%d9%88%d8%b6-%d9%85%d8%b5%d8%a7%d8%b1%d8%b9%d8%a9/",
+};
+
+const GENRE_SEARCH_MAP: Record<string, string> = {
+  action: "اكشن",
+  horror: "رعب",
+  comedy: "كوميدي",
+  romance: "رومانسي",
+  scifi: "خيال علمي",
+};
+
+export async function getArabseedCategory(slug: string, page = 1, force = false): Promise<ArabseedItem[]> {
+  const cacheKey = `cat:${slug}:${page}`;
   const now = Date.now();
   const cached = listingCache.get(cacheKey);
   if (!force && cached && now - cached.time < LISTING_TTL) {
@@ -159,10 +185,16 @@ export async function getArabseedMovies(page = 1, force = false): Promise<Arabse
   }
 
   try {
-    const url =
-      page <= 1
-        ? `${BASE_URL}/%d8%a7%d9%81%d9%84%d8%a7%d9%85/`
-        : `${BASE_URL}/%d8%a7%d9%81%d9%84%d8%a7%d9%85/page/${page}/`;
+    let url: string;
+    if (GENRE_SEARCH_MAP[slug]) {
+      const q = encodeURIComponent(GENRE_SEARCH_MAP[slug]);
+      url = page <= 1 ? `${BASE_URL}/?s=${q}` : `${BASE_URL}/page/${page}/?s=${q}`;
+    } else {
+      const path = CATEGORY_MAP[slug] || CATEGORY_MAP["movies"];
+      const cleanPath = path.replace(/\/$/, "");
+      url = page <= 1 ? `${BASE_URL}${cleanPath}/` : `${BASE_URL}${cleanPath}/page/${page}/`;
+    }
+
     const html = await fetchHtml(url);
     const items = parseListing(html);
     if (items.length > 0) {
@@ -170,34 +202,17 @@ export async function getArabseedMovies(page = 1, force = false): Promise<Arabse
     }
     return items;
   } catch (err) {
-    console.error("Arabseed movies error:", err);
+    console.error(`Arabseed category error (${slug}):`, err);
     return cached ? cached.items : [];
   }
 }
 
-export async function getArabseedSeries(page = 1, force = false): Promise<ArabseedItem[]> {
-  const cacheKey = `series:${page}`;
-  const now = Date.now();
-  const cached = listingCache.get(cacheKey);
-  if (!force && cached && now - cached.time < LISTING_TTL) {
-    return cached.items;
-  }
+export async function getArabseedMovies(page = 1, force = false): Promise<ArabseedItem[]> {
+  return getArabseedCategory("movies", page, force);
+}
 
-  try {
-    const url =
-      page <= 1
-        ? `${BASE_URL}/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/`
-        : `${BASE_URL}/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/page/${page}/`;
-    const html = await fetchHtml(url);
-    const items = parseListing(html);
-    if (items.length > 0) {
-      listingCache.set(cacheKey, { items, time: now });
-    }
-    return items;
-  } catch (err) {
-    console.error("Arabseed series error:", err);
-    return cached ? cached.items : [];
-  }
+export async function getArabseedSeries(page = 1, force = false): Promise<ArabseedItem[]> {
+  return getArabseedCategory("series", page, force);
 }
 
 export async function searchArabseed(query: string): Promise<ArabseedItem[]> {
@@ -244,12 +259,11 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
         .text()
         .trim() || "لا يوجد وصف متوفر.";
 
-    // Parse Watch Servers from both watchHtml and pageHtml
+    // Parse Watch Servers
     const servers: ArabseedServer[] = [];
     const sourceHtml = watchHtml || pageHtml;
     const $watch = cheerio.load(sourceHtml);
 
-    // 1. Parse server items from #watch li, ul.servers li with data-link
     $watch(
       "#watch li, ul.servers li, .watch-servers li, #servers li, [data-link], [data-embed], [data-url], iframe#videoIframe, iframe"
     ).each((_, el) => {
@@ -271,9 +285,9 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
       }
     });
 
-    // Check for Seasons & Episodes
+    // Check for Seasons
     const seasons: ArabseedSeason[] = [];
-    $(".Seasons--List a, .seasons-list a, .SeasonBlock a").each((_, el) => {
+    $("a[href*='/series/'], .Seasons--List a, .seasons-list a, .SeasonBlock a").each((_, el) => {
       const a = $(el);
       const sUrl = a.attr("href");
       if (sUrl) {
@@ -285,23 +299,37 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
       }
     });
 
+    // Check for Episodes (Real Arabseed selectors!)
     const episodes: ArabseedEpisode[] = [];
-    $(".Episodes--List a, .episodes-list a, .EpisodeBlock a, .EpBlock a").each((_, el) => {
+    $("a.episode__item, .episode__item a, a[href*='/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-'], .Episodes--List a, .EpisodeBlock a").each((_, el) => {
       const a = $(el);
       const epUrl = a.attr("href");
-      if (epUrl) {
+      if (epUrl && !episodes.some((e) => e.pageUrl === epUrl)) {
+        let epTitle = a.find(".title, h3, span").text().trim() || a.text().trim();
+        // Extract "الحلقة X" if text contains it
+        const match = epTitle.match(/الحلقة\s*([0-9]+)/i);
+        if (match) {
+          epTitle = `الحلقة ${match[1]}`;
+        }
         episodes.push({
-          title: a.text().trim() || `الحلقة ${episodes.length + 1}`,
+          title: epTitle || `الحلقة ${episodes.length + 1}`,
           pageUrl: epUrl,
           episodeNumber: `${episodes.length + 1}`,
         });
       }
     });
 
-    // Background pre-resolve the 1st server without blocking the detail response!
+    // Background pre-resolve 1st server
     if (servers.length > 0) {
       resolveDirectStream(servers[0].embedUrl).catch(() => {});
     }
+
+    const isSeries =
+      episodes.length > 0 ||
+      seasons.length > 0 ||
+      pageUrl.includes("مسلسل") ||
+      title.includes("مسلسل") ||
+      title.includes("الموسم");
 
     const detail: ArabseedDetail = {
       item: {
@@ -309,8 +337,8 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
         title: title || "مشهد فيديو",
         poster,
         pageUrl,
-        category: seasons.length > 0 || episodes.length > 0 ? "مسلسلات" : "أفلام",
-        isSeries: seasons.length > 0 || episodes.length > 0,
+        category: isSeries ? "مسلسلات" : "أفلام",
+        isSeries,
       },
       overview,
       servers,
@@ -328,7 +356,6 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
 
 /**
  * Resolves direct video stream link (.m3u8 or .mp4) from embed servers (Govid etc.)
- * High performance resolution with caching.
  */
 export async function resolveDirectStream(serverUrl: string): Promise<string | undefined> {
   if (!serverUrl) return undefined;
@@ -349,7 +376,6 @@ export async function resolveDirectStream(serverUrl: string): Promise<string | u
     if (serverUrl.includes("govid.live")) {
       let embedPageUrl = serverUrl;
 
-      // If it's a /play/ URL, fetch play page to find the real /e/ iframe
       if (serverUrl.includes("/play/")) {
         const html = await fetchHtml(serverUrl, `${BASE_URL}/`, 4000);
         const iframeMatch = html.match(/iframe[^>]+src=['"]([^'"]+)['"]/i);
@@ -358,10 +384,8 @@ export async function resolveDirectStream(serverUrl: string): Promise<string | u
         }
       }
 
-      // Now fetch the embed player page which contains the hex-encoded stream or Mohix variable
       const embedHtml = await fetchHtml(embedPageUrl, `${GOVID_URL}/`, 4000);
 
-      // Check 1: Mohix hex variable
       const mohixMatch = embedHtml.match(/const\s+Mohix\s*=\s*['"]([0-9a-fA-F]+)['"]/i);
       if (mohixMatch && mohixMatch[1]) {
         const direct = hexToString(mohixMatch[1]);
@@ -371,7 +395,6 @@ export async function resolveDirectStream(serverUrl: string): Promise<string | u
         }
       }
 
-      // Check 2: Direct m3u8 or mp4 in embed HTML
       const m3u8Match = embedHtml.match(/https?:\/\/[^"']+\.m3u8[^"']*/i);
       if (m3u8Match) {
         streamCache.set(serverUrl, { url: m3u8Match[0], time: now });
