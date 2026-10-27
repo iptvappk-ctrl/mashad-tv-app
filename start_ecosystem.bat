@@ -57,7 +57,11 @@ echo [!] جاري بناء وتشفير تطبيق الأندرويد (Release A
 cd /d "%~dp0MadarTV"
 call gradlew.bat assembleRelease
 if %errorlevel% equ 0 (
-    copy /y "app\build\outputs\apk\release\app-release-unsigned.apk" "%USERPROFILE%\Desktop\Mashad.apk" >nul
+    if exist "app\build\outputs\apk\release\app-release.apk" (
+        copy /y "app\build\outputs\apk\release\app-release.apk" "%USERPROFILE%\Desktop\Mashad.apk" >nul
+    ) else (
+        copy /y "app\build\outputs\apk\release\app-release-unsigned.apk" "%USERPROFILE%\Desktop\Mashad.apk" >nul
+    )
     echo [✓] تم البناء بنجاح! تم نسخ APK إلى سطح المكتب باسم Mashad.apk
 ) else (
     echo [X] فشل البناء! يرجى مراجعة سجل الأخطاء أعلاه.
