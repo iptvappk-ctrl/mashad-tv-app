@@ -6,7 +6,8 @@ export const metadata: Metadata = {
   description: "أقوى منصة لمشاهدة أحدث الأفلام والمسلسلات ومباريات كرة القدم الحية بجودة عالية وبدون إعلانات",
   manifest: "/manifest.json",
   icons: {
-    icon: "/favicon.ico",
+    icon: "/logo.jpg",
+    apple: "/logo.jpg",
   },
 };
 

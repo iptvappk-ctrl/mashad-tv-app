@@ -356,11 +356,45 @@ export default function PlayerModal({
           className="w-full h-full object-contain cursor-pointer"
         />
 
+        {/* Mashad TV Dynamic Watermark (Masks Yacine & external stream logos) */}
+        {isLive && (
+          <div className="absolute bottom-16 left-6 z-20 pointer-events-none select-none flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-[#0A0E17]/95 border border-mashad-gold/80 shadow-2xl backdrop-blur-md">
+            <div className="w-8 h-8 rounded-lg overflow-hidden border border-mashad-gold/60 p-0.5 bg-black flex-shrink-0">
+              <img
+                src="/logo.jpg"
+                alt="مشهد TV"
+                className="w-full h-full object-cover rounded"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "/logo.png";
+                }}
+              />
+            </div>
+            <div className="flex flex-col text-right">
+              <span className="text-xs font-black text-mashad-gold tracking-wide">مَـشْـهَـدْ TV</span>
+              <span className="text-[9px] font-semibold text-gray-200">بث مباشر رسمي</span>
+            </div>
+          </div>
+        )}
+
         {/* Buffering Indicator */}
         {isBuffering && !errorMsg && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-3">
-            <div className="w-16 h-16 border-4 border-mashad-gold/20 border-t-mashad-gold rounded-full animate-spin shadow-gold" />
-            <span className="text-xs font-bold text-mashad-gold tracking-wider">جاري تحميل البث...</span>
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-4">
+            <div className="relative">
+              <div className="w-20 h-20 rounded-3xl overflow-hidden border-2 border-mashad-gold shadow-gold p-1 bg-black">
+                <img
+                  src="/logo.jpg"
+                  alt="مَشْهَد TV"
+                  className="w-full h-full object-cover rounded-2xl"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = "/logo.png";
+                  }}
+                />
+              </div>
+              <div className="absolute -inset-2.5 border-4 border-t-mashad-gold border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin shadow-gold" />
+            </div>
+            <span className="text-xs font-black text-mashad-gold tracking-widest uppercase">
+              جاري تشغيل البث المباشر...
+            </span>
           </div>
         )}
 

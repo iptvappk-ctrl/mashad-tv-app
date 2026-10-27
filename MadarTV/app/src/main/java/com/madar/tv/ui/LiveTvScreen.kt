@@ -71,7 +71,7 @@ fun LiveTvScreen(
         ) {
             YacineStreamPlayer(
                 stream = activeStream!!,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center).aspectRatio(16f / 9f),
                 onToggleFullscreen = {
                     isFullscreen = false
                     resetScreenOrientation(context)

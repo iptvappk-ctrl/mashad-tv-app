@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     // Case 1: M3U8 Playlist -> Rewrite segment URLs to pass through proxy
     if (isM3u8 && response.ok) {
       const playlistText = await response.text();
-      const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf("/") + 1);
+      const parsedTarget = new URL(targetUrl);
 
       const rewritten = playlistText
         .split("\n")
@@ -65,8 +65,19 @@ export async function GET(req: NextRequest) {
             // Check for URI inside tags like #EXT-X-KEY:METHOD=AES-128,URI="..."
             if (trimmed.startsWith("#EXT-X-KEY:") && trimmed.includes('URI="')) {
               return trimmed.replace(/URI="([^"]+)"/, (_, uri) => {
-                const fullUri = uri.startsWith("http") ? uri : new URL(uri, baseUrl).toString();
-                const proxied = `/api/proxy/stream?url=${encodeURIComponent(fullUri)}&ua=${encodeURIComponent(userAgent)}&ref=${encodeURIComponent(referer)}`;
+                let fullKeyUrl = uri;
+                if (!uri.startsWith("http")) {
+                  try {
+                    const resolvedKey = new URL(uri, parsedTarget.href);
+                    if (!resolvedKey.search && parsedTarget.search) {
+                      resolvedKey.search = parsedTarget.search;
+                    }
+                    fullKeyUrl = resolvedKey.toString();
+                  } catch {
+                    fullKeyUrl = uri;
+                  }
+                }
+                const proxied = `/api/proxy/stream?url=${encodeURIComponent(fullKeyUrl)}&ua=${encodeURIComponent(userAgent)}&ref=${encodeURIComponent(referer)}`;
                 return `URI="${proxied}"`;
               });
             }
@@ -77,7 +88,12 @@ export async function GET(req: NextRequest) {
           let fullSegmentUrl = trimmed;
           if (!trimmed.startsWith("http")) {
             try {
-              fullSegmentUrl = new URL(trimmed, baseUrl).toString();
+              const resolved = new URL(trimmed, parsedTarget.href);
+              // Crucial: preserve query parameters (security tokens like ?t=...&e=...)
+              if (!resolved.search && parsedTarget.search) {
+                resolved.search = parsedTarget.search;
+              }
+              fullSegmentUrl = resolved.toString();
             } catch {
               return line;
             }
@@ -98,11 +114,23 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Case 2: Binary Video Chunk (.ts, .mp4, audio) -> Stream directly
+    // Case 2: Binary Video Chunk (.ts, .mp4, audio, .pdf disguised TS) -> Stream directly
     const responseHeaders = new Headers();
     responseHeaders.set("Access-Control-Allow-Origin", "*");
     responseHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-    if (contentType) responseHeaders.set("Content-Type", contentType);
+
+    // Fix disguised .pdf/.js chunks -> must be served as video/mp2t for browsers and HLS.js
+    if (
+      targetUrl.includes(".pdf") ||
+      targetUrl.includes(".js") ||
+      targetUrl.includes(".ts") ||
+      targetUrl.includes("/0021012254/") ||
+      contentType.includes("pdf")
+    ) {
+      responseHeaders.set("Content-Type", "video/mp2t");
+    } else if (contentType) {
+      responseHeaders.set("Content-Type", contentType);
+    }
 
     const contentLength = response.headers.get("content-length");
     if (contentLength) responseHeaders.set("Content-Length", contentLength);
