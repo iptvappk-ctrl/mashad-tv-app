@@ -732,42 +732,78 @@ private fun MashadDetailScreen(
     var loadingDetail by remember(item.pageUrl) { mutableStateOf(cachedDetail == null) }
     var preResolvedStream by remember(item.pageUrl) { mutableStateOf(cachedDetail?.preResolvedStream) }
 
+    // Seasons & Episodes state
+    var seasonBundle by remember(item.pageUrl) { mutableStateOf<ArabseedSeasonBundle?>(null) }
+    var loadingSeasons by remember(item.pageUrl) { mutableStateOf(item.type == ArabseedType.SERIES) }
+    var selectedSeason by remember { mutableStateOf(0) }
+
+    // Episode player state — when user picks an episode
+    var episodeItem by remember { mutableStateOf<ArabseedItem?>(null) }
+    var episodeServers by remember { mutableStateOf<List<ArabseedServer>>(emptyList()) }
+    var loadingEpisode by remember { mutableStateOf(false) }
+
     LaunchedEffect(item.pageUrl) {
         if (cachedDetail != null) {
             loadingDetail = false
-            return@LaunchedEffect
+        } else {
+            loadingDetail = true
+            try {
+                val storyJob = async(Dispatchers.IO) { ArabseedRepository.fetchStoryFast(item.pageUrl) }
+                val detailJob = async(Dispatchers.IO) { ArabseedRepository.fetchDetail(item) }
+                val s = storyJob.await()
+                if (s.isNotBlank()) fullStory = s
+                val d = detailJob.await()
+                detail = d
+                if (fullStory.isBlank() && d.item.overview.isNotBlank()) fullStory = d.item.overview
+                if (d.preResolvedStream != null) preResolvedStream = d.preResolvedStream
+            } catch (_: Exception) {
+            } finally {
+                loadingDetail = false
+            }
         }
-        loadingDetail = true
+
+        // Load seasons/episodes for series
+        if (item.type == ArabseedType.SERIES) {
+            loadingSeasons = true
+            try {
+                val bundle = withContext(Dispatchers.IO) {
+                    ArabseedRepository.fetchSeasonsAndEpisodes(item)
+                }
+                seasonBundle = bundle
+            } catch (_: Exception) {
+            } finally {
+                loadingSeasons = false
+            }
+        }
+    }
+
+    // When episode chosen, fetch its servers and auto-play
+    LaunchedEffect(episodeItem) {
+        val ep = episodeItem ?: return@LaunchedEffect
+        loadingEpisode = true
         try {
-            // Concurrent: 1. story fetch, 2. servers + pre-resolve
-            val storyJob = async(Dispatchers.IO) {
-                ArabseedRepository.fetchStoryFast(item.pageUrl)
+            val servers = withContext(Dispatchers.IO) {
+                ArabseedRepository.fetchEpisodeServers(ep.pageUrl)
             }
-            val detailJob = async(Dispatchers.IO) {
-                ArabseedRepository.fetchDetail(item)
-            }
-
-            val s = storyJob.await()
-            if (s.isNotBlank()) {
-                fullStory = s
-            }
-
-            val d = detailJob.await()
-            detail = d
-            if (fullStory.isBlank() && d.item.overview.isNotBlank()) {
-                fullStory = d.item.overview
-            }
-            if (d.preResolvedStream != null) {
-                preResolvedStream = d.preResolvedStream
+            episodeServers = servers
+            if (servers.isNotEmpty()) {
+                val preRes = withContext(Dispatchers.IO) {
+                    ArabseedRepository.resolveDirectStream(servers.first().embedUrl)
+                }
+                onPlay(ArabseedDetail(ep, servers, preRes))
             }
         } catch (_: Exception) {
         } finally {
-            loadingDetail = false
+            loadingEpisode = false
         }
     }
 
     val displayOverview = fullStory.ifBlank { item.overview }
     val servers = detail?.servers ?: emptyList()
+    val bundle = seasonBundle
+    val seasons = bundle?.seasons ?: emptyList()
+    val currentSeason = seasons.getOrNull(selectedSeason)
+    val allEpisodes = seasons.flatMap { it.episodes }
 
     Column(Modifier.fillMaxSize().background(MashadColors.Background)) {
         // Top Back Row
@@ -776,49 +812,35 @@ private fun MashadDetailScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                Modifier.size(38.dp).clip(CircleShape).background(MashadColors.SurfaceCard).border(1.dp, MashadColors.GoldBorder, CircleShape).clickable(onClick = onBack),
+                Modifier.size(38.dp).clip(CircleShape).background(MashadColors.SurfaceCard)
+                    .border(1.dp, MashadColors.GoldBorder, CircleShape).clickable(onClick = onBack),
                 contentAlignment = Alignment.Center,
-            ) {
-                Text("←", color = Color.White, fontSize = 18.sp)
-            }
+            ) { Text("←", color = Color.White, fontSize = 18.sp) }
             Spacer(Modifier.width(12.dp))
             Text(
-                item.title,
-                color = Color.White,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                item.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
 
         LazyColumn(
             Modifier.weight(1f),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Poster + Meta
+            // ── Poster + Meta + Play button ──────────────────────────────────
             item {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
                     Box(
                         Modifier.size(width = 115.dp, height = 165.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MashadColors.Surface)
+                            .clip(RoundedCornerShape(8.dp)).background(MashadColors.Surface)
                             .border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(8.dp)),
                     ) {
                         if (item.posterUrl != null) {
-                            AsyncImage(
-                                model = item.posterUrl,
-                                contentDescription = item.title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                            )
+                            AsyncImage(model = item.posterUrl, contentDescription = item.title,
+                                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                         }
                     }
-
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(item.title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Text(
@@ -826,47 +848,60 @@ private fun MashadDetailScreen(
                                 if (item.year.isNotBlank()) append(item.year)
                                 if (item.quality.isNotBlank()) append(" · ${item.quality}")
                                 append(" · ${if (item.type == ArabseedType.MOVIE) "فيلم" else "مسلسل"}")
+                                if (seasons.isNotEmpty()) append(" · ${seasons.size} مواسم")
                             },
                             color = MashadColors.TextMuted, fontSize = 11.sp,
                         )
                         Text(item.category, color = MashadColors.GoldLight, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-
                         Spacer(Modifier.height(8.dp))
 
-                        // Big Royal Gold Play Button
+                        // Play button — for movies or "تشغيل أول حلقة" for series
+                        val playLabel = if (item.type == ArabseedType.SERIES && allEpisodes.isNotEmpty())
+                            "▶  تشغيل الحلقة الأولى" else "▶  تشغيل الآن"
+
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-                                .background(if (loadingDetail && servers.isEmpty()) MashadColors.SurfaceHighlight else MashadColors.Gold)
+                                .background(if (loadingDetail && servers.isEmpty() && allEpisodes.isEmpty()) MashadColors.SurfaceHighlight else MashadColors.Gold)
                                 .clickable {
-                                    if (servers.isNotEmpty()) {
-                                        val targetDetail = (detail ?: ArabseedDetail(item, servers)).copy(preResolvedStream = preResolvedStream)
-                                        onPlay(targetDetail)
+                                    if (item.type == ArabseedType.SERIES && allEpisodes.isNotEmpty()) {
+                                        episodeItem = ArabseedItem(
+                                            id = allEpisodes.first().pageUrl.substringAfterLast('/'),
+                                            title = allEpisodes.first().title,
+                                            arabicTitle = allEpisodes.first().title,
+                                            posterUrl = item.posterUrl,
+                                            year = item.year, quality = item.quality, rating = item.rating,
+                                            type = ArabseedType.SERIES,
+                                            pageUrl = allEpisodes.first().pageUrl,
+                                            category = item.category,
+                                        )
+                                    } else if (servers.isNotEmpty()) {
+                                        onPlay((detail ?: ArabseedDetail(item, servers)).copy(preResolvedStream = preResolvedStream))
                                     }
                                 }
                                 .padding(vertical = 12.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (loadingDetail && servers.isEmpty()) {
+                            if ((loadingDetail && servers.isEmpty()) || loadingEpisode) {
                                 CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
                                 Text("جاري تحضير البث...", color = Color.Black, fontSize = 13.sp)
                             } else {
-                                Text("▶", color = Color.Black, fontSize = 15.sp)
-                                Spacer(Modifier.width(8.dp))
-                                Text("تشغيل الآن", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text(playLabel, color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
 
-            // Full Complete Story (Never truncated)
+            // ── Story ─────────────────────────────────────────────────────────
             if (displayOverview.isNotBlank() || loadingDetail) {
                 item {
                     Column(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .background(MashadColors.Surface).border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(8.dp)).padding(14.dp),
+                            .background(MashadColors.Surface)
+                            .border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(8.dp))
+                            .padding(14.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -879,56 +914,275 @@ private fun MashadDetailScreen(
                             }
                         }
                         if (displayOverview.isNotBlank()) {
-                            Text(
-                                text = displayOverview,
-                                color = Color(0xFFDDDDDD),
-                                fontSize = 13.sp,
-                                lineHeight = 22.sp,
-                            )
+                            Text(text = displayOverview, color = Color(0xFFDDDDDD), fontSize = 13.sp, lineHeight = 22.sp)
                         }
                     }
                 }
             }
 
-            // Streaming Servers
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("اختر سيرفر المشاهدة", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-
-                    if (loadingDetail && servers.isEmpty()) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            CircularProgressIndicator(color = MashadColors.Gold, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(10.dp))
-                            Text("جاري استخراج السيرفرات السريعة...", color = MashadColors.TextMuted, fontSize = 12.sp)
+            // ── SEASONS & EPISODES section (Series only) ─────────────────────
+            if (item.type == ArabseedType.SERIES) {
+                item {
+                    Column(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                            .background(MashadColors.Surface)
+                            .border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(10.dp))
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        // Header
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("📺 المواسم والحلقات", color = MashadColors.GoldLight, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                            Spacer(Modifier.weight(1f))
+                            if (loadingSeasons) {
+                                CircularProgressIndicator(color = MashadColors.Gold, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else if (seasons.isNotEmpty()) {
+                                Text(
+                                    "${allEpisodes.size} حلقة",
+                                    color = MashadColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
-                    } else if (servers.isEmpty()) {
-                        Text("لا توجد سيرفرات متاحة حالياً", color = MashadColors.TextMuted, fontSize = 12.sp)
-                    } else {
-                        servers.forEachIndexed { index, server ->
-                            val isFirst = index == 0
-                            Row(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                                    .background(MashadColors.Surface)
-                                    .border(1.dp, if (isFirst) MashadColors.Gold else MashadColors.Border, RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        val targetDetail = (detail ?: ArabseedDetail(item, servers))
-                                            .copy(
-                                                servers = listOf(server) + (servers - server),
-                                                preResolvedStream = if (isFirst) preResolvedStream else null,
+
+                        if (loadingSeasons) {
+                            Text("جاري جلب الحلقات...", color = MashadColors.TextMuted, fontSize = 12.sp)
+                        } else if (seasons.isEmpty()) {
+                            Text("لا توجد حلقات متاحة حالياً", color = MashadColors.TextMuted, fontSize = 12.sp)
+                        } else {
+                            // Season selector tabs (if more than 1 season)
+                            if (seasons.size > 1) {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    contentPadding = PaddingValues(vertical = 2.dp),
+                                ) {
+                                    items(seasons.size) { idx ->
+                                        val active = idx == selectedSeason
+                                        Box(
+                                            Modifier.clip(RoundedCornerShape(20.dp))
+                                                .background(if (active) MashadColors.Gold else MashadColors.SurfaceCard)
+                                                .border(1.dp, if (active) MashadColors.Gold else MashadColors.Border, RoundedCornerShape(20.dp))
+                                                .clickable { selectedSeason = idx }
+                                                .padding(horizontal = 16.dp, vertical = 7.dp),
+                                        ) {
+                                            Text(
+                                                seasons[idx].title,
+                                                color = if (active) Color.Black else MashadColors.TextMuted,
+                                                fontSize = 12.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                                             )
-                                        onPlay(targetDetail)
+                                        }
                                     }
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text("▶", color = MashadColors.Gold, fontSize = 12.sp)
+                                }
+                            }
+
+                            // Episodes grid for selected season
+                            val episodes = currentSeason?.episodes ?: emptyList()
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                episodes.chunked(2).forEach { rowEps ->
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        rowEps.forEach { ep ->
+                                            Box(
+                                                Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                                                    .background(MashadColors.SurfaceCard)
+                                                    .border(1.dp, MashadColors.Border, RoundedCornerShape(8.dp))
+                                                    .clickable {
+                                                        episodeItem = ArabseedItem(
+                                                            id = ep.pageUrl.substringAfterLast('/'),
+                                                            title = ep.title,
+                                                            arabicTitle = ep.title,
+                                                            posterUrl = item.posterUrl,
+                                                            year = item.year, quality = item.quality, rating = item.rating,
+                                                            type = ArabseedType.SERIES,
+                                                            pageUrl = ep.pageUrl,
+                                                            category = item.category,
+                                                        )
+                                                    }
+                                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                ) {
+                                                    Box(
+                                                        Modifier.size(30.dp).clip(CircleShape)
+                                                            .background(MashadColors.Gold),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Text(
+                                                            ep.number.toString(),
+                                                            color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Black,
+                                                        )
+                                                    }
+                                                    Text(
+                                                        ep.title.take(30),
+                                                        color = Color.White, fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        // Fill empty slot if odd number
+                                        if (rowEps.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Related Parts / Other Seasons ────────────────────────────
+                if (!loadingSeasons && bundle?.relatedParts?.isNotEmpty() == true) {
+                    item {
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                .background(MashadColors.Surface)
+                                .border(1.dp, MashadColors.Border, RoundedCornerShape(10.dp))
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text("🎬 الأجزاء والمواسم الأخرى", color = MashadColors.GoldLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                items(bundle.relatedParts) { part ->
+                                    Column(
+                                        Modifier.width(110.dp).clickable {
+                                            // Navigate to that part — tell parent to open it
+                                            episodeItem = part
+                                        },
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Box(
+                                            Modifier.fillMaxWidth().aspectRatio(2f / 3f)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(MashadColors.SurfaceCard)
+                                                .border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(6.dp)),
+                                        ) {
+                                            if (part.posterUrl != null) {
+                                                AsyncImage(model = part.posterUrl, contentDescription = part.title,
+                                                    modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                            }
+                                        }
+                                        Text(
+                                            part.title, color = Color.White, fontSize = 10.sp,
+                                            maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Streaming Servers (Movies) ────────────────────────────────────
+            if (item.type == ArabseedType.MOVIE) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("اختر سيرفر المشاهدة", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        if (loadingDetail && servers.isEmpty()) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(color = MashadColors.Gold, modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(10.dp))
-                                Text(server.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                                Text(if (isFirst) "فائق السرعة ⚡" else "سريع", color = MashadColors.LiveGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("جاري استخراج السيرفرات السريعة...", color = MashadColors.TextMuted, fontSize = 12.sp)
+                            }
+                        } else if (servers.isEmpty()) {
+                            Text("لا توجد سيرفرات متاحة حالياً", color = MashadColors.TextMuted, fontSize = 12.sp)
+                        } else {
+                            servers.forEachIndexed { index, server ->
+                                val isFirst = index == 0
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                                        .background(MashadColors.Surface)
+                                        .border(1.dp, if (isFirst) MashadColors.Gold else MashadColors.Border, RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            val targetDetail = (detail ?: ArabseedDetail(item, servers))
+                                                .copy(
+                                                    servers = listOf(server) + (servers - server),
+                                                    preResolvedStream = if (isFirst) preResolvedStream else null,
+                                                )
+                                            onPlay(targetDetail)
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text("▶", color = MashadColors.Gold, fontSize = 12.sp)
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(server.name, color = Color.White, fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                    Text(if (isFirst) "فائق السرعة ⚡" else "سريع",
+                                        color = MashadColors.LiveGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── Next / Previous Episode navigation ────────────────────────────
+            if (item.type == ArabseedType.SERIES && allEpisodes.isNotEmpty()) {
+                item {
+                    val currentEpUrl = episodeItem?.pageUrl
+                    val currentIdx = allEpisodes.indexOfFirst { it.pageUrl == currentEpUrl }
+                    val hasPrev = currentIdx > 0
+                    val hasNext = currentIdx in 0 until allEpisodes.size - 1
+
+                    if (hasPrev || hasNext) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (hasPrev) {
+                                val prevEp = allEpisodes[currentIdx - 1]
+                                Row(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                                        .background(MashadColors.SurfaceCard)
+                                        .border(1.dp, MashadColors.Border, RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            episodeItem = ArabseedItem(
+                                                id = prevEp.pageUrl.substringAfterLast('/'),
+                                                title = prevEp.title, arabicTitle = prevEp.title,
+                                                posterUrl = item.posterUrl, year = item.year,
+                                                quality = item.quality, rating = item.rating,
+                                                type = ArabseedType.SERIES, pageUrl = prevEp.pageUrl,
+                                                category = item.category,
+                                            )
+                                        }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                ) {
+                                    Text("→ السابقة", color = MashadColors.TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Spacer(Modifier.weight(1f))
+                            }
+                            if (hasNext) {
+                                val nextEp = allEpisodes[currentIdx + 1]
+                                Row(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(8.dp))
+                                        .background(MashadColors.Gold)
+                                        .clickable {
+                                            episodeItem = ArabseedItem(
+                                                id = nextEp.pageUrl.substringAfterLast('/'),
+                                                title = nextEp.title, arabicTitle = nextEp.title,
+                                                posterUrl = item.posterUrl, year = item.year,
+                                                quality = item.quality, rating = item.rating,
+                                                type = ArabseedType.SERIES, pageUrl = nextEp.pageUrl,
+                                                category = item.category,
+                                            )
+                                        }
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                ) {
+                                    Text("← التالية", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Spacer(Modifier.weight(1f))
                             }
                         }
                     }

@@ -41,6 +41,26 @@ data class ArabseedServer(
     override fun toString(): String = name
 }
 
+// ── Seasons & Episodes ────────────────────────────────────────────────────────
+
+data class ArabseedEpisode(
+    val number: Int,
+    val title: String,
+    val pageUrl: String,
+    val seasonNumber: Int = 1,
+)
+
+data class ArabseedSeason(
+    val number: Int,
+    val title: String,
+    val episodes: List<ArabseedEpisode>,
+)
+
+data class ArabseedSeasonBundle(
+    val seasons: List<ArabseedSeason>,
+    val relatedParts: List<ArabseedItem> = emptyList(), // e.g. "الجزء الثاني", "الموسم 2"
+)
+
 object ArabseedCategories {
     val MAIN_TABS = listOf(
         ArabCategory("home", "الرئيسية", "home/"),

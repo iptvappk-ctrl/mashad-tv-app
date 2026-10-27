@@ -294,6 +294,105 @@ object ArabseedRepository {
         return detail
     }
 
+    // ── Seasons & Episodes ────────────────────────────────────────────────
+
+    private val seasonBundleCache = ConcurrentHashMap<String, ArabseedSeasonBundle>()
+
+    fun fetchSeasonsAndEpisodes(item: ArabseedItem): ArabseedSeasonBundle {
+        seasonBundleCache[item.pageUrl]?.let { return it }
+        return try {
+            val html = fetchHtml(item.pageUrl)
+            val doc = Jsoup.parse(html, BASE_URL)
+
+            // Try standard episode list containers used by Arabseed
+            val episodeSelectors = listOf(
+                ".EpisodesList li a", ".eps-list li a", ".eps li a",
+                ".episodios li a", ".episodes-list li a", ".eplister li a",
+                "ul.season-list li a", ".Seasons li a", ".seasonDiv li a",
+                ".EntryHolder li a", ".season li a", ".eplist a",
+            )
+            val rawEpisodes = mutableListOf<Pair<String, String>>()
+            for (sel in episodeSelectors) {
+                val els = doc.select(sel)
+                if (els.isNotEmpty()) {
+                    for (el in els) {
+                        val href = el.attr("abs:href").ifBlank { el.attr("href") }
+                        val txt = el.text().trim()
+                        if (href.isNotBlank() && href.startsWith(P_HTTP) && txt.isNotBlank())
+                            rawEpisodes += txt to href
+                    }
+                    if (rawEpisodes.isNotEmpty()) break
+                }
+            }
+
+            // Group into seasons
+            val seasons = mutableListOf<ArabseedSeason>()
+            if (rawEpisodes.isNotEmpty()) {
+                val seasonMap = LinkedHashMap<Int, MutableList<ArabseedEpisode>>()
+                rawEpisodes.forEachIndexed { index, (title, url) ->
+                    val seasonNum = Regex("""(?:الموسم|season|s)[\s\-]?(\d+)""", RegexOption.IGNORE_CASE)
+                        .find(url + title)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                    val epNum = Regex("""(?:الحلقة|ep|e)[\s\-]?(\d+)""", RegexOption.IGNORE_CASE)
+                        .find(url + title)?.groupValues?.get(1)?.toIntOrNull()
+                        ?: Regex("""\b(\d+)\b""").findAll(title).lastOrNull()?.value?.toIntOrNull()
+                        ?: (index + 1)
+                    seasonMap.getOrPut(seasonNum) { mutableListOf() }
+                        .add(ArabseedEpisode(epNum, title, url, seasonNum))
+                }
+                seasonMap.entries.sortedBy { it.key }.forEach { (sNum, eps) ->
+                    seasons += ArabseedSeason(
+                        number = sNum,
+                        title = when (sNum) {
+                            1 -> "الموسم الأول"; 2 -> "الموسم الثاني"; 3 -> "الموسم الثالث"
+                            4 -> "الموسم الرابع"; 5 -> "الموسم الخامس"
+                            else -> "الموسم $sNum"
+                        },
+                        episodes = eps.sortedBy { it.number },
+                    )
+                }
+            }
+
+            // Find related parts/seasons linked from the page
+            val relatedParts = mutableListOf<ArabseedItem>()
+            for (sel in listOf(
+                ".RelatedPosts .post__item a", ".related-series a",
+                ".seasons-list a", ".parts-list a",
+                "a[href*='%d8%a7%d9%84%d8%ac%d8%b2%d8%a1']",
+                "a[href*='part']", "a[href*='season']",
+            )) {
+                for (el in doc.select(sel)) {
+                    val href = el.attr("abs:href").ifBlank { el.attr("href") }
+                    val txt = el.text().trim().ifBlank { el.attr("title").trim() }
+                    if (href.isNotBlank() && href.startsWith(P_HTTP)
+                        && href != item.pageUrl && txt.isNotBlank()
+                    ) {
+                        relatedParts += ArabseedItem(
+                            id = href.trimEnd('/').substringAfterLast('/').take(80),
+                            title = txt, arabicTitle = txt,
+                            posterUrl = item.posterUrl, year = item.year,
+                            quality = item.quality, rating = item.rating,
+                            type = ArabseedType.SERIES, pageUrl = href,
+                            category = item.category,
+                        )
+                    }
+                }
+                if (relatedParts.isNotEmpty()) break
+            }
+
+            val bundle = ArabseedSeasonBundle(
+                seasons = seasons,
+                relatedParts = relatedParts.distinctBy { it.pageUrl }.take(12),
+            )
+            seasonBundleCache[item.pageUrl] = bundle
+            bundle
+        } catch (_: Exception) {
+            ArabseedSeasonBundle(emptyList())
+        }
+    }
+
+    fun fetchEpisodeServers(episodeUrl: String): List<ArabseedServer> =
+        fetchServersFast(episodeUrl)
+
     fun resolveDirectStream(serverUrl: String): String? {
         try {
             streamCache[serverUrl]?.let { return it }
