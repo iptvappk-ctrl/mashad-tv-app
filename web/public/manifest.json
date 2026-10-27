@@ -1,0 +1,16 @@
+{
+  "name": "مَشْهَدْ TV",
+  "short_name": "مشهد",
+  "description": "منصة السينما والبث المباشر لمباريات الكورة والقنوات التلفزيونية",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08080C",
+  "theme_color": "#E5B842",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

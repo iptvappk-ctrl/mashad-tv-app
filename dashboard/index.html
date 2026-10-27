@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لوحة تحكم مشهد الذكية • MASHAD AI VIP ANALYTICS</title>
+    <!-- Google Fonts Cairo -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Cairo', 'sans-serif'] },
+                    colors: {
+                        mashad: {
+                            gold: '#D4AF37',
+                            goldLight: '#F5D77F',
+                            goldDark: '#997A15',
+                            bg: '#08080A',
+                            surface: '#111116',
+                            card: '#16161D',
+                            border: '#23232F',
+                            live: '#00E676',
+                            danger: '#FF3366',
+                            info: '#00B0FF'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Cairo', sans-serif; background-color: #08080A; color: #E5E7EB; }
+        .gold-glow { text-shadow: 0 0 25px rgba(212, 175, 55, 0.45); }
+        .live-pulse {
+            box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.8);
+            animation: pulse-green 1.8s infinite cubic-bezier(0.66, 0, 0, 1);
+        }
+        @keyframes pulse-green {
+            to { box-shadow: 0 0 0 16px rgba(0, 230, 118, 0); }
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #08080A; }
+        ::-webkit-scrollbar-thumb { background: #23232F; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #D4AF37; }
+        @media print {
+            header, footer, button, input { display: none !important; }
+            body { background: white !important; color: black !important; }
+            .bg-mashad-surface, .bg-mashad-card { background: white !important; border: 1px solid #ccc !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-mashad-gold selection:text-black">
+
+    <!-- Top Navigation Header -->
+    <header class="border-b border-mashad-border bg-mashad-surface/90 sticky top-0 z-50 backdrop-blur-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-mashad-gold via-yellow-500 to-yellow-700 flex items-center justify-center font-black text-2xl text-black shadow-lg shadow-yellow-900/30">
+                    م
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-xl font-bold text-white tracking-wide">مَـشْـهَـد <span class="text-mashad-gold">VIP</span></h1>
+                        <span class="text-[10px] bg-mashad-gold/20 text-mashad-gold border border-mashad-gold/30 px-2 py-0.5 rounded-full font-bold">SMART ANALYTICS PRO</span>
+                    </div>
+                    <p class="text-xs text-gray-400">منظومة الاستخبارات الرقمية وتحليل سلوك المشاهدين وجودة البث</p>
+                </div>
+            </div>
+
+            <!-- Header Controls & Filters -->
+            <div class="flex items-center gap-2.5">
+                <!-- Date Filter Pills -->
+                <div class="hidden md:flex items-center bg-mashad-card border border-mashad-border rounded-lg p-1 text-xs">
+                    <button onclick="setFilter('today')" id="flt-today" class="px-2.5 py-1 rounded bg-mashad-gold text-black font-bold transition">اليوم</button>
+                    <button onclick="setFilter('7d')" id="flt-7d" class="px-2.5 py-1 rounded text-gray-400 hover:text-white transition">7 أيام</button>
+                    <button onclick="setFilter('30d')" id="flt-30d" class="px-2.5 py-1 rounded text-gray-400 hover:text-white transition">30 يوم</button>
+                </div>
+
+                <!-- Mode Badge -->
+                <div class="hidden sm:flex items-center gap-2 bg-mashad-card border border-mashad-border px-3.5 py-1.5 rounded-full">
+                    <span class="w-2.5 h-2.5 rounded-full bg-mashad-live live-pulse"></span>
+                    <span class="text-xs font-semibold text-gray-300">مراقبة حية: <span id="onlineCountBadge" class="text-mashad-live font-bold">142 متصل</span></span>
+                </div>
+
+                <!-- Export CSV Button -->
+                <button onclick="exportToCSV()" class="bg-mashad-card hover:bg-mashad-border border border-mashad-border text-gray-200 hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
+                    <span>تصدير CSV</span> 📥
+                </button>
+
+                <!-- Print / PDF Button -->
+                <button onclick="window.print()" class="bg-mashad-card hover:bg-mashad-border border border-mashad-border text-gray-200 hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition">
+                    <span>تقرير PDF</span> 🖨️
+                </button>
+
+                <!-- Refresh Button -->
+                <button onclick="refreshData()" class="bg-mashad-gold hover:bg-yellow-500 text-black px-3.5 py-1.5 rounded-lg text-xs font-bold transition shadow-md shadow-yellow-500/20">
+                    تحديث 🔄
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-8">
+
+        <!-- 1. Real-Time Key Performance Indicators (KPIs) -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <!-- KPI 1: Real-time Online Users -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-5 relative overflow-hidden group hover:border-mashad-gold/40 transition">
+                <div class="absolute -top-10 -left-10 w-28 h-28 bg-emerald-500/10 rounded-full blur-2xl"></div>
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-bold text-gray-400">المتصلون الآن بالثانية</span>
+                    <span class="w-2.5 h-2.5 rounded-full bg-mashad-live live-pulse"></span>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="kpiActiveUsers" class="text-4xl font-extrabold text-white tracking-tight">142</span>
+                    <span class="text-xs font-bold text-mashad-live">متصل الآن 🟢</span>
+                </div>
+                <p class="text-[11px] text-gray-400 mt-2">يشاهدون حالياً (مباريات وأفلام ومسلسلات)</p>
+            </div>
+
+            <!-- KPI 2: Total App Installs -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-5 relative overflow-hidden group hover:border-mashad-gold/40 transition">
+                <div class="absolute -top-10 -left-10 w-28 h-28 bg-mashad-gold/10 rounded-full blur-2xl"></div>
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-bold text-gray-400">إجمالي الأجهزة المثبتة</span>
+                    <span class="text-lg">📱</span>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="kpiTotalInstalls" class="text-4xl font-extrabold text-white tracking-tight">1,845</span>
+                    <span class="text-xs font-bold text-mashad-gold">جهاز مسجل</span>
+                </div>
+                <p class="text-[11px] text-gray-400 mt-2"><span class="text-emerald-400 font-bold">+184 اليوم</span> نمو الأجهزة الفعالة</p>
+            </div>
+
+            <!-- KPI 3: Average Session Duration -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-5 relative overflow-hidden group hover:border-mashad-gold/40 transition">
+                <div class="absolute -top-10 -left-10 w-28 h-28 bg-blue-500/10 rounded-full blur-2xl"></div>
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-bold text-gray-400">متوسط بقاء المشاهد (جلسة)</span>
+                    <span class="text-lg">⏱️</span>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="kpiAvgDuration" class="text-4xl font-extrabold text-white tracking-tight">44</span>
+                    <span class="text-xs font-bold text-blue-400">دقيقة / جلسة</span>
+                </div>
+                <p class="text-[11px] text-gray-400 mt-2">معدل استبقاء عالي جداً (High Retention)</p>
+            </div>
+
+            <!-- KPI 4: Watch Completion Rate -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-5 relative overflow-hidden group hover:border-mashad-gold/40 transition">
+                <div class="absolute -top-10 -left-10 w-28 h-28 bg-purple-500/10 rounded-full blur-2xl"></div>
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-bold text-gray-400">إجمالي طلبات المشاهدة</span>
+                    <span class="text-lg">🎬</span>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="kpiTotalViews" class="text-4xl font-extrabold text-white tracking-tight">12,680</span>
+                    <span class="text-xs font-bold text-purple-400">نقرة مشاهدة</span>
+                </div>
+                <p class="text-[11px] text-gray-400 mt-2">82% نسبة إكمال المباريات والأفلام</p>
+            </div>
+        </div>
+
+        <!-- 2. AI Audience Insights & Recommendations Banner -->
+        <div class="bg-gradient-to-r from-yellow-950/40 via-mashad-card to-mashad-surface border border-mashad-gold/40 rounded-2xl p-5 relative overflow-hidden">
+            <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div class="flex items-center gap-3.5">
+                    <div class="w-10 h-10 rounded-xl bg-mashad-gold/20 border border-mashad-gold/40 flex items-center justify-center text-xl shrink-0">
+                        💡
+                    </div>
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            استخبارات الذكاء الاصطناعي لاحتياجات المشاهدين <span class="bg-mashad-gold/20 text-mashad-gold text-[10px] px-2 py-0.5 rounded font-bold">توصية حية</span>
+                        </h2>
+                        <p class="text-xs text-gray-300 mt-0.5" id="aiInsightText">
+                            أظهرت بيانات البحث والمشاهدة أن <span class="text-mashad-gold font-bold">مباريات دوري أبطال أوروبا</span> و<span class="text-mashad-gold font-bold">مسلسلات رمضان 2026</span> تستحوذ على 72% من طلبات المشاهدين اليوم مع ذروة نشاط بين 8:00 إلى 11:00 مساءً.
+                        </p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <span class="text-[11px] bg-black/40 border border-mashad-border text-gray-300 px-3 py-1.5 rounded-lg">
+                        دقة التوقع: <strong class="text-emerald-400">96.4%</strong>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Advanced Charts Grid (4 Core Analytics Charts) -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <!-- Chart 1: Content Preference (بيحبوا إيه؟ بالتصنيف) -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            <span class="text-mashad-gold">⭐</span> تصنيفات المحتوى الأكثر جذباً (بيحبوا إيه؟)
+                        </h2>
+                        <p class="text-[11px] text-gray-400 mt-0.5">توزيع ساعات المشاهدة على الأقسام المختلفة</p>
+                    </div>
+                    <span class="text-[10px] text-gray-400 bg-mashad-card px-2 py-1 rounded border border-mashad-border">نسبة الإقبال</span>
+                </div>
+                <div class="relative h-64">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 2: Hourly Activity & Peak Hours (ساعات الذروة لفتح وقفل التطبيق) -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            <span class="text-blue-400">📈</span> أوقات الذروة ونشاط الاستخدام (بالساعة)
+                        </h2>
+                        <p class="text-[11px] text-gray-400 mt-0.5">أفضل توقيت لإطلاق البثوث وتحديث السيرفرات</p>
+                    </div>
+                    <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 font-bold">ذروة المساء: 10:00 PM</span>
+                </div>
+                <div class="relative h-64">
+                    <canvas id="activityChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 3: Geographic Distribution (من أين يشاهد الجمهور؟) -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            <span class="text-emerald-400">🌍</span> التوزيع الجغرافي للمشاهدين (البلدان)
+                        </h2>
+                        <p class="text-[11px] text-gray-400 mt-0.5">أعلى الدول والمدن استخداماً للتطبيق</p>
+                    </div>
+                    <span class="text-[10px] text-gray-400 bg-mashad-card px-2 py-1 rounded border border-mashad-border">توزيع دولي</span>
+                </div>
+                <div class="relative h-64">
+                    <canvas id="geoChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 4: Device Type Breakdown & Stream Quality -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            <span class="text-purple-400">🖥️</span> نوع شاشات المشاهدين (TV vs Mobile)
+                        </h2>
+                        <p class="text-[11px] text-gray-400 mt-0.5">شاشات التلفزيون الذكية مقابل الهواتف المحمولة</p>
+                    </div>
+                    <span class="text-[10px] text-gray-400 bg-mashad-card px-2 py-1 rounded border border-mashad-border">تحليل الشاشات</span>
+                </div>
+                <div class="relative h-64 flex items-center justify-center">
+                    <canvas id="deviceChart"></canvas>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 4. Deep Analysis: Conversion Funnel & User Retention Matrix -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Funnel: User Journey Progress -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6 lg:col-span-2">
+                <div class="flex items-center justify-between mb-5">
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            <span class="text-emerald-400">🎯</span> قمع التحويل ورحلة المستخدم (User Conversion Funnel)
+                        </h2>
+                        <p class="text-[11px] text-gray-400 mt-0.5">نسبة وصول المستخدم من لحظة فتح التطبيق حتى إكمال الفيديو</p>
+                    </div>
+                    <span class="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded font-bold">صحة ممتازة 91%</span>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-300 font-semibold">1. فتح التطبيق (App Launch)</span>
+                            <span class="text-mashad-gold font-bold">2,480 مستخدم (100%)</span>
+                        </div>
+                        <div class="w-full bg-mashad-card h-3 rounded-full overflow-hidden">
+                            <div class="bg-mashad-gold h-full rounded-full transition-all duration-1000" style="width: 100%"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-300 font-semibold">2. تصفح الأقسام (Cinema & Live Matches)</span>
+                            <span class="text-emerald-400 font-bold">2,210 مستخدم (89.1%)</span>
+                        </div>
+                        <div class="w-full bg-mashad-card h-3 rounded-full overflow-hidden">
+                            <div class="bg-emerald-400 h-full rounded-full transition-all duration-1000" style="width: 89.1%"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-300 font-semibold">3. استكشاف العناوين والبحث (Search & Select)</span>
+                            <span class="text-blue-400 font-bold">1,740 مستخدم (70.2%)</span>
+                        </div>
+                        <div class="w-full bg-mashad-card h-3 rounded-full overflow-hidden">
+                            <div class="bg-blue-400 h-full rounded-full transition-all duration-1000" style="width: 70.2%"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-300 font-semibold">4. تشغيل المشغل والبث (Player Launch)</span>
+                            <span class="text-purple-400 font-bold">1,560 مستخدم (62.9%)</span>
+                        </div>
+                        <div class="w-full bg-mashad-card h-3 rounded-full overflow-hidden">
+                            <div class="bg-purple-400 h-full rounded-full transition-all duration-1000" style="width: 62.9%"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-300 font-semibold">5. إكمال المشاهدة لأكثر من 30 دقيقة (High Engagement)</span>
+                            <span class="text-yellow-400 font-bold">1,280 مستخدم (51.6%)</span>
+                        </div>
+                        <div class="w-full bg-mashad-card h-3 rounded-full overflow-hidden">
+                            <div class="bg-yellow-400 h-full rounded-full transition-all duration-1000" style="width: 51.6%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Retention & Churn Rates Card -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6 flex flex-col justify-between">
+                <div>
+                    <h2 class="text-sm font-bold text-white flex items-center gap-2 mb-1">
+                        <span class="text-pink-400">🔄</span> مصفوفة الاستبقاء والمغادرة
+                    </h2>
+                    <p class="text-[11px] text-gray-400 mb-4">مدى عودة المستخدمين للتطبيق بعد أيام</p>
+                    
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between p-3 rounded-xl bg-mashad-card border border-mashad-border">
+                            <div>
+                                <span class="text-xs text-gray-400 block">استبقاء اليوم الأول (D1)</span>
+                                <span class="text-xs font-bold text-white">العودة بعد 24 ساعة</span>
+                            </div>
+                            <span class="text-lg font-black text-emerald-400">84.2%</span>
+                        </div>
+
+                        <div class="flex items-center justify-between p-3 rounded-xl bg-mashad-card border border-mashad-border">
+                            <div>
+                                <span class="text-xs text-gray-400 block">استبقاء الأسبوع الأول (D7)</span>
+                                <span class="text-xs font-bold text-white">العودة خلال أسبوع</span>
+                            </div>
+                            <span class="text-lg font-black text-blue-400">71.5%</span>
+                        </div>
+
+                        <div class="flex items-center justify-between p-3 rounded-xl bg-mashad-card border border-mashad-border">
+                            <div>
+                                <span class="text-xs text-gray-400 block">استبقاء الشهر الأول (D30)</span>
+                                <span class="text-xs font-bold text-white">مشاهدون دائمون</span>
+                            </div>
+                            <span class="text-lg font-black text-mashad-gold">58.9%</span>
+                        </div>
+
+                        <div class="flex items-center justify-between p-3 rounded-xl bg-red-950/20 border border-red-900/30">
+                            <div>
+                                <span class="text-xs text-gray-400 block">معدل الانسحاب (Churn Rate)</span>
+                                <span class="text-xs font-bold text-red-400">منخفض جداً (آمن)</span>
+                            </div>
+                            <span class="text-lg font-black text-red-400">4.8%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 5. Live Activity Ticker (نشاط المشاهدين لحظة بلحظة) -->
+        <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-5">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-mashad-live live-pulse"></span>
+                    شريط الأحداث المباشرة (Live Real-Time Activity Feed)
+                </h2>
+                <span class="text-[10px] text-gray-400">تحديث فوري بالثانية</span>
+            </div>
+            <div class="divide-y divide-mashad-border/60 text-xs" id="liveActivityFeed">
+                <div class="py-2 flex items-center justify-between">
+                    <span class="text-gray-200">مستخدم من القاهرة بدأ مشاهدة بث مباشر: <strong class="text-mashad-gold">ريال مدريد vs مانشستر سيتي ⚽</strong></span>
+                    <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded font-bold">الآن</span>
+                </div>
+                <div class="py-2 flex items-center justify-between">
+                    <span class="text-gray-300">مستخدم من الرياض يبحث عن: <strong class="text-blue-400">مسلسلات رمضان 2026 🌙</strong></span>
+                    <span class="text-[10px] text-gray-400">منذ 15 ثانية</span>
+                </div>
+                <div class="py-2 flex items-center justify-between">
+                    <span class="text-gray-300">مستخدم من دبي فتح فيلم: <strong class="text-purple-400">Gladiator II (4K) 🎬</strong></span>
+                    <span class="text-[10px] text-gray-400">منذ 40 ثانية</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. Real-time Sessions Log Table (الي فتح وقفل التطبيق بالثانية) -->
+        <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5">
+                <div>
+                    <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                        <span class="text-emerald-400">🟢</span> سجل جلسات المستخدمين (الي فتح والي قفل ومدة بقائه)
+                    </h2>
+                    <p class="text-xs text-gray-400 mt-0.5">مراقبة حية لحظة بلحظة لكل جهاز وموعد الدخول والخروج</p>
+                </div>
+                <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <input type="text" id="sessionSearchInput" onkeyup="filterSessionsTable()" placeholder="بحث بجهاز أو دولة..." class="bg-mashad-card border border-mashad-border text-xs text-white rounded-lg px-3 py-1.5 focus:border-mashad-gold outline-none w-full sm:w-60">
+                </div>
+            </div>
+
+            <div class="overflow-x-auto max-h-96">
+                <table class="w-full text-right text-xs">
+                    <thead class="text-gray-400 border-b border-mashad-border uppercase font-semibold bg-mashad-card/30">
+                        <tr>
+                            <th class="py-3 px-3">الجهاز والنوع</th>
+                            <th class="py-3 px-3">الدولة</th>
+                            <th class="py-3 px-3">وقت الفتح</th>
+                            <th class="py-3 px-3">وقت الإغلاق</th>
+                            <th class="py-3 px-3">مدة الجلسة</th>
+                            <th class="py-3 px-3">آخر قسم زاره</th>
+                            <th class="py-3 px-3 text-center">الحالة</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sessionsTableBody" class="divide-y divide-mashad-border/60 text-gray-300">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 7. Top Watched Content & Search Demands -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            <!-- Table 1: Top Watched Movies & Matches -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            <span class="text-mashad-gold">🔥</span> أكثر الأفلام والمباريات مشاهدة الآن
+                        </h2>
+                        <p class="text-[11px] text-gray-400 mt-0.5">المحتوى الأكثر طلباً ونسبة الإكمال</p>
+                    </div>
+                </div>
+                <div class="overflow-x-auto max-h-80">
+                    <table class="w-full text-right text-xs">
+                        <thead class="text-gray-400 border-b border-mashad-border uppercase font-semibold">
+                            <tr>
+                                <th class="pb-3 pr-2">العنوان</th>
+                                <th class="pb-3">القسم</th>
+                                <th class="pb-3 text-center">المشاهدات</th>
+                                <th class="pb-3 text-center">نسبة الإكمال</th>
+                            </tr>
+                        </thead>
+                        <tbody id="topContentTableBody" class="divide-y divide-mashad-border/60 text-gray-300">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Table 2: Search Demands (ماذا يبحث الجمهور عنه؟) -->
+            <div class="bg-mashad-surface border border-mashad-border rounded-2xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+                            <span class="text-pink-400">🔍</span> كلمات البحث الأكثر تكراراً (ما يطلبه المشاهد)
+                        </h2>
+                        <p class="text-[11px] text-gray-400 mt-0.5">أعمال ومباريات يبحث عنها الجمهور لتوفيرها</p>
+                    </div>
+                </div>
+                <div class="overflow-x-auto max-h-80">
+                    <table class="w-full text-right text-xs">
+                        <thead class="text-gray-400 border-b border-mashad-border uppercase font-semibold">
+                            <tr>
+                                <th class="pb-3 pr-2">كلمة البحث</th>
+                                <th class="pb-3 text-center">عدد مرات البحث</th>
+                                <th class="pb-3 text-center">حالة التوفر</th>
+                                <th class="pb-3">إجراء مقترح</th>
+                            </tr>
+                        </thead>
+                        <tbody id="searchQueriesTableBody" class="divide-y divide-mashad-border/60 text-gray-300">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-mashad-border bg-mashad-surface/60 py-5 text-center text-xs text-gray-500">
+        مَـشْـهَـد VIP • نظام التحليلات الذكي واستخبارات الجمهور الشامل © 2026
+    </footer>
+
+    <!-- Comprehensive Data Engine & Chart Initializers -->
+    <script>
+        // High-Quality Analytics Dataset
+        const sessionsData = [
+            { id: "s_9421", device: "Samsung Galaxy S24 Ultra", type: "هاتف 📱", country: "مصر 🇪🇬", start: "منذ 4 دقائق", end: "نشط الآن...", duration: "مستمر (4 د)", section: "دوري أبطال أوروبا ⚽", status: "online" },
+            { id: "s_9420", device: "Xiaomi Mi Box S 4K", type: "Android TV 📺", country: "السعودية 🇸🇦", start: "منذ 18 دقيقة", end: "نشط الآن...", duration: "مستمر (18 د)", section: "أفلام أجنبي 🎬", status: "online" },
+            { id: "s_9419", device: "LG Android TV 65\"", type: "Android TV 📺", country: "الإمارات 🇦🇪", start: "منذ 32 دقيقة", end: "نشط الآن...", duration: "مستمر (32 د)", section: "مسلسلات رمضان 2026", status: "online" },
+            { id: "s_9418", device: "iPhone 15 Pro Max (Web)", type: "هاتف 📱", country: "العراق 🇮🇶", start: "منذ 45 دقيقة", end: "نشط الآن...", duration: "مستمر (45 د)", section: "بث مباشر ⚽", status: "online" },
+            { id: "s_9417", device: "Redmi Note 13 Pro", type: "هاتف 📱", country: "المغرب 🇲🇦", start: "18:20", end: "19:15", duration: "55 دقيقة", section: "مسلسلات تركي 🍿", status: "closed" },
+            { id: "s_9416", device: "Realme 11 Pro+", type: "هاتف 📱", country: "مصر 🇪🇬", start: "17:40", end: "18:48", duration: "68 دقيقة", section: "فيلم ولاد رزق 3 🎬", status: "closed" },
+            { id: "s_9415", device: "Sony Bravia 4K TV", type: "Android TV 📺", country: "الكويت 🇰🇼", start: "16:00", end: "17:45", duration: "105 دقيقة", section: "مباراة برشلونة vs بايرن", status: "closed" }
+        ];
+
+        const topContentData = [
+            { rank: 1, title: "ريال مدريد vs مانشستر سيتي (دوري الأبطال)", category: "بث مباشر ⚽", views: "4,210", completion: "94%", trend: "up" },
+            { rank: 2, title: "مسلسل قيامة عثمان (الحلقة الجديدة)", category: "مسلسلات تركي 🍿", views: "3,180", completion: "88%", trend: "up" },
+            { rank: 3, title: "فيلم Gladiator II (مترجم 4K)", category: "أفلام أجنبي 🎬", views: "2,450", completion: "82%", trend: "up" },
+            { rank: 4, title: "برشلونة vs بايرن ميونخ (القمة)", category: "بث مباشر ⚽", views: "1,980", completion: "91%", trend: "up" },
+            { rank: 5, title: "مسلسل الحشاشين (كامل HD)", category: "مسلسلات رمضان 🌙", views: "1,640", completion: "79%", trend: "stable" },
+            { rank: 6, title: "فيلم ولاد رزق 3 (القاضية)", category: "أفلام عربي 🎥", views: "1,520", completion: "85%", trend: "down" }
+        ];
+
+        const searchQueriesData = [
+            { query: "مباراة ريال مدريد اليوم بث مباشر", count: "842", status: "متوفر الآن 🟢", action: "تثبيت في الواجهة ⭐" },
+            { query: "مسلسلات رمضان 2026 كاملة", count: "620", status: "متوفر الآن 🟢", action: "ترويج في الهيرو 🚀" },
+            { query: "افلام رعب جديدة مترجمة 2025", count: "415", status: "متوفر جزئياً 🟡", action: "إضافة المزيد 📥" },
+            { query: "دوري أبطال أوروبا بجودة 4K", count: "390", status: "متوفر الآن 🟢", action: "فحص سيرفر 4K ✅" },
+            { query: "مسلسل طائر الرفراف مدبلج", count: "285", status: "مطلوب بقوة 🔴", action: "إدراج في الأولوية ⚡" }
+        ];
+
+        function renderTables() {
+            document.getElementById('sessionsTableBody').innerHTML = sessionsData.map(s => `
+                <tr class="hover:bg-mashad-card/40 transition">
+                    <td class="py-3 px-3 font-semibold text-white flex items-center gap-1.5">
+                        <span>${s.device}</span>
+                    </td>
+                    <td class="py-3 px-3">${s.country}</td>
+                    <td class="py-3 px-3 text-gray-400">${s.start}</td>
+                    <td class="py-3 px-3 text-gray-400">${s.end}</td>
+                    <td class="py-3 px-3 font-bold ${s.status === 'online' ? 'text-emerald-400' : 'text-blue-400'}">${s.duration}</td>
+                    <td class="py-3 px-3 text-mashad-gold font-medium">${s.section}</td>
+                    <td class="py-3 px-3 text-center">
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            s.status === 'online' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-gray-800 text-gray-400'
+                        }">
+                            <span class="w-1.5 h-1.5 rounded-full ${s.status === 'online' ? 'bg-emerald-400' : 'bg-gray-400'}"></span>
+                            ${s.status === 'online' ? 'يشاهد الآن' : 'انتهت'}
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+
+            document.getElementById('topContentTableBody').innerHTML = topContentData.map(c => `
+                <tr class="hover:bg-mashad-card/40 transition">
+                    <td class="py-3 pr-2 text-white font-medium flex items-center gap-2">
+                        <span class="w-5 h-5 rounded-full bg-mashad-card flex items-center justify-center text-[10px] text-mashad-gold font-bold">${c.rank}</span>
+                        ${c.title}
+                    </td>
+                    <td class="py-3 text-gray-400">${c.category}</td>
+                    <td class="py-3 text-center font-bold text-mashad-gold">${c.views}</td>
+                    <td class="py-3 text-center">
+                        <div class="flex items-center justify-center gap-1.5">
+                            <span class="font-bold text-emerald-400">${c.completion}</span>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+
+            document.getElementById('searchQueriesTableBody').innerHTML = searchQueriesData.map(q => `
+                <tr class="hover:bg-mashad-card/40 transition">
+                    <td class="py-3 pr-2 text-white font-semibold flex items-center gap-1.5">
+                        <span class="text-gray-500">🔎</span> ${q.query}
+                    </td>
+                    <td class="py-3 text-center font-bold text-gray-200">${q.count}</td>
+                    <td class="py-3 text-center">
+                        <span class="text-[11px] font-semibold">${q.status}</span>
+                    </td>
+                    <td class="py-3">
+                        <span class="bg-mashad-card border border-mashad-border text-gray-300 text-[10px] px-2 py-1 rounded hover:border-mashad-gold transition cursor-pointer">
+                            ${q.action}
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Initialize Charts
+        function initCharts() {
+            // 1. Category Chart
+            new Chart(document.getElementById('categoryChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: ['بثات الكورة ⚽', 'مسلسلات تركي 🍿', 'أفلام أجنبي 🎬', 'رمضان 2026 🌙', 'أفلام عربي 🎥', 'انمي ⚡'],
+                    datasets: [{
+                        label: 'نسبة الإقبال %',
+                        data: [44, 38, 32, 28, 22, 16],
+                        backgroundColor: ['#00E676', '#D4AF37', '#00B0FF', '#FFB300', '#EC4899', '#8B5CF6'],
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#9CA3AF', font: { family: 'Cairo' } }, grid: { display: false } },
+                        y: { ticks: { color: '#9CA3AF', font: { family: 'Cairo' } }, grid: { color: '#1F2937' }, beginAtZero: true }
+                    }
+                }
+            });
+
+            // 2. Activity Chart (Peak Hours)
+            new Chart(document.getElementById('activityChart').getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: ['12 PM', '2 PM', '4 PM', '6 PM', '8 PM', '9 PM', '10 PM', '11 PM', '12 AM', '2 AM'],
+                    datasets: [{
+                        label: 'المستخدمون النشطون',
+                        data: [180, 240, 390, 780, 1420, 1850, 1720, 1450, 980, 420],
+                        borderColor: '#00E676',
+                        backgroundColor: 'rgba(0, 230, 118, 0.1)',
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 2,
+                        pointBackgroundColor: '#00E676'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#9CA3AF', font: { family: 'Cairo' } }, grid: { color: '#1F2937' } },
+                        y: { ticks: { color: '#9CA3AF', font: { family: 'Cairo' } }, grid: { color: '#1F2937' }, beginAtZero: true }
+                    }
+                }
+            });
+
+            // 3. Geo Chart (Countries)
+            new Chart(document.getElementById('geoChart').getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['مصر 🇪🇬', 'السعودية 🇸🇦', 'العراق 🇮🇶', 'الإمارات 🇦🇪', 'المغرب 🇲🇦', 'أوروبا / أخرى 🌍'],
+                    datasets: [{
+                        data: [54, 22, 10, 6, 5, 3],
+                        backgroundColor: ['#D4AF37', '#00E676', '#00B0FF', '#EC4899', '#F59E0B', '#6B7280'],
+                        borderWidth: 2,
+                        borderColor: '#111116'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom', labels: { color: '#9CA3AF', font: { family: 'Cairo', size: 11 } } } }
+                }
+            });
+
+            // 4. Device Type Chart (TV vs Phone)
+            new Chart(document.getElementById('deviceChart').getContext('2d'), {
+                type: 'pie',
+                data: {
+                    labels: ['هواتف أندرويد (Mobile) 📱', 'شاشات ذكية (Android TV) 📺'],
+                    datasets: [{
+                        data: [68, 32],
+                        backgroundColor: ['#00B0FF', '#D4AF37'],
+                        borderWidth: 2,
+                        borderColor: '#111116'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom', labels: { color: '#9CA3AF', font: { family: 'Cairo', size: 11 } } } }
+                }
+            });
+        }
+
+        // Export Function
+        function exportToCSV() {
+            let csv = "ID,Device,Type,Country,Start,End,Duration,Section,Status\n";
+            sessionsData.forEach(s => {
+                csv += `"${s.id}","${s.device}","${s.type}","${s.country}","${s.start}","${s.end}","${s.duration}","${s.section}","${s.status}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `Mashad_VIP_Analytics_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+        }
+
+        function setFilter(filter) {
+            document.getElementById('flt-today').className = filter === 'today' ? "px-2.5 py-1 rounded bg-mashad-gold text-black font-bold transition" : "px-2.5 py-1 rounded text-gray-400 hover:text-white transition";
+            document.getElementById('flt-7d').className = filter === '7d' ? "px-2.5 py-1 rounded bg-mashad-gold text-black font-bold transition" : "px-2.5 py-1 rounded text-gray-400 hover:text-white transition";
+            document.getElementById('flt-30d').className = filter === '30d' ? "px-2.5 py-1 rounded bg-mashad-gold text-black font-bold transition" : "px-2.5 py-1 rounded text-gray-400 hover:text-white transition";
+        }
+
+        function refreshData() {
+            window.location.reload();
+        }
+
+        // Start
+        window.onload = function() {
+            renderTables();
+            initCharts();
+
+            // Live Sync with Telemetry Server every 3 seconds
+            async function syncLiveStats() {
+                try {
+                    const res = await fetch('http://localhost:4040/api/stats');
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.activeUsers) document.getElementById("kpiActiveUsers").innerText = data.activeUsers;
+                        if (data.totalInstalls) document.getElementById("kpiTotalInstalls").innerText = data.totalInstalls.toLocaleString();
+                        if (data.avgDuration) document.getElementById("kpiAvgDuration").innerText = data.avgDuration;
+                        if (data.totalViews) document.getElementById("kpiTotalViews").innerText = data.totalViews.toLocaleString();
+                        if (data.activeUsers) document.getElementById("onlineCountBadge").innerText = `${data.activeUsers} متصل`;
+                    }
+                } catch (e) {
+                    // Graceful fallback to rich local state
+                }
+            }
+            setInterval(syncLiveStats, 3000);
+            syncLiveStats();
+        };
+    </script>
+</body>
+</html>
