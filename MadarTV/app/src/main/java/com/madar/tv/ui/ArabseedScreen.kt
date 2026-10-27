@@ -75,7 +75,8 @@ fun CinemaSection(
     var selectedCategoryPath by rememberSaveable { mutableStateOf("home/") }
     var selectedCategoryTitle by rememberSaveable { mutableStateOf("الرئيسية") }
 
-    var openedItem by rememberSaveable { mutableStateOf<String?>(null) }
+    // Navigation stack: allows Back to return to previous episode/part detail
+    var itemStack by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var openedDetail by rememberSaveable { mutableStateOf<ArabseedDetail?>(null) }
     var searchMode by rememberSaveable { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -85,12 +86,12 @@ fun CinemaSection(
     var currentEpisodeIndex by remember { mutableStateOf(-1) }
     val scope = rememberCoroutineScope()
 
-    val currentItem = remember(openedItem, allItems) {
-        allItems.firstOrNull { it.pageUrl == openedItem }
+    val currentItem = remember(itemStack, allItems) {
+        allItems.firstOrNull { it.pageUrl == itemStack.lastOrNull() }
     }
     val detail = openedDetail
 
-    val isDeep = detail != null || currentItem != null
+    val isDeep = detail != null || itemStack.isNotEmpty()
     LaunchedEffect(isDeep) { onDeepScreen(isDeep) }
 
     Box(Modifier.fillMaxSize().background(MashadColors.Background)) {
@@ -155,7 +156,10 @@ fun CinemaSection(
             currentItem != null -> {
                 MashadDetailScreen(
                     item = currentItem,
-                    onBack = { openedItem = null },
+                    onBack = {
+                        // Pop current from stack; if stack empty -> go home
+                        itemStack = itemStack.dropLast(1)
+                    },
                     onPlay = { d, eps, epIdx ->
                         openedDetail = d
                         activeEpisodes = eps
@@ -163,7 +167,7 @@ fun CinemaSection(
                     },
                     onOpenItem = { newItem ->
                         allItems = (allItems + newItem).distinctBy { it.pageUrl }
-                        openedItem = newItem.pageUrl
+                        itemStack = itemStack + newItem.pageUrl
                     },
                 )
             }
@@ -181,7 +185,7 @@ fun CinemaSection(
                             url = item.pageUrl
                         )
                         allItems = (allItems + item).distinctBy { it.pageUrl }
-                        openedItem = item.pageUrl
+                        itemStack = listOf(item.pageUrl)
                         searchMode = false
                     },
                 )
@@ -212,7 +216,7 @@ fun CinemaSection(
                             url = item.pageUrl
                         )
                         allItems = (allItems + item).distinctBy { it.pageUrl }
-                        openedItem = item.pageUrl
+                        itemStack = listOf(item.pageUrl)
                     },
                 )
             }
