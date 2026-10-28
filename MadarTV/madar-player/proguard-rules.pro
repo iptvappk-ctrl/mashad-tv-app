@@ -1,0 +1,1 @@
+-keep class com.madar.player.CastOptionsProvider { *; }

@@ -2,7 +2,7 @@
 
 > **اسم التطبيق الرسمي:** مشهد (Mashad)  
 > **Package Name:** `com.madar.tv`  
-> **الإصدار:** 0.1.0 — تطبيق Android أصلي، مع تجهيز اختياري لـ Firebase Analytics.
+> **الإصدار:** 0.2.0 — تطبيق Android أصلي، مع مشغّل منفصل داخل المشروع.
 
 ---
 
@@ -17,6 +17,7 @@
 - **لغة البرمجة:** Kotlin 2.2.20 (مع دعم Coroutines و Flow للتعامل مع العمليات غير المتزامنة).
 - **واجهة المستخدم:** Jetpack Compose وMaterial Design 3 بواجهة فاتحة واتجاه RTL.
 - **مشغل الفيديو:** AndroidX Media3 (ExoPlayer) المتخصص في بث تدفقات HLS (`.m3u8`) و DASH (`.mpd`) بكفاءة عالية وبدون تقطيع.
+- **مشغل مشهد المصاحب:** وحدة `:madar-player` مستقلة، مع اختيار مسار الجودة وتوفير البيانات وGoogle Cast؛ يفتحها مشهد من رابط HTTPS.
 - **الشبكات والاتصال:** OkHttp 4 مع إعداد Interceptors مخصصة لتزويد الترويسات المطلوبة وتخطي الحظر.
 - **تحميل الصور والملصقات:** Coil 3 مدمج مع ذاكرة تخزين مؤقت (Caching) فائقة السرعة.
 - **تقليص Release:** R8 وresource shrinking؛ راجع [حدود حماية APK](../DOCUMENTATION/03_SECURITY_OBFUSCATION_V6.md) ولا تضع أسراراً في التطبيق.
@@ -26,21 +27,16 @@
 ## 🏛️ البنية البرمجية والمستودعات (Repositories)
 
 ```text
-com.madar.tv/
-├── core/
-│   ├── X.kt                      # فك ترميز نصوص قديمة مموهة؛ ليست حماية تشفيرية
-│   └── PlayerActivity.kt         # مشغل الفيديو المتكامل عبر AndroidX Media3
-├── data/
-│   ├── ArabseedRepository.kt     # مستودع جلب وفك تشفير سينما عرب سيد وسيرفرات المشاهدة
-│   ├── YacineRepository.kt       # مستودع قنوات وباقات وسيرفرات شبكة ياسين تيفي
-│   ├── FootballRepository.kt     # مستودع جدول ومواعيد ونتائج المباريات الحية
-│   ├── LiveScoreRepository.kt    # مستودع اللحظات المباشرة للدوريات الأوروبية
-│   ├── PublicChannelRepository.kt# مستودع القنوات العامة التلفزيونية المجانية
-│   └── MashadTelemetry.kt        # أحداث Analytics اختيارية ومجمّعة
-└── ui/
-    ├── MainActivity.kt           # النشاط الرئيسي وإدارة التنقل وثيم التطبيق
-    ├── components/               # مكونات واجهة المستخدم (بطاقات، مشغلات، قوائم)
-    └── theme/                    # الثيم والألوان والخطوط الرسمية
+MadarTV/
+├── app/                           # تطبيق مشهد: com.madar.tv
+│   └── src/main/java/com/madar/tv/
+│       ├── core/                  # التحليلات والإشعارات
+│       ├── data/                  # مصادر الأفلام والمسلسلات والقنوات
+│       └── ui/                    # Compose، التنقل، وصفحات العرض
+└── madar-player/                  # المشغل المصاحب: com.madar.player
+    └── src/main/java/com/madar/player/
+        ├── PlayerActivity.kt      # Media3، اختيار الجودة، وزر Google Cast
+        └── CastOptionsProvider.kt # إعداد Google Cast
 ```
 
 ---
@@ -67,6 +63,14 @@ Set-Location "c:\Users\hassa\Desktop\all project\iptv app\MadarTV"
 ./gradlew.bat assembleRelease
 ```
 
+لبناء APK تجريبي للتطبيق والمشغل معًا:
+```powershell
+./gradlew.bat :app:assembleDebug :madar-player:assembleDebug
+```
+
 - ملف الـ APK النهائي يتولد في:
   `app/build/outputs/apk/release/app-release-unsigned.apk`
+- APK المشغل يتولد في `madar-player/build/outputs/apk/{debug,release}/`.
 - لا يوجد نسخ تلقائي إلى سطح المكتب. يتطلب توزيع Release إعداد مفاتيح توقيع مالك التطبيق بشكل مستقل وآمن.
+- المشغل الحالي لم يُنشر بعد؛ صفحة Play Store المهيأة داخل مشهد ستعمل بعد نشر `com.madar.player` فقط.
+- التحديث الداخلي لمشهد مؤجل حاليًا؛ يحتاج قناة تنزيل عامة ومفتاح توقيع ثابت. Play In-App Updates لا ينطبق على تطبيق التثبيت الجانبي.

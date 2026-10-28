@@ -1,5 +1,6 @@
 package com.madar.tv.data
 
+import org.jsoup.nodes.Element
 import java.net.URLDecoder
 
 /** Shared, conservative parsing for episode/season/part labels found in provider pages. */
@@ -71,6 +72,64 @@ internal object SeriesCatalogParser {
         numberPattern = seasonNumberPattern,
         ordinalPattern = seasonOrdinalPattern,
     )
+
+    /**
+     * Reads a season label from the episode link or its nearby DOM container.
+     * Episode URLs often omit the season, while the provider groups links under
+     * containers such as `season-2` or `data-season="2"`.
+     */
+    fun seasonNumberFromElement(element: Element, title: String, url: String): Int? {
+        seasonNumber(title, url)?.let { return it }
+
+        val seasonAttributes = listOf(
+            "data-season-number", "data-season", "data-season_num",
+        )
+        var node: Element? = element
+        var depth = 0
+        while (node != null && depth < 8) {
+            val contextValues = listOf(
+                node.id(), node.className(), node.attr("title"), node.attr("aria-label"),
+                node.attr("data-title"), node.attr("data-name"),
+            ).filter(String::isNotBlank)
+            contextValues.firstNotNullOfOrNull { seasonNumber(it, "") }?.let { return it }
+
+            for (attribute in seasonAttributes) {
+                val value = node.attr(attribute).trim()
+                if (value.isNotBlank()) {
+                    value.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+                    seasonNumber(value, "")?.let { return it }
+                }
+            }
+
+            val childSeasonNumbers = node.children()
+                .filter { child ->
+                    child.tagName() in setOf("h1", "h2", "h3", "h4", "h5", "button")
+                        || child.attr("role").equals("tab", ignoreCase = true)
+                }
+                .take(4)
+                .mapNotNull { seasonNumber(it.text().take(100), "") }
+                .distinct()
+            if (childSeasonNumbers.size == 1) return childSeasonNumbers.single()
+
+            var sibling = node.previousElementSibling()
+            var siblingCount = 0
+            while (sibling != null && siblingCount < 3) {
+                val isSeasonLabel = sibling.tagName() in setOf("h1", "h2", "h3", "h4", "h5", "button")
+                    || sibling.className().contains("season", ignoreCase = true)
+                    || sibling.id().contains("season", ignoreCase = true)
+                if (isSeasonLabel) {
+                    seasonNumber(sibling.text().take(100), "")?.let { return it }
+                }
+                sibling = sibling.previousElementSibling()
+                siblingCount++
+            }
+
+            node = node.parent()
+            depth++
+        }
+
+        return null
+    }
 
     fun partNumber(title: String, url: String): Int? = extractLabeledNumber(
         title = title,

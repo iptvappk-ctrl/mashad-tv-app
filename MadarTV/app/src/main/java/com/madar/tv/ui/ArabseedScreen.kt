@@ -5,6 +5,8 @@ package com.madar.tv.ui
 import android.annotation.SuppressLint
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 
 import android.view.ViewGroup
 
@@ -136,6 +138,21 @@ import kotlinx.coroutines.withContext
 
 
 
+private fun adjacentEpisodeIndex(
+    episodes: List<ArabseedEpisode>,
+    currentIndex: Int,
+    direction: Int,
+): Int? {
+    if (direction != -1 && direction != 1) return null
+    val current = episodes.getOrNull(currentIndex) ?: return null
+    val candidateIndex = currentIndex + direction
+    val candidate = episodes.getOrNull(candidateIndex) ?: return null
+    return candidateIndex.takeIf {
+        candidate.seasonNumber == current.seasonNumber && candidate.number == current.number + direction
+    }
+}
+
+
 @Composable
 
 fun CinemaSection(
@@ -226,15 +243,14 @@ fun CinemaSection(
 
                     onBack = { openedDetail = null },
 
-                    hasPrev = currentEpisodeIndex > 0,
+                    hasPrev = adjacentEpisodeIndex(activeEpisodes, currentEpisodeIndex, -1) != null,
 
-                    hasNext = currentEpisodeIndex in 0 until activeEpisodes.size - 1,
+                    hasNext = adjacentEpisodeIndex(activeEpisodes, currentEpisodeIndex, 1) != null,
 
                     onPrev = {
 
-                        if (currentEpisodeIndex > 0) {
-
-                            val prevIdx = currentEpisodeIndex - 1
+                        val prevIdx = adjacentEpisodeIndex(activeEpisodes, currentEpisodeIndex, -1)
+                        if (prevIdx != null) {
 
                             val prevEp = activeEpisodes[prevIdx]
 
@@ -285,9 +301,8 @@ fun CinemaSection(
 
                     onNext = {
 
-                        if (currentEpisodeIndex in 0 until activeEpisodes.size - 1) {
-
-                            val nextIdx = currentEpisodeIndex + 1
+                        val nextIdx = adjacentEpisodeIndex(activeEpisodes, currentEpisodeIndex, 1)
+                        if (nextIdx != null) {
 
                             val nextEp = activeEpisodes[nextIdx]
 
@@ -368,7 +383,10 @@ fun CinemaSection(
 
                     onOpenItem = { newItem ->
 
-                        allItems = (allItems + newItem).distinctBy { it.pageUrl }
+                        val normalizedNewUrl = SeriesCatalogParser.normalizedUrl(newItem.pageUrl)
+                        allItems = allItems.filterNot {
+                            SeriesCatalogParser.normalizedUrl(it.pageUrl) == normalizedNewUrl
+                        } + newItem
 
                         itemStack = itemStack + newItem.pageUrl
 
@@ -514,7 +532,7 @@ private fun MashadMainScreen(
 
     var page by remember(currentCategoryPath) { mutableStateOf(1) }
 
-    var items by remember(currentCategoryPath) { mutableStateOf(emptyList<ArabseedItem>()) }
+    var items by remember(currentCategoryPath, selectedTab) { mutableStateOf(emptyList<ArabseedItem>()) }
 
     var loading by remember(currentCategoryPath, page) { mutableStateOf(true) }
 
@@ -526,7 +544,7 @@ private fun MashadMainScreen(
 
     // Auto-updating live movies ticker: re-fetch in background every 4 minutes
 
-    LaunchedEffect(currentCategoryPath) {
+    LaunchedEffect(currentCategoryPath, selectedTab) {
 
         while (true) {
 
@@ -534,15 +552,30 @@ private fun MashadMainScreen(
 
             try {
 
-                val liveLatest = withContext(Dispatchers.IO) {
-
-                    ArabseedRepository.fetchCategory(currentCategoryPath, 1)
-
+                val liveLatest = async(Dispatchers.IO) {
+                    ArabseedRepository.fetchCategory(currentCategoryPath, 1, forceRefresh = true)
                 }
+                val providerLatest = async(Dispatchers.IO) {
+                    when (selectedTab) {
+                        "movies" -> MultiProviderRepository.fetchMoviesAll(1, forceRefresh = true)
+                        "series" -> MultiProviderRepository.fetchSeriesAll(1, forceRefresh = true)
+                        "home" -> MultiProviderRepository.fetchCatalogAll(1, forceRefresh = true)
+                        else -> emptyList()
+                    }
+                }
+                val latestSourceItems = liveLatest.await()
+                val latestProviderItems = providerLatest.await()
 
-                if (liveLatest.isNotEmpty()) {
+                if (latestSourceItems.isNotEmpty() || latestProviderItems.isNotEmpty()) {
 
-                    items = (liveLatest + items).distinctBy { it.pageUrl }
+                    items = MultiProviderRepository.mergeCatalogItems(
+                        latestProviderItems + latestSourceItems + items,
+                        expectedType = when (selectedTab) {
+                            "movies" -> ArabseedType.MOVIE
+                            "series" -> ArabseedType.SERIES
+                            else -> null
+                        },
+                    )
 
                 }
 
@@ -556,7 +589,7 @@ private fun MashadMainScreen(
 
     // Live Fetch Movies for Current Category
 
-    LaunchedEffect(currentCategoryPath, page, reloadKey) {
+    LaunchedEffect(currentCategoryPath, selectedTab, page, reloadKey) {
 
         error = null
 
@@ -566,11 +599,33 @@ private fun MashadMainScreen(
 
             val fetched = withContext(Dispatchers.IO) {
 
-                ArabseedRepository.fetchCategory(currentCategoryPath, page, forceRefresh = reloadKey > 0)
+                val sourceJob = async(Dispatchers.IO) {
+                    ArabseedRepository.fetchCategory(
+                        currentCategoryPath,
+                        page,
+                        forceRefresh = reloadKey > 0,
+                    )
+                }
+                val providerJob = async(Dispatchers.IO) {
+                    when (selectedTab) {
+                        "movies" -> MultiProviderRepository.fetchMoviesAll(page, forceRefresh = reloadKey > 0)
+                        "series" -> MultiProviderRepository.fetchSeriesAll(page, forceRefresh = reloadKey > 0)
+                        "home" -> MultiProviderRepository.fetchCatalogAll(page, forceRefresh = reloadKey > 0)
+                        else -> emptyList()
+                    }
+                }
+                val sourceItems = sourceJob.await()
+                val providerItems = providerJob.await()
+                val expectedType = when (selectedTab) {
+                    "movies" -> ArabseedType.MOVIE
+                    "series" -> ArabseedType.SERIES
+                    else -> null
+                }
+                MultiProviderRepository.mergeCatalogItems(sourceItems + providerItems, expectedType)
 
             }
 
-            items = if (page == 1) fetched else (items + fetched).distinctBy { it.pageUrl }
+            items = if (page == 1) fetched else MultiProviderRepository.mergeCatalogItems(items + fetched)
 
         } catch (e: Exception) {
 
@@ -623,6 +678,7 @@ private fun MashadMainScreen(
             onRefresh = {
 
                 ArabseedRepository.clearListingCache()
+                MultiProviderRepository.clearCatalogCache()
 
                 reloadKey++
 
@@ -1663,6 +1719,15 @@ private fun MashadDetailScreen(
     var loadingRecommendations by remember(item.pageUrl) { mutableStateOf(true) }
 
 
+    fun episodeItem(episode: ArabseedEpisode): ArabseedItem = item.copy(
+        id = episode.pageUrl.trimEnd('/').substringAfterLast('/'),
+        title = episode.title,
+        arabicTitle = episode.title,
+        pageUrl = episode.pageUrl,
+        parentSeriesTitle = item.parentSeriesTitle?.takeIf(String::isNotBlank) ?: item.title,
+        parentSeriesPageUrl = item.parentSeriesPageUrl?.takeIf(String::isNotBlank) ?: item.pageUrl,
+    )
+
 
     LaunchedEffect(item.pageUrl) {
 
@@ -1686,15 +1751,19 @@ private fun MashadDetailScreen(
 
             try {
 
-                val list = if (item.type == ArabseedType.SERIES) {
-
-                    ArabseedRepository.fetchSeries(1).ifEmpty { MultiProviderRepository.fetchSeriesAll(1) }
-
-                } else {
-
-                    ArabseedRepository.fetchMovies(1).ifEmpty { MultiProviderRepository.fetchMoviesAll(1) }
-
+                val expectedType = item.type
+                val sourceJob = async {
+                    if (expectedType == ArabseedType.SERIES) ArabseedRepository.fetchSeries(1)
+                    else ArabseedRepository.fetchMovies(1)
                 }
+                val providerJob = async {
+                    if (expectedType == ArabseedType.SERIES) MultiProviderRepository.fetchSeriesAll(1)
+                    else MultiProviderRepository.fetchMoviesAll(1)
+                }
+                val list = MultiProviderRepository.mergeCatalogItems(
+                    sourceJob.await() + providerJob.await(),
+                    expectedType,
+                )
 
                 recommendations = list.filter { it.pageUrl != item.pageUrl && !it.posterUrl.isNullOrBlank() }.take(12)
 
@@ -1767,10 +1836,18 @@ private fun MashadDetailScreen(
         try {
 
             val bundle = withContext(Dispatchers.IO) {
-                if (item.providerName == "عرب سيد") {
-                    ArabseedRepository.fetchSeasonsAndEpisodes(item)
+                val catalogItem = if (!item.parentSeriesPageUrl.isNullOrBlank()) {
+                    item.copy(
+                        title = item.parentSeriesTitle?.takeIf(String::isNotBlank) ?: item.title,
+                        pageUrl = item.parentSeriesPageUrl,
+                    )
                 } else {
-                    MultiProviderRepository.fetchSeasonsAndEpisodes(item)
+                    item
+                }
+                if (item.providerName == "عرب سيد") {
+                    ArabseedRepository.fetchSeasonsAndEpisodes(catalogItem)
+                } else {
+                    MultiProviderRepository.fetchSeasonsAndEpisodes(catalogItem)
                 }
             }
 
@@ -1841,9 +1918,13 @@ private fun MashadDetailScreen(
         }
     }
 
-    val hasPrevEp = currentEpIdx > 0
+    val previousEpisodeIndex = adjacentEpisodeIndex(currentEpisodes, currentEpIdx, -1)
 
-    val hasNextEp = currentEpIdx in 0 until (currentEpisodes.size - 1)
+    val nextEpisodeIndex = adjacentEpisodeIndex(currentEpisodes, currentEpIdx, 1)
+
+    val hasPrevEp = previousEpisodeIndex != null
+
+    val hasNextEp = nextEpisodeIndex != null
 
 
 
@@ -1873,7 +1954,8 @@ private fun MashadDetailScreen(
 
             Text(
 
-                item.title, color = MashadColors.TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                item.parentSeriesTitle?.takeIf(String::isNotBlank) ?: item.title,
+                color = MashadColors.TextWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold,
 
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
 
@@ -1927,7 +2009,18 @@ private fun MashadDetailScreen(
 
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
 
-                            Text(item.title, color = MashadColors.TextWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                item.parentSeriesTitle?.takeIf(String::isNotBlank) ?: item.title,
+                                color = MashadColors.TextWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                                maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            )
+                            if (!item.parentSeriesTitle.isNullOrBlank() && item.title != item.parentSeriesTitle) {
+                                Text(
+                                    item.title,
+                                    color = MashadColors.TextMuted, fontSize = 12.sp,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            }
 
                             Text(
 
@@ -2483,7 +2576,7 @@ private fun MashadDetailScreen(
 
                                     if (hasPrevEp) {
 
-                                        val prevEp = currentEpisodes[currentEpIdx - 1]
+                                        val prevEp = currentEpisodes[previousEpisodeIndex!!]
 
                                         Row(
 
@@ -2495,24 +2588,7 @@ private fun MashadDetailScreen(
 
                                                 .clickable {
 
-                                                    val epItem = ArabseedItem(
-
-                                                        id = prevEp.pageUrl.trimEnd('/').substringAfterLast('/'),
-
-                                                        title = prevEp.title, arabicTitle = prevEp.title,
-
-                                                        posterUrl = item.posterUrl, year = item.year,
-
-                                                        quality = item.quality, rating = item.rating,
-
-                                                        type = ArabseedType.SERIES, pageUrl = prevEp.pageUrl,
-
-                                                        category = item.category,
-                                                        providerName = item.providerName,
-
-                                                    )
-
-                                                    onOpenItem?.invoke(epItem)
+                                                    onOpenItem?.invoke(episodeItem(prevEp))
 
                                                 }
 
@@ -2538,7 +2614,7 @@ private fun MashadDetailScreen(
 
                                     if (hasNextEp) {
 
-                                        val nextEp = currentEpisodes[currentEpIdx + 1]
+                                        val nextEp = currentEpisodes[nextEpisodeIndex!!]
 
                                         Row(
 
@@ -2548,24 +2624,7 @@ private fun MashadDetailScreen(
 
                                                 .clickable {
 
-                                                    val epItem = ArabseedItem(
-
-                                                        id = nextEp.pageUrl.trimEnd('/').substringAfterLast('/'),
-
-                                                        title = nextEp.title, arabicTitle = nextEp.title,
-
-                                                        posterUrl = item.posterUrl, year = item.year,
-
-                                                        quality = item.quality, rating = item.rating,
-
-                                                        type = ArabseedType.SERIES, pageUrl = nextEp.pageUrl,
-
-                                                        category = item.category,
-                                                        providerName = item.providerName,
-
-                                                    )
-
-                                                    onOpenItem?.invoke(epItem)
+                                                    onOpenItem?.invoke(episodeItem(nextEp))
 
                                                 }
 
@@ -2626,28 +2685,7 @@ private fun MashadDetailScreen(
 
                                                     .clickable {
 
-                                                        val epItem = ArabseedItem(
-
-                                                            id = ep.pageUrl.trimEnd('/').substringAfterLast('/'),
-
-                                                            title = ep.title,
-
-                                                            arabicTitle = ep.title,
-
-                                                            posterUrl = item.posterUrl,
-
-                                                            year = item.year, quality = item.quality, rating = item.rating,
-
-                                                            type = ArabseedType.SERIES,
-
-                                                            pageUrl = ep.pageUrl,
-
-                                                            category = item.category,
-                                                            providerName = item.providerName,
-
-                                                        )
-
-                                                        onOpenItem?.invoke(epItem)
+                                                        onOpenItem?.invoke(episodeItem(ep))
 
                                                     },
 
@@ -2983,6 +3021,13 @@ private fun MashadPlayerScreen(
 
     }
 
+    LaunchedEffect(resolvedStreamUrl) {
+        val stream = resolvedStreamUrl
+        if (stream?.startsWith("https://", ignoreCase = true) == true) {
+            openMadarPlayer(context, stream, detail.item.title)
+        }
+    }
+
 
 
     Box(
@@ -3017,30 +3062,26 @@ private fun MashadPlayerScreen(
 
                     CircularProgressIndicator(color = MashadColors.Gold)
 
-                    Text("جاري تشغيل البث بأقصى سرعة...", color = MashadColors.GoldLight, fontSize = 12.sp)
+                    Text("جاري تجهيز التشغيل...", color = MashadColors.GoldLight, fontSize = 12.sp)
 
                 }
 
             }
 
+        } else if (resolvedStreamUrl?.startsWith("https://", ignoreCase = true) == true) {
+
+            // HTTPS links are handed to the companion player to avoid starting a second stream here.
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("تم فتح المشغل المصاحب", color = MashadColors.GoldLight, fontSize = 14.sp)
+            }
+
         } else if (resolvedStreamUrl != null) {
 
-            // 🚀 Native ExoPlayer: 100% ad-free, instant, ultra-fast!
-
             NativeStreamPlayer(
-
                 streamUrl = resolvedStreamUrl!!,
-
                 contentTitle = detail.item.title,
-
                 contentType = if (detail.item.type == ArabseedType.SERIES) "series" else "movie",
-
-                onError = {
-
-                    resolvedStreamUrl = null
-
-                }
-
+                onError = { resolvedStreamUrl = null },
             )
 
         } else {
@@ -3549,8 +3590,56 @@ private fun MashadPlayerScreen(
 
         }
 
+        if (controlsVisible && resolvedStreamUrl?.startsWith("https://", ignoreCase = true) == true) {
+            androidx.compose.material3.Surface(
+                modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                onClick = { openMadarPlayer(context, resolvedStreamUrl!!, detail.item.title) },
+                color = Color(0xDD252B3D),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text(
+                    "فتح في مشغل مشهد",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp),
+                )
+            }
+        }
+
     }
 
+}
+
+private fun openMadarPlayer(context: Context, streamUrl: String, title: String) {
+    val packageName = "com.madar.player"
+    val playerIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+    if (playerIntent != null) {
+        playerIntent.putExtra("com.madar.player.extra.STREAM_URL", streamUrl)
+        playerIntent.putExtra("com.madar.player.extra.TITLE", title)
+        playerIntent.putExtra(
+            "com.madar.player.extra.USER_AGENT",
+            ArabseedRepository.getPlayerUserAgent(),
+        )
+        playerIntent.putExtra(
+            "com.madar.player.extra.REFERER",
+            ArabseedRepository.getPlayerHeaders().values.firstOrNull().orEmpty(),
+        )
+        context.startActivity(playerIntent)
+        return
+    }
+
+    val playStoreUri = Uri.parse("market://details?id=" + packageName)
+    runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, playStoreUri))
+    }.onFailure {
+        context.startActivity(
+            Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://play.google.com/store/apps/details?id=" + packageName),
+            ),
+        )
+    }
 }
 
 
@@ -3814,9 +3903,11 @@ private fun MashadSearchScreen(
 
             com.madar.tv.core.MashadTelemetry.trackSearchQuery(trimmed)
 
-            val fetched = withContext(Dispatchers.IO) { ArabseedRepository.search(trimmed) }
-
-            results = fetched
+            val sourceResults = async(Dispatchers.IO) { ArabseedRepository.search(trimmed) }
+            val providerResults = async(Dispatchers.IO) { MultiProviderRepository.searchAll(trimmed) }
+            results = MultiProviderRepository.mergeCatalogItems(
+                sourceResults.await() + providerResults.await(),
+            )
 
         } catch (e: Exception) {
 

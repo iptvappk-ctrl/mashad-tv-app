@@ -32,7 +32,10 @@ class ContentSyncWorker(
 
     private suspend fun checkNewMovies() {
         val seenUrls   = FollowRepository.getSeenMovieUrls(context)
-        val freshItems = MultiProviderRepository.fetchMoviesAll(page = 1)
+        val freshItems = MultiProviderRepository.mergeCatalogItems(
+            ArabseedRepository.fetchMovies(page = 1) + MultiProviderRepository.fetchMoviesAll(page = 1),
+            ArabseedType.MOVIE,
+        )
 
         if (seenUrls.isEmpty()) {
             // First run — just save and don't notify
@@ -67,7 +70,10 @@ class ContentSyncWorker(
 
     private suspend fun checkNewSeries() {
         val seenUrls   = FollowRepository.getSeenSeriesUrls(context)
-        val freshItems = MultiProviderRepository.fetchSeriesAll(page = 1)
+        val freshItems = MultiProviderRepository.mergeCatalogItems(
+            ArabseedRepository.fetchSeries(page = 1) + MultiProviderRepository.fetchSeriesAll(page = 1),
+            ArabseedType.SERIES,
+        )
 
         if (seenUrls.isEmpty()) {
             FollowRepository.saveSeenSeries(context, freshItems.map { it.pageUrl }.toSet())

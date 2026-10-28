@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "MadarTV"
 include(":app")
+include(":madar-player")

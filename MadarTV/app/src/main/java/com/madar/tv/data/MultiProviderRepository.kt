@@ -11,6 +11,8 @@ import okhttp3.Request
 import org.jsoup.Jsoup
 
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorCompletionService
 
 import java.util.concurrent.Executors
 
@@ -675,170 +677,122 @@ object MultiProviderRepository {
 
 
 
-    fun fetchMoviesAll(page: Int = 1): List<ArabseedItem> {
+    fun fetchMoviesAll(page: Int = 1, forceRefresh: Boolean = false): List<ArabseedItem> =
+        fetchCatalogAll(page, ArabseedType.MOVIE, forceRefresh)
 
-        val key = "movies:$page"
+    fun fetchSeriesAll(page: Int = 1, forceRefresh: Boolean = false): List<ArabseedItem> =
+        fetchCatalogAll(page, ArabseedType.SERIES, forceRefresh)
 
+    /** Fetch both media types from every configured provider in parallel. */
+    fun fetchCatalogAll(page: Int = 1, forceRefresh: Boolean = false): List<ArabseedItem> =
+        fetchCatalogAll(page, type = null, forceRefresh = forceRefresh)
+
+    private fun fetchCatalogAll(
+        page: Int,
+        type: ArabseedType?,
+        forceRefresh: Boolean,
+    ): List<ArabseedItem> {
+        val cacheType = when (type) {
+            ArabseedType.MOVIE -> "movies"
+            ArabseedType.SERIES -> "series"
+            null -> "catalog"
+        }
+        val key = "$cacheType:$page"
         val now = System.currentTimeMillis()
-
-        listCache[key]?.let { (t, l) -> if (now - t < LIST_TTL && l.isNotEmpty()) return l }
-
-
-
-        val futures = mutableListOf<Future<List<ArabseedItem>>>()
-
-
-
-        for (p in PROVIDERS.filter { it.enabled }) {
-
-            futures += pool.submit<List<ArabseedItem>> {
-
-                try {
-
-                    val url = "${p.baseUrl}${p.moviesPath.replace("{page}", page.toString())}"
-
-                    parseItems(fetchHtml(url, "${p.baseUrl}/"), p, ArabseedType.MOVIE)
-
-                } catch (_: Exception) { emptyList() }
-
+        if (!forceRefresh) {
+            listCache[key]?.let { (savedAt, items) ->
+                if (now - savedAt < LIST_TTL && items.isNotEmpty()) return items
             }
-
         }
 
-
-
-        val all = mutableListOf<ArabseedItem>()
-
-        for (f in futures) {
-
-            try { all += f.get(2000, TimeUnit.MILLISECONDS) } catch (_: Exception) {}
-
+        val types = if (type == null) {
+            listOf(ArabseedType.MOVIE, ArabseedType.SERIES)
+        } else {
+            listOf(type)
+        }
+        val tasks = mutableListOf<() -> List<ArabseedItem>>()
+        for (provider in PROVIDERS.filter { it.enabled }) {
+            for (catalogType in types) {
+                tasks += {
+                    try {
+                        val path = if (catalogType == ArabseedType.MOVIE) provider.moviesPath else provider.seriesPath
+                        val url = "${provider.baseUrl}${path.replace("{page}", page.toString())}"
+                        parseItems(fetchHtml(url, "${provider.baseUrl}/"), provider, catalogType)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                }
+            }
         }
 
-
-
-        val deduped = deduplicateItems(all)
+        val combined = collectParallel(tasks)
+        val deduped = deduplicateItems(combined, expectedType = type)
         val enriched = enrichPostersFromSource(deduped)
-
-        if (enriched.isNotEmpty()) listCache[key] = now to enriched
-
+        if (enriched.isNotEmpty()) listCache[key] = System.currentTimeMillis() to enriched
         return enriched
-
     }
 
-
-
-    fun fetchSeriesAll(page: Int = 1): List<ArabseedItem> {
-
-        val key = "series:$page"
-
-        val now = System.currentTimeMillis()
-
-        listCache[key]?.let { (t, l) -> if (now - t < LIST_TTL && l.isNotEmpty()) return l }
-
-
-
-        val futures = mutableListOf<Future<List<ArabseedItem>>>()
-
-
-
-        for (p in PROVIDERS.filter { it.enabled }) {
-
-            futures += pool.submit<List<ArabseedItem>> {
-
-                try {
-
-                    val url = "${p.baseUrl}${p.seriesPath.replace("{page}", page.toString())}"
-
-                    parseItems(fetchHtml(url, "${p.baseUrl}/"), p, ArabseedType.SERIES)
-
-                } catch (_: Exception) { emptyList() }
-
-            }
-
-        }
-
-
-
-        val all = mutableListOf<ArabseedItem>()
-
-        for (f in futures) {
-
-            try { all += f.get(2000, TimeUnit.MILLISECONDS) } catch (_: Exception) {}
-
-        }
-
-
-
-        val deduped = deduplicateItems(all)
-        val enriched = enrichPostersFromSource(deduped)
-
-        if (enriched.isNotEmpty()) listCache[key] = now to enriched
-
-        return enriched
-
+    /** Clear catalog caches so a manual refresh reaches providers again. */
+    fun clearCatalogCache() {
+        listCache.clear()
+        searchCache.clear()
     }
 
-
-
+    private fun collectParallel(tasks: List<() -> List<ArabseedItem>>): List<ArabseedItem> {
+        if (tasks.isEmpty()) return emptyList()
+        val completion = ExecutorCompletionService<List<ArabseedItem>>(pool)
+        val submitted = tasks.map { task -> completion.submit(Callable { task() }) }
+        val results = mutableListOf<ArabseedItem>()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8)
+        for (index in tasks.indices) {
+            val remaining = deadline - System.nanoTime()
+            if (remaining <= 0L) break
+            val finished = try {
+                completion.poll(remaining, TimeUnit.NANOSECONDS) ?: break
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            }
+            try {
+                results += finished.get()
+            } catch (_: Exception) {
+                // A failing source does not discard results from the others.
+            }
+        }
+        submitted.filterNot { it.isDone }.forEach { it.cancel(true) }
+        return results
+    }
     fun searchAll(query: String): List<ArabseedItem> {
-
         val q = query.trim()
-
         if (q.isBlank()) return emptyList()
 
-
-
         val key = "search:${q.lowercase()}"
-
         val now = System.currentTimeMillis()
+        searchCache[key]?.let { (savedAt, items) ->
+            if (now - savedAt < SEARCH_TTL && items.isNotEmpty()) return items
+        }
 
-        searchCache[key]?.let { (t, l) -> if (now - t < SEARCH_TTL && l.isNotEmpty()) return l }
-
-
-
-        val futures = mutableListOf<Future<List<ArabseedItem>>>()
-
-
-
-        for (p in PROVIDERS.filter { it.enabled }) {
-
-            futures += pool.submit<List<ArabseedItem>> {
-
+        val tasks = PROVIDERS.filter { it.enabled }.map { provider ->
+            {
                 try {
-
-                    val url = "${p.baseUrl}${p.searchPath.replace("{q}", java.net.URLEncoder.encode(q, "UTF-8"))}"
-
-                    parseItems(fetchHtml(url, "${p.baseUrl}/"), p, ArabseedType.MOVIE)
-
-                } catch (_: Exception) { emptyList() }
-
+                    val encodedQuery = java.net.URLEncoder.encode(q, "UTF-8")
+                    val url = "${provider.baseUrl}${provider.searchPath.replace("{q}", encodedQuery)}"
+                    parseItems(fetchHtml(url, "${provider.baseUrl}/"), provider, ArabseedType.MOVIE)
+                } catch (_: Exception) {
+                    emptyList()
+                }
             }
-
         }
-
-
-
-        val all = mutableListOf<ArabseedItem>()
-
-        for (f in futures) {
-
-            try { all += f.get(2000, TimeUnit.MILLISECONDS) } catch (_: Exception) {}
-
-        }
-
-
-
-        val deduped = deduplicateItems(all)
-
-        if (deduped.isNotEmpty()) searchCache[key] = now to deduped
-
-        return deduped
-
+        val results = deduplicateItems(collectParallel(tasks))
+        if (results.isNotEmpty()) searchCache[key] = System.currentTimeMillis() to results
+        return results
     }
 
-
-
+    /** Merge results from different catalog sources and return one playable row per work. */
+    fun mergeCatalogItems(
+        items: List<ArabseedItem>,
+        expectedType: ArabseedType? = null,
+    ): List<ArabseedItem> = deduplicateItems(items, expectedType)
     // ══════════════════════════════════════════════════════════════════
 
     // STORY, SERVERS, DETAIL & SEASONS FOR ALL PROVIDERS
@@ -1207,7 +1161,7 @@ object MultiProviderRepository {
             val doc = Jsoup.parse(html, baseUrl)
             doc.select("footer, script, style").remove()
 
-            val rawEpisodes = mutableListOf<Pair<String, String>>()
+            val rawEpisodes = mutableListOf<Triple<String, String, Int?>>()
             val selectors = listOf(
                 ".episodes-list a", ".EpisodesList li a", ".eplister li a",
                 ".eps-list li a", ".eps a", "a.episode__item", ".episode__item a", "a.ep-item",
@@ -1215,12 +1169,12 @@ object MultiProviderRepository {
                 "a[href*='episode']", "a[href*='ep-']", ".postDiv a[href*='serie']"
             )
 
-            fun collectEpisodes(d: org.jsoup.nodes.Document): List<Pair<String, String>> {
-                var best = mutableListOf<Pair<String, String>>()
+            fun collectEpisodes(d: org.jsoup.nodes.Document): List<Triple<String, String, Int?>> {
+                var best = mutableListOf<Triple<String, String, Int?>>()
                 for (sel in selectors) {
                     val els = d.select(sel)
                     if (els.isNotEmpty()) {
-                        val current = mutableListOf<Pair<String, String>>()
+                        val current = mutableListOf<Triple<String, String, Int?>>()
                         for (el in els) {
                             val href = el.attr("abs:href").ifBlank { el.attr("href") }
                             val txt = el.text().trim().ifBlank { el.attr("title").trim() }
@@ -1237,16 +1191,21 @@ object MultiProviderRepository {
                                 url = href,
                                 allowNumericTitle = hasEpisodeListParent,
                             )
+                            val seasonNumber = SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
                             if (href.startsWith("http") && episodeNumber != null) {
-                                if (current.none {
-                                        SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(href)
-                                    }
-                                ) {
-                                    current += txt to href
+                                val currentIndex = current.indexOfFirst {
+                                    SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(href)
+                                }
+                                if (currentIndex < 0) {
+                                    current += Triple(txt, href, seasonNumber)
+                                } else if (current[currentIndex].third == null && seasonNumber != null) {
+                                    current[currentIndex] = Triple(txt, href, seasonNumber)
                                 }
                             }
                         }
-                        if (current.size > best.size) {
+                        if (current.size > best.size ||
+                            (current.size == best.size && current.count { it.third != null } > best.count { it.third != null })
+                        ) {
                             best = current
                         }
                     }
@@ -1256,7 +1215,14 @@ object MultiProviderRepository {
 
             val docEps = collectEpisodes(doc)
             for (ep in docEps) {
-                if (rawEpisodes.none { it.second == ep.second }) rawEpisodes += ep
+                val existingIndex = rawEpisodes.indexOfFirst {
+                    SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(ep.second)
+                }
+                if (existingIndex < 0) {
+                    rawEpisodes += ep
+                } else if (rawEpisodes[existingIndex].third == null && ep.third != null) {
+                    rawEpisodes[existingIndex] = ep
+                }
             }
 
             // If few episodes found, search for breadcrumbs / parent series page
@@ -1290,9 +1256,11 @@ object MultiProviderRepository {
             }
 
             val defaultSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) ?: 1
-            val numberedEpisodes = rawEpisodes.mapNotNull { (title, href) ->
+            val numberedEpisodes = rawEpisodes.mapNotNull { (title, href, domSeasonNumber) ->
                 val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: return@mapNotNull null
-                val seasonNumber = SeriesCatalogParser.seasonNumber(title, href) ?: defaultSeasonNumber
+                val seasonNumber = domSeasonNumber
+                    ?: SeriesCatalogParser.seasonNumber(title, href)
+                    ?: defaultSeasonNumber
                 Triple(seasonNumber, episodeNumber, href)
             }.distinctBy { (_, _, href) -> SeriesCatalogParser.normalizedUrl(href) }
             val seasons = numberedEpisodes.groupBy { it.first }.toSortedMap().map { (seasonNumber, rows) ->
@@ -1367,62 +1335,106 @@ object MultiProviderRepository {
 
     // ══════════════════════════════════════════════════════════════════
 
-    private fun normalizeTitle(title: String): String =
-
-        title.lowercase()
-
-            .replace(Regex("[أإآ]"), "ا")
-
+    private fun normalizeTitle(title: String, type: ArabseedType): String {
+        var normalized = SeriesCatalogParser.normalizeDigits(title)
+            .lowercase()
+            .replace(Regex("[أإآٱ]"), "ا")
             .replace("ة", "ه")
-
             .replace("ى", "ي")
+            .replace(Regex("[\\u064B-\\u065F\\u0670\\u0640]"), "")
 
-            .replace(Regex("[\\u064B-\\u0652]"), "")
-
-            .replace(Regex("""(?i)\b(فيلم|مسلسل|مترجم|مدبلج|كامل|hd|fhd|4k|1080p|720p)\b"""), "")
-
-            .replace(Regex("""[^\w\s\u0600-\u06FF]"""), " ")
-
-            .replace(Regex("""\s+"""), " ")
-
-            .trim()
-
-
-
-    private fun deduplicateItems(items: List<ArabseedItem>): List<ArabseedItem> {
-
-        val seen = LinkedHashMap<String, ArabseedItem>()
-
-        for (item in items) {
-
-            val norm = normalizeTitle(item.title)
-
-            if (norm.length < 2) continue
-
-            if (!seen.containsKey(norm)) {
-
-                seen[norm] = item
-
-            } else {
-
-                val existing = seen[norm]!!
-
-                if ((existing.posterUrl == null || !existing.posterUrl.startsWith("http"))
-
-                    && item.posterUrl?.startsWith("http") == true) {
-
-                    seen[norm] = item
-
-                }
-
-            }
-
+        if (type == ArabseedType.SERIES) {
+            normalized = normalized.replace(
+                Regex("""(?i)\s+(?:الموسم|موسم|season|الحلقة|حلقة|episode|ep)\s*.*$"""),
+                " ",
+            )
         }
 
-        return seen.values.toList()
-
+        return normalized
+            .replace(Regex("""(?i)\b(فيلم|مسلسل|مترجم|مدبلج|كامل|مشاهدة|اون لاين|web[- ]?dl|bluray|hdtv|hdrip|hd|fhd|4k|2160p|1080p|720p|480p)\b"""), " ")
+            .replace(Regex("""(?<!\d)(?:19|20)\d{2}(?!\d)"""), " ")
+            .replace(Regex("""[^\w\s\u0600-\u06FF]"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
     }
 
+    private fun titleKeys(item: ArabseedItem): Set<String> =
+        listOf(item.title, item.arabicTitle)
+            .map { normalizeTitle(it, item.type) }
+            .filter { it.length >= 2 }
+            .toSet()
+
+    private fun releaseYear(item: ArabseedItem): String =
+        listOf(item.year, item.title, item.arabicTitle)
+            .firstNotNullOfOrNull { Regex("""(?<!\d)(?:19|20)\d{2}(?!\d)""").find(it)?.value }
+            .orEmpty()
+
+    private fun hasArabic(value: String): Boolean = value.any { it in '\u0600'..'\u06FF' }
+
+    private fun hasUsablePoster(item: ArabseedItem): Boolean =
+        item.posterUrl?.startsWith("http", ignoreCase = true) == true
+
+    private fun catalogMetadataScore(item: ArabseedItem): Int {
+        var score = 0
+        if (hasUsablePoster(item)) score += 5
+        if (releaseYear(item).isNotBlank()) score += 2
+        if (item.quality.isNotBlank() && !item.quality.equals("HD", ignoreCase = true)) score += 1
+        if (item.rating.isNotBlank()) score += 1
+        if (item.overview.isNotBlank() && PROVIDERS.none { it.name == item.overview }) score += 1
+        return score
+    }
+
+    private fun mergeDuplicate(existing: ArabseedItem, incoming: ArabseedItem): ArabseedItem {
+        val preferred = if (catalogMetadataScore(incoming) > catalogMetadataScore(existing)) incoming else existing
+        val other = if (preferred === existing) incoming else existing
+        val arabicTitle = listOf(preferred.arabicTitle, other.arabicTitle, preferred.title, other.title)
+            .firstOrNull { it.isNotBlank() && hasArabic(it) }
+            ?: preferred.arabicTitle.ifBlank { other.arabicTitle }
+        val overview = listOf(preferred.overview, other.overview)
+            .firstOrNull { text -> text.isNotBlank() && PROVIDERS.none { it.name == text } }
+            .orEmpty()
+
+        return preferred.copy(
+            title = listOf(preferred.title, other.title).firstOrNull { it.isNotBlank() && hasArabic(it) }
+                ?: preferred.title.ifBlank { other.title },
+            arabicTitle = arabicTitle,
+            posterUrl = preferred.posterUrl?.takeIf { it.startsWith("http", ignoreCase = true) }
+                ?: other.posterUrl?.takeIf { it.startsWith("http", ignoreCase = true) },
+            year = preferred.year.ifBlank { other.year },
+            quality = preferred.quality.takeIf { it.isNotBlank() && !it.equals("HD", ignoreCase = true) }
+                ?: other.quality.ifBlank { preferred.quality },
+            rating = preferred.rating.ifBlank { other.rating },
+            overview = overview,
+        )
+    }
+
+    private fun deduplicateItems(
+        items: List<ArabseedItem>,
+        expectedType: ArabseedType? = null,
+    ): List<ArabseedItem> {
+        val unique = mutableListOf<ArabseedItem>()
+        for (item in items) {
+            if (expectedType != null && item.type != expectedType) continue
+            if (item.title.isBlank() || !item.pageUrl.startsWith("http", ignoreCase = true)) continue
+            if (SeriesCatalogParser.isEpisode(item.title, item.pageUrl)
+                || SeriesCatalogParser.isEpisode(item.arabicTitle, item.pageUrl)
+            ) continue
+
+            val keys = titleKeys(item)
+            if (keys.isEmpty()) continue
+            val year = releaseYear(item)
+            val duplicateIndex = unique.indexOfFirst { current ->
+                if (current.type != item.type) return@indexOfFirst false
+                if (current.pageUrl == item.pageUrl) return@indexOfFirst true
+                val currentYear = releaseYear(current)
+                val yearsCompatible = currentYear.isBlank() || year.isBlank() || currentYear == year
+                yearsCompatible && titleKeys(current).any(keys::contains)
+            }
+            if (duplicateIndex < 0) unique += item
+            else unique[duplicateIndex] = mergeDuplicate(unique[duplicateIndex], item)
+        }
+        return unique
+    }
     // Fetch og:image from the source page
     private fun fetchOgImage(pageUrl: String): String? {
         return try {

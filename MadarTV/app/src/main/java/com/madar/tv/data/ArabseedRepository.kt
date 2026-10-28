@@ -612,7 +612,7 @@ object ArabseedRepository {
 
     
 
-                val rawEpisodes = mutableListOf<Pair<String, String>>()
+                val rawEpisodes = mutableListOf<Triple<String, String, Int?>>()
                 val episodeSelectors = listOf(
                     "a.episode__item", ".episode__item a",
                     "a[href*='%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9']",
@@ -622,12 +622,12 @@ object ArabseedRepository {
                     ".eps-list li a", ".eps a", "a.ep-item", ".episodios li a", ".eplist a"
                 )
 
-                fun collectEpisodes(d: org.jsoup.nodes.Document): List<Pair<String, String>> {
-                    var best = mutableListOf<Pair<String, String>>()
+                fun collectEpisodes(d: org.jsoup.nodes.Document): List<Triple<String, String, Int?>> {
+                    var best = mutableListOf<Triple<String, String, Int?>>()
                     for (sel in episodeSelectors) {
                         val els = d.select(sel)
                         if (els.isNotEmpty()) {
-                            val current = mutableListOf<Pair<String, String>>()
+                            val current = mutableListOf<Triple<String, String, Int?>>()
                             for (el in els) {
                                 val href = el.attr("abs:href").ifBlank { el.attr("href") }
                                 val txt = el.text().trim().ifBlank { el.attr("title").trim() }
@@ -647,15 +647,22 @@ object ArabseedRepository {
                                     url = href,
                                     allowNumericTitle = hasEpisodeListParent,
                                 )
+                                val seasonNumber = SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
 
-                                if (episodeNumber != null && current.none {
+                                if (episodeNumber != null) {
+                                    val currentIndex = current.indexOfFirst {
                                         SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(href)
                                     }
-                                ) {
-                                    current += txt to href
+                                    if (currentIndex < 0) {
+                                        current += Triple(txt, href, seasonNumber)
+                                    } else if (current[currentIndex].third == null && seasonNumber != null) {
+                                        current[currentIndex] = Triple(txt, href, seasonNumber)
+                                    }
                                 }
                             }
-                            if (current.size > best.size) {
+                            if (current.size > best.size ||
+                                (current.size == best.size && current.count { it.third != null } > best.count { it.third != null })
+                            ) {
                                 best = current
                             }
                         }
@@ -665,7 +672,14 @@ object ArabseedRepository {
 
                 val docEps = collectEpisodes(doc)
                 for (ep in docEps) {
-                    if (rawEpisodes.none { it.second == ep.second }) rawEpisodes += ep
+                    val existingIndex = rawEpisodes.indexOfFirst {
+                        SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(ep.second)
+                    }
+                    if (existingIndex < 0) {
+                        rawEpisodes += ep
+                    } else if (rawEpisodes[existingIndex].third == null && ep.third != null) {
+                        rawEpisodes[existingIndex] = ep
+                    }
                 }
 
                 // If few episodes found, search for breadcrumbs / parent series page
@@ -704,9 +718,11 @@ object ArabseedRepository {
                 val seasons = mutableListOf<ArabseedSeason>()
                 if (rawEpisodes.isNotEmpty()) {
                     val defaultSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) ?: 1
-                    val numberedEpisodes = rawEpisodes.mapNotNull { (title, url) ->
+                    val numberedEpisodes = rawEpisodes.mapNotNull { (title, url, domSeasonNumber) ->
                         val episodeNumber = SeriesCatalogParser.episodeNumber(title, url) ?: return@mapNotNull null
-                        val seasonNumber = SeriesCatalogParser.seasonNumber(title, url) ?: defaultSeasonNumber
+                        val seasonNumber = domSeasonNumber
+                            ?: SeriesCatalogParser.seasonNumber(title, url)
+                            ?: defaultSeasonNumber
                         Triple(seasonNumber, episodeNumber, url)
                     }.distinctBy { (_, _, url) -> SeriesCatalogParser.normalizedUrl(url) }
 

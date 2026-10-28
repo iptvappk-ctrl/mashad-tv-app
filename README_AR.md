@@ -6,7 +6,7 @@
 
 | المسار | المكوّن | التقنية |
 | --- | --- | --- |
-| `MadarTV/` | تطبيق Android | Kotlin، Jetpack Compose، Media3، Gradle |
+| `MadarTV/` | تطبيق مشهد ومشغل Android مستقل | Kotlin، Jetpack Compose، Media3، Google Cast، Gradle |
 | `web/` | موقع الويب وواجهاته ومسارات API | Next.js، React، TypeScript، Firebase Analytics اختياري |
 | `dashboard/` | لوحة Analytics عربية محلية | Node.js، Google Analytics Data API |
 | `DOCUMENTATION/` | التوثيق الفني والأمني | أدلة بناء وربط وتحليلات وحدود الحماية |
@@ -36,8 +36,10 @@ npm start
 
 ```powershell
 Set-Location "C:\Users\hassa\Desktop\all project\iptv app\MadarTV"
-.\gradlew.bat :app:assembleDebug
+.\gradlew.bat :app:assembleDebug :madar-player:assembleDebug
 ```
+
+للتجربة الجانبية ثبّت APK المشغل `com.madar.player` ثم APK مشهد `com.madar.tv`. التحديث الداخلي لمشهد مؤجل حاليًا.
 
 إعداد Firebase Android موجود محلياً في `MadarTV/app/google-services.json`، والملف مستبعد من Git. البناء الحالي يمر عبر Google Services plugin.
 

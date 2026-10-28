@@ -17,6 +17,7 @@
 | [06_WEB_DASHBOARD_AND_DEPLOYMENT.md](./06_WEB_DASHBOARD_AND_DEPLOYMENT.md) | **منصة الويب ولوحة تحليلات GA4** | تشغيل الموقع ولوحة Node.js المتصلة بـ Google Analytics Data API وإعداد اعتماد القراءة والبناء. |
 | [07_MULTI_PROVIDER_STREAMING_AGGREGATOR.md](./07_MULTI_PROVIDER_STREAMING_AGGREGATOR.md) | **معمارية مجمّع البث الموحد (16 موقعاً عربياً)** | توثيق هندسي شامل لـ 16 موقعاً سينمائياً (أكوام، فاصل، وي سيما، قصة عشق، لودي نت، برستيج...) مع خوارزميات البحث المتوازي وفك السيرفرات. |
 | [08_FIREBASE_ANALYTICS_AND_DASHBOARD.md](./08_FIREBASE_ANALYTICS_AND_DASHBOARD.md) | **إعداد Firebase Analytics ولوحة الإدارة** | أحداث Android والويب، إعداد التطبيقات، ربط GA4 Data API، وقيود الإحصاءات الحقيقية. |
+| [09_MADAR_PLAYER_CAST_AND_UPDATES.md](./09_MADAR_PLAYER_CAST_AND_UPDATES.md) | **مشغل مشهد والجودة وCast والتحديثات الجانبية** | وحدة المشغل المستقلة، اختيار الجودة، Cast، إشعارات المحتوى، ومتطلبات نشر التحديث. |
 
 ---
 
