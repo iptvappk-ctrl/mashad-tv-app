@@ -1415,10 +1415,14 @@ object MultiProviderRepository {
             val latest = entries.maxWithOrNull(
                 compareBy<Pair<Int, ArabseedItem>> {
                     SeriesCatalogParser.seasonNumber(it.second.title, it.second.pageUrl)
+                        ?: SeriesCatalogParser.seasonNumber(it.second.arabicTitle, it.second.pageUrl)
                         ?: SeriesCatalogParser.partNumber(it.second.title, it.second.pageUrl)
+                        ?: SeriesCatalogParser.partNumber(it.second.arabicTitle, it.second.pageUrl)
                         ?: 1
                 }.thenBy {
-                    SeriesCatalogParser.partNumber(it.second.title, it.second.pageUrl) ?: 1
+                    SeriesCatalogParser.partNumber(it.second.title, it.second.pageUrl)
+                        ?: SeriesCatalogParser.partNumber(it.second.arabicTitle, it.second.pageUrl)
+                        ?: 1
                 }.thenBy {
                     SeriesCatalogParser.episodeNumber(it.second.title, it.second.pageUrl)
                         ?: SeriesCatalogParser.episodeNumber(it.second.arabicTitle, it.second.pageUrl)
