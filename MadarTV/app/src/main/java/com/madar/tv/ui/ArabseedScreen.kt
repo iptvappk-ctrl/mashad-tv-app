@@ -148,7 +148,8 @@ private fun adjacentEpisodeIndex(
     val candidateIndex = currentIndex + direction
     val candidate = episodes.getOrNull(candidateIndex) ?: return null
     return candidateIndex.takeIf {
-        candidate.seasonNumber == current.seasonNumber && candidate.number == current.number + direction
+        candidate.seasonNumber == current.seasonNumber
+            && if (direction < 0) candidate.number < current.number else candidate.number > current.number
     }
 }
 
@@ -287,6 +288,8 @@ fun CinemaSection(
 
                                         pageUrl = prevEp.pageUrl,
 
+                                        latestEpisodeLabel = "الموسم ${prevEp.seasonNumber} · الحلقة ${prevEp.number}",
+
                                     )
 
                                     openedDetail = ArabseedDetail(newItem, srvs, preRes)
@@ -338,6 +341,8 @@ fun CinemaSection(
                                         arabicTitle = nextEp.title,
 
                                         pageUrl = nextEp.pageUrl,
+
+                                        latestEpisodeLabel = "الموسم ${nextEp.seasonNumber} · الحلقة ${nextEp.number}",
 
                                     )
 
@@ -1725,8 +1730,9 @@ private fun MashadDetailScreen(
         title = episode.title,
         arabicTitle = episode.title,
         pageUrl = episode.pageUrl,
+        latestEpisodeLabel = "الموسم ${episode.seasonNumber} · الحلقة ${episode.number}",
         parentSeriesTitle = item.parentSeriesTitle?.takeIf(String::isNotBlank) ?: item.title,
-        parentSeriesPageUrl = item.parentSeriesPageUrl?.takeIf(String::isNotBlank) ?: item.pageUrl,
+        parentSeriesPageUrl = item.parentSeriesPageUrl?.takeIf(String::isNotBlank),
     )
 
 
@@ -1860,6 +1866,7 @@ private fun MashadDetailScreen(
                 }
             }
             val seasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
             val titleSeasonIndex = seasonNumber?.let { number ->
                 bundle.seasons.indexOfFirst { it.number == number }
             } ?: -1
@@ -1908,7 +1915,9 @@ private fun MashadDetailScreen(
             urlIdx
         } else {
             val numFromTitle = SeriesCatalogParser.episodeNumber(item.title, item.pageUrl)
+                ?: SeriesCatalogParser.episodeNumber(item.latestEpisodeLabel, "")
             val itemSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
             val selectedSeasonMatchesItem = itemSeasonNumber == currentSeason?.number
                 || (itemSeasonNumber == null && seasons.size == 1)
             if (numFromTitle != null && selectedSeasonMatchesItem) {

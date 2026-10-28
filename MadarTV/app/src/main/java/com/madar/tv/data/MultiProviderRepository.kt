@@ -1227,44 +1227,69 @@ object MultiProviderRepository {
                 }
             }
 
-            // If few episodes found, search for breadcrumbs / parent series page
-            if (rawEpisodes.size <= 4) {
+            val currentPage = SeriesCatalogParser.normalizedUrl(item.pageUrl)
+            val isEpisodePage = SeriesCatalogParser.isEpisode(item.title, item.pageUrl)
+                || SeriesCatalogParser.isEpisode(item.latestEpisodeLabel, item.pageUrl)
+
+            // Episode cards may not have a canonical series URL. Resolve their breadcrumb
+            // parent even when the episode page exposes several links: those links can span
+            // multiple seasons and must not be treated as one season's episode list.
+            if (rawEpisodes.size <= 4 || isEpisodePage) {
                 val parentSelectors = listOf(
                     "a[href*='/series/']", "a[href*='/season/']", "a[href*='الموسم']",
                     ".breadcrumb a", "ol.breadcrumb a", ".entry-breadcrumb a", "nav a"
                 )
-                for (sel in parentSelectors) {
-                    val links = doc.select(sel)
-                    val parent = links.lastOrNull { el ->
+                val parents = parentSelectors.flatMap { selector ->
+                    doc.select(selector).mapNotNull { el ->
                         val href = el.attr("abs:href").ifBlank { el.attr("href") }
                         val txt = el.text().trim()
-                        href.startsWith("http") && href != item.pageUrl
+                        val valid = href.startsWith("http") && href != item.pageUrl
                             && !txt.contains("الرئيسية") && !txt.contains("home", ignoreCase = true)
                             && !SeriesCatalogParser.isEpisode(txt, href)
+                        if (valid) href to txt else null
                     }
-                    if (parent != null) {
-                        val parentHref = parent.attr("abs:href").ifBlank { parent.attr("href") }
-                        try {
-                            val parentDoc = Jsoup.parse(fetchHtml(parentHref, baseUrl), baseUrl)
-                            val parentEps = collectEpisodes(parentDoc)
-                            if (parentEps.size > rawEpisodes.size) {
-                                rawEpisodes.clear()
-                                rawEpisodes.addAll(parentEps)
-                                break
-                            }
-                        } catch (_: Exception) {}
+                }.distinctBy { SeriesCatalogParser.normalizedUrl(it.first) }.take(8)
+
+                for ((parentHref, _) in parents) {
+                    try {
+                        val parentDoc = Jsoup.parse(fetchHtml(parentHref, baseUrl), baseUrl)
+                        val parentEps = collectEpisodes(parentDoc)
+                        val parentContainsCurrentEpisode = parentEps.any {
+                            SeriesCatalogParser.normalizedUrl(it.second) == currentPage
+                        }
+                        val shouldUseParent = parentEps.isNotEmpty() && (
+                            if (isEpisodePage) parentContainsCurrentEpisode
+                            else parentEps.size > rawEpisodes.size
+                        )
+                        if (shouldUseParent) {
+                            rawEpisodes.clear()
+                            rawEpisodes.addAll(parentEps)
+                            break
+                        }
+                    } catch (_: Exception) {
                     }
                 }
             }
 
-            val defaultSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) ?: 1
-            val numberedEpisodes = rawEpisodes.mapNotNull { (title, href, domSeasonNumber) ->
+            val expectedSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+            val parsedEpisodes = rawEpisodes.mapNotNull { (title, href, domSeasonNumber) ->
                 val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: return@mapNotNull null
                 val seasonNumber = domSeasonNumber
                     ?: SeriesCatalogParser.seasonNumber(title, href)
-                    ?: defaultSeasonNumber
                 Triple(seasonNumber, episodeNumber, href)
             }.distinctBy { (_, _, href) -> SeriesCatalogParser.normalizedUrl(href) }
+            val labelledSeasons = parsedEpisodes.mapNotNull { it.first }.distinct()
+            val inferredSeasonNumber = when {
+                labelledSeasons.size > 1 -> null
+                labelledSeasons.size == 1 -> labelledSeasons.single()
+                expectedSeasonNumber != null -> expectedSeasonNumber
+                !isEpisodePage -> 1
+                else -> null
+            }
+            val numberedEpisodes = parsedEpisodes.mapNotNull { (seasonNumber, episodeNumber, href) ->
+                (seasonNumber ?: inferredSeasonNumber)?.let { Triple(it, episodeNumber, href) }
+            }
             val seasons = numberedEpisodes.groupBy { it.first }.toSortedMap().map { (seasonNumber, rows) ->
                 val episodes = rows
                     .distinctBy { it.second }
@@ -1438,7 +1463,7 @@ object MultiProviderRepository {
             val episode = SeriesCatalogParser.episodeNumber(selected.title, selected.pageUrl)
                 ?: SeriesCatalogParser.episodeNumber(selected.arabicTitle, selected.pageUrl)
             val label = when {
-                episode != null && season != null && season > 1 -> "الموسم $season · الحلقة $episode"
+                episode != null && season != null -> "الموسم $season · الحلقة $episode"
                 episode != null -> "أحدث حلقة · $episode"
                 season != null && season > 1 -> "أحدث موسم · $season"
                 part != null && part > 1 -> "الجزء $part"
