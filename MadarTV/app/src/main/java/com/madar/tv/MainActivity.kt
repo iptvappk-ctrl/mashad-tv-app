@@ -30,7 +30,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         MashadTelemetry.init(this)
-        MashadTelemetry.onAppOpen()
 
         // Create notification channels
         NotificationHelper.createChannels(this)
@@ -100,13 +99,4 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    override fun onStart() {
-        super.onStart()
-        MashadTelemetry.onAppOpen()
-    }
-
-    override fun onStop() {
-        super.onStop()
-        MashadTelemetry.onAppClose()
-    }
 }

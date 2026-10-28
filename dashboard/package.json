@@ -1,0 +1,17 @@
+{
+  "name": "dashboard",
+  "version": "1.0.0",
+  "description": "Local, real Google Analytics reporting dashboard for MadarTV",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@google-analytics/data": "^7.3.0",
+    "dotenv": "^16.6.1"
+  }
+}

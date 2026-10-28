@@ -11,7 +11,7 @@ echo ================================================================
 echo.
 echo  [1] تشغيل خادم التحليلات والرصد (Port 4040) وفتح اللوحة
 echo  [2] تشغيل منصة الويب السينمائية (Port 3000)
-echo  [3] بناء تطبيق الأندرويد المشفر (Release APK)
+echo  [3] بناء تطبيق الأندرويد (Release APK مع R8)
 echo  [4] فتح لوحة التحكم في المتصفح مباشرة
 echo  [5] تشغيل كل الخدمات معاً (السيرفر + منصة الويب + اللوحة)
 echo  [0] خروج
@@ -29,14 +29,14 @@ goto menu
 
 :start_dashboard
 cls
-echo [!] جاري تشغيل خادم التحليلات...
+echo [!] جاري تشغيل لوحة تحليلات GA4...
 netstat -ano | findstr ":4040" >nul
 if %errorlevel% neq 0 (
-    start "Mashad Analytics Server" /min node "%~dp0dashboard\server.js"
+    start "Mashad Analytics Server" /min /D "%~dp0dashboard" cmd /c npm start
     timeout /t 2 /nobreak >nul
 )
-start "" "http://localhost:4040"
-echo [✓] الخادم يعمل الآن على: http://localhost:4040
+start "" "http://127.0.0.1:4040"
+echo [✓] اللوحة تعمل الآن على: http://127.0.0.1:4040
 pause
 goto menu
 
@@ -53,7 +53,7 @@ goto menu
 
 :build_apk
 cls
-echo [!] جاري بناء وتشفير تطبيق الأندرويد (Release APK)...
+echo [!] جاري بناء تطبيق الأندرويد (Release APK)...
 cd /d "%~dp0MadarTV"
 call gradlew.bat assembleRelease
 if %errorlevel% equ 0 (
@@ -62,7 +62,7 @@ if %errorlevel% equ 0 (
     ) else (
         copy /y "app\build\outputs\apk\release\app-release-unsigned.apk" "%USERPROFILE%\Desktop\Mashad.apk" >nul
     )
-    echo [✓] تم البناء بنجاح! تم نسخ APK إلى سطح المكتب باسم Mashad.apk
+    echo [✓] تم البناء ونسخ الملف إلى سطح المكتب باسم Mashad.apk. قد يكون غير موقّع.
 ) else (
     echo [X] فشل البناء! يرجى مراجعة سجل الأخطاء أعلاه.
 )
@@ -70,7 +70,7 @@ pause
 goto menu
 
 :open_dash
-start "" "http://localhost:4040"
+start "" "http://127.0.0.1:4040"
 goto menu
 
 :start_all
@@ -78,7 +78,7 @@ cls
 echo [!] جاري تشغيل كافة الخدمات...
 netstat -ano | findstr ":4040" >nul
 if %errorlevel% neq 0 (
-    start "Mashad Analytics Server" /min node "%~dp0dashboard\server.js"
+    start "Mashad Analytics Server" /min /D "%~dp0dashboard" cmd /c npm start
     timeout /t 2 /nobreak >nul
 )
 cd /d "%~dp0web"

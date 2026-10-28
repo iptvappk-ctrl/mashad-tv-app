@@ -15,6 +15,10 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Madar">
 
+        <meta-data
+            android:name="google_analytics_adid_collection_enabled"
+            android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout"

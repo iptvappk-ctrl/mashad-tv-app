@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
+import { trackPlaybackError, trackPlaybackStarted } from "@/lib/analytics";
 import {
   Play,
   Pause,
@@ -51,6 +52,7 @@ export default function PlayerModal({
   const progressBarRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const hideControlsTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastPlaybackReported = useRef<string | null>(null);
 
   const [currentIndex, setCurrentIndex] = useState(activeStreamIndex);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -93,6 +95,10 @@ export default function PlayerModal({
   const isStreamLive =
     !isMovieOrSeries &&
     (isLive || title.includes("مباراة") || title.includes("beIN") || title.includes("SSC"));
+
+  useEffect(() => {
+    lastPlaybackReported.current = null;
+  }, [currentStream?.url]);
 
   const isEmbed = Boolean(
     currentStream?.url &&
@@ -470,7 +476,14 @@ export default function PlayerModal({
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
             onWaiting={() => setIsBuffering(true)}
-            onPlaying={() => setIsBuffering(false)}
+            onPlaying={() => {
+              setIsBuffering(false);
+              if (lastPlaybackReported.current !== currentStream?.url) {
+                lastPlaybackReported.current = currentStream?.url || "unknown";
+                trackPlaybackStarted(title, isStreamLive);
+              }
+            }}
+            onError={() => trackPlaybackError(isStreamLive)}
             onTimeUpdate={handleTimeUpdate}
             onClick={handlePlayPause}
             className="w-full h-full object-contain cursor-pointer"

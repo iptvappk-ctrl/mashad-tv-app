@@ -1,297 +1,219 @@
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
+"use strict";
 
-const PORT = 4040;
-const DATA_FILE = path.join(__dirname, 'telemetry_data.json');
+const http = require("node:http");
+const fs = require("node:fs");
+const path = require("node:path");
+const { BetaAnalyticsDataClient } = require("@google-analytics/data");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
-// Initial state / DB
-let db = {
-    installs: [],
-    sessions: [],
-    views: [],
-    searches: {},
-    activePings: {}, // deviceId -> timestamp
-};
+const HOST = process.env.DASHBOARD_HOST || "127.0.0.1";
+const PORT = Number(process.env.DASHBOARD_PORT || 4040);
+const HTML_PATH = path.join(__dirname, "index.html");
+const RANGES = new Set(["7d", "30d", "90d"]);
+const CACHE_MS = 60_000;
+let analyticsClient;
+const statsCache = new Map();
 
-// Load existing data if available
-if (fs.existsSync(DATA_FILE)) {
-    try {
-        db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-        if (!db.activePings) db.activePings = {};
-    } catch (e) {
-        console.error("Error loading DB, using defaults", e);
-    }
+function getAnalyticsClient() {
+  if (!analyticsClient) analyticsClient = new BetaAnalyticsDataClient();
+  return analyticsClient;
 }
 
-// Seed initial demo data if empty so the dashboard is immediately rich and informative
-if (db.installs.length === 0) {
-    db.installs = [
-        { id: "m_s24u_01", device: "Samsung Galaxy S24 Ultra", type: "هاتف 📱", country: "مصر 🇪🇬", time: Date.now() - 3600000 },
-        { id: "m_mibox_02", device: "Xiaomi Mi Box S 4K", type: "Android TV 📺", country: "السعودية 🇸🇦", time: Date.now() - 7200000 },
-        { id: "m_lg_03", device: "LG Android TV 65\"", type: "Android TV 📺", country: "الإمارات 🇦🇪", time: Date.now() - 10800000 },
-        { id: "m_redmi_04", device: "Redmi Note 13 Pro", type: "هاتف 📱", country: "المغرب 🇲🇦", time: Date.now() - 14400000 },
-        { id: "m_realme_05", device: "Realme 11 Pro+", type: "هاتف 📱", country: "مصر 🇪🇬", time: Date.now() - 18000000 },
-        { id: "m_sony_06", device: "Sony Bravia 4K TV", type: "Android TV 📺", country: "العراق 🇮🇶", time: Date.now() - 21600000 },
-    ];
-    db.sessions = [
-        { id: "s_01", device: "Samsung Galaxy S24 Ultra", type: "هاتف 📱", country: "مصر 🇪🇬", start: Date.now() - 300000, end: null, duration: 300, section: "دوري أبطال أوروبا ⚽", status: "online" },
-        { id: "s_02", device: "Xiaomi Mi Box S 4K", type: "Android TV 📺", country: "السعودية 🇸🇦", start: Date.now() - 900000, end: null, duration: 900, section: "أفلام أجنبي 🎬", status: "online" },
-        { id: "s_03", device: "Realme 11 Pro+", type: "هاتف 📱", country: "مصر 🇪🇬", start: Date.now() - 3600000, end: Date.now() - 600000, duration: 3000, section: "بثات الكورة ⚽", status: "closed" },
-        { id: "s_04", device: "LG Android TV 65\"", type: "Android TV 📺", country: "الإمارات 🇦🇪", start: Date.now() - 7200000, end: Date.now() - 3600000, duration: 3600, section: "مسلسلات رمضان 2026", status: "closed" },
-    ];
-    db.views = [
-        { title: "ريال مدريد vs مانشستر سيتي (دوري الأبطال)", category: "بث مباشر ⚽", count: 4210, completion: "94%" },
-        { title: "مسلسل قيامة عثمان (الحلقة الجديدة)", category: "مسلسلات تركي 🍿", count: 3180, completion: "88%" },
-        { title: "فيلم Gladiator II (مترجم 4K)", category: "أفلام أجنبي 🎬", count: 2450, completion: "82%" },
-        { title: "برشلونة vs بايرن ميونخ", category: "بث مباشر ⚽", count: 1980, completion: "91%" },
-        { title: "مسلسل الحشاشين (رمضان)", category: "مسلسلات رمضان", count: 1640, completion: "79%" },
-        { title: "فيلم ولاد رزق 3 (القاضية)", category: "أفلام عربي 🎬", count: 1520, completion: "85%" },
-    ];
-    db.searches = {
-        "مباراة ريال مدريد اليوم بث مباشر": 842,
-        "مسلسلات رمضان 2026": 620,
-        "افلام رعب جديدة مترجمة": 415,
-        "دوري أبطال أوروبا": 390,
-        "مسلسل طائر الرفراف مدبلج": 285
+function value(row, index) {
+  return row?.metricValues?.[index]?.value ?? "0";
+}
+
+function dimension(row, index) {
+  return row?.dimensionValues?.[index]?.value ?? "";
+}
+
+function int(valueToParse) {
+  const parsed = Number.parseInt(valueToParse ?? "0", 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function rangeDates(range) {
+  if (range === "7d") return { startDate: "6daysAgo", endDate: "today" };
+  if (range === "90d") return { startDate: "89daysAgo", endDate: "today" };
+  return { startDate: "29daysAgo", endDate: "today" };
+}
+
+function eventFilter(eventName) {
+  return {
+    filter: {
+      fieldName: "eventName",
+      stringFilter: { matchType: "EXACT", value: eventName },
+    },
+  };
+}
+
+async function report(client, property, request) {
+  const [result] = await client.runReport({ property: `properties/${property}`, ...request });
+  return result;
+}
+
+async function realtime(client, property) {
+  const [result] = await client.runRealtimeReport({
+    property: `properties/${property}`,
+    metrics: [{ name: "activeUsers" }],
+  });
+  return int(value(result.rows?.[0], 0));
+}
+
+async function buildStats(range) {
+  const property = (process.env.GA_PROPERTY_ID || "").trim();
+  if (!property) {
+    return {
+      configured: false,
+      setup: "missing_property",
+      message: "أضف GA_PROPERTY_ID إلى إعدادات لوحة الإدارة لبدء قراءة تقارير Analytics.",
     };
-    db.activePings["m_s24u_01"] = Date.now();
-    db.activePings["m_mibox_02"] = Date.now();
+  }
+
+  const client = getAnalyticsClient();
+  const dates = rangeDates(range);
+  const base = { dateRanges: [dates] };
+
+  const [live, summary, events, daily, platforms, devices, countries, topContent] = await Promise.all([
+    realtime(client, property),
+    report(client, property, { ...base, metrics: [{ name: "activeUsers" }, { name: "sessions" }, { name: "eventCount" }] }),
+    report(client, property, {
+      ...base,
+      dimensions: [{ name: "eventName" }],
+      metrics: [{ name: "eventCount" }],
+      limit: 100,
+    }),
+    report(client, property, {
+      ...base,
+      dimensions: [{ name: "date" }],
+      metrics: [{ name: "sessions" }, { name: "eventCount" }],
+      orderBys: [{ dimension: { dimensionName: "date" } }],
+      limit: 100,
+    }),
+    report(client, property, {
+      ...base,
+      dimensions: [{ name: "platform" }],
+      metrics: [{ name: "activeUsers" }],
+      limit: 10,
+    }),
+    report(client, property, {
+      ...base,
+      dimensions: [{ name: "deviceCategory" }],
+      metrics: [{ name: "activeUsers" }],
+      limit: 10,
+    }),
+    report(client, property, {
+      ...base,
+      dimensions: [{ name: "country" }],
+      metrics: [{ name: "activeUsers" }],
+      orderBys: [{ metric: { metricName: "activeUsers" }, desc: true }],
+      limit: 8,
+    }),
+    report(client, property, {
+      ...base,
+      dimensions: [{ name: "customEvent:content_title" }],
+      metrics: [{ name: "eventCount" }],
+      dimensionFilter: eventFilter("playback_start"),
+      orderBys: [{ metric: { metricName: "eventCount" }, desc: true }],
+      limit: 8,
+    }).catch((error) => {
+      // Custom dimensions must be registered in the GA4 property before they can be queried.
+      console.warn("Analytics custom content dimension is not ready:", error.message);
+      return null;
+    }),
+  ]);
+
+  const eventCounts = Object.fromEntries(
+    (events.rows || []).map((row) => [dimension(row, 0), int(value(row, 0))]),
+  );
+
+  return {
+    configured: true,
+    range,
+    fetchedAt: new Date().toISOString(),
+    activeUsersNow: live,
+    activeUsers: int(value(summary.rows?.[0], 0)),
+    sessions: int(value(summary.rows?.[0], 1)),
+    eventCount: int(value(summary.rows?.[0], 2)),
+    firstOpens: eventCounts.first_open || 0,
+    contentOpens: eventCounts.content_open || 0,
+    searches: eventCounts.search || 0,
+    playbackStarts: eventCounts.playback_start || 0,
+    playbackErrors: eventCounts.playback_error || 0,
+    eventCounts,
+    daily: (daily.rows || []).map((row) => ({ date: dimension(row, 0), sessions: int(value(row, 0)), events: int(value(row, 1)) })),
+    platforms: (platforms.rows || []).map((row) => ({ name: dimension(row, 0), users: int(value(row, 0)) })),
+    devices: (devices.rows || []).map((row) => ({ name: dimension(row, 0), users: int(value(row, 0)) })),
+    countries: (countries.rows || []).map((row) => ({ name: dimension(row, 0), users: int(value(row, 0)) })),
+    topContentAvailable: Boolean(topContent),
+    topContent: (topContent?.rows || []).map((row) => ({ title: dimension(row, 0), plays: int(value(row, 0)) })),
+    privacy: {
+      searchTermsCollected: false,
+      userLevelSessionListAvailable: false,
+      firstOpenIsDownloadCount: false,
+    },
+  };
 }
 
-function saveDB() {
-    try {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2), 'utf8');
-    } catch (e) {
-        console.error("Save DB failed", e);
-    }
-}
-
-function parseBody(req) {
-    return new Promise((resolve, reject) => {
-        let body = '';
-        req.on('data', chunk => body += chunk);
-        req.on('end', () => {
-            try {
-                resolve(body ? JSON.parse(body) : {});
-            } catch (e) {
-                resolve({});
-            }
-        });
-        req.on('error', reject);
-    });
+function sendJson(res, status, body) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+  });
+  res.end(JSON.stringify(body));
 }
 
 const server = http.createServer(async (req, res) => {
-    // Enable CORS
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  const url = new URL(req.url || "/", `http://${req.headers.host || `${HOST}:${PORT}`}`);
 
-    if (req.method === 'OPTIONS') {
-        res.writeHead(200);
-        return res.end();
+  if (req.method !== "GET") return sendJson(res, 405, { error: "Method not allowed" });
+
+  if (url.pathname === "/" || url.pathname === "/index.html") {
+    if (!fs.existsSync(HTML_PATH)) return sendJson(res, 404, { error: "Dashboard file is missing" });
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Frame-Options": "DENY",
+    });
+    return res.end(fs.readFileSync(HTML_PATH));
+  }
+
+  if (url.pathname === "/api/health") {
+    return sendJson(res, 200, {
+      ok: true,
+      configured: Boolean((process.env.GA_PROPERTY_ID || "").trim()),
+      host: HOST,
+    });
+  }
+
+  if (url.pathname === "/api/stats") {
+    const requestedRange = url.searchParams.get("range") || "30d";
+    const range = RANGES.has(requestedRange) ? requestedRange : "30d";
+    const cached = statsCache.get(range);
+    if (cached && Date.now() - cached.time < CACHE_MS) return sendJson(res, 200, cached.data);
+
+    try {
+      const data = await buildStats(range);
+      if (data.configured) statsCache.set(range, { time: Date.now(), data });
+      return sendJson(res, 200, data);
+    } catch (error) {
+      console.error("Google Analytics Data API request failed:", error);
+      return sendJson(res, 503, {
+        configured: true,
+        setup: "analytics_access",
+        message: "تعذر جلب التقرير. راجع صلاحية حساب الخدمة على خاصية Analytics وتفعيل Data API.",
+      });
     }
+  }
 
-    const url = new URL(req.url, `http://${req.headers.host}`);
-
-    // Serve HTML Dashboard
-    if (url.pathname === '/' || url.pathname === '/index.html') {
-        const htmlPath = path.join(__dirname, 'index.html');
-        if (fs.existsSync(htmlPath)) {
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-            return res.end(fs.readFileSync(htmlPath));
-        }
-    }
-
-    // ─── API Endpoints ────────────────────────────────────────────────────────
-
-    // GET /api/stats -> returns aggregated stats for dashboard
-    if (url.pathname === '/api/stats' && req.method === 'GET') {
-        const now = Date.now();
-        // Count active users in last 2 minutes
-        let activeCount = 0;
-        for (const [id, ts] of Object.entries(db.activePings)) {
-            if (now - ts < 120000) activeCount++;
-        }
-        if (activeCount < 1) activeCount = 1; // current viewer
-
-        // Calculate average duration
-        let totalDuration = 0;
-        let closedCount = 0;
-        db.sessions.forEach(s => {
-            if (s.duration) {
-                totalDuration += s.duration;
-                closedCount++;
-            }
-        });
-        const avgMin = closedCount > 0 ? Math.round(totalDuration / closedCount / 60) : 44;
-
-        // Total views
-        let totalViews = 0;
-        db.views.forEach(v => totalViews += (v.count || 1));
-
-        const stats = {
-            activeUsers: activeCount + 140, // realistic real-time base
-            totalInstalls: db.installs.length + 1840,
-            avgDuration: avgMin,
-            totalViews: totalViews + 12400,
-            sessions: db.sessions.slice(-15).reverse(),
-            topContent: db.views.slice(0, 10),
-            searches: Object.entries(db.searches).map(([query, count]) => ({ query, count })).sort((a,b) => b.count - a.count),
-            categories: [
-                { name: 'بثات الكورة ⚽', percent: 44 },
-                { name: 'مسلسلات تركي 🍿', percent: 38 },
-                { name: 'أفلام أجنبي 🎬', percent: 32 },
-                { name: 'رمضان 2026 🌙', percent: 28 },
-                { name: 'أفلام عربي 🎥', percent: 22 },
-                { name: 'انمي ⚡', percent: 16 }
-            ],
-            countries: [
-                { name: 'مصر 🇪🇬', percent: 54 },
-                { name: 'السعودية 🇸🇦', percent: 22 },
-                { name: 'العراق 🇮🇶', percent: 10 },
-                { name: 'الإمارات 🇦🇪', percent: 6 },
-                { name: 'المغرب 🇲🇦', percent: 5 },
-                { name: 'أخرى 🌍', percent: 3 }
-            ],
-            devices: [
-                { name: 'هواتف أندرويد (Mobile) 📱', percent: 68 },
-                { name: 'شاشات ذكية (Android TV) 📺', percent: 32 }
-            ],
-            hourlyTraffic: [
-                { hour: '00:00', users: 110 }, { hour: '02:00', users: 65 }, { hour: '04:00', users: 30 },
-                { hour: '06:00', users: 45 }, { hour: '08:00', users: 95 }, { hour: '10:00', users: 160 },
-                { hour: '12:00', users: 240 }, { hour: '14:00', users: 310 }, { hour: '16:00', users: 480 },
-                { hour: '18:00', users: 790 }, { hour: '20:00', users: 1250 }, { hour: '22:00', users: 1420 },
-                { hour: '23:00', users: 980 }
-            ],
-            streamQualities: [
-                { quality: '4K Ultra HD 💎', percent: 28 },
-                { quality: '1080p Full HD ⚡', percent: 52 },
-                { quality: '720p HD 📶', percent: 16 },
-                { quality: '480p SD 📱', percent: 4 }
-            ],
-            funnel: [
-                { step: 'فتح التطبيق (App Open)', count: 2480, rate: '100%' },
-                { step: 'تصفح الأقسام (Cinema/Live)', count: 2210, rate: '89.1%' },
-                { step: 'البحث والاستكشاف (Search/Browse)', count: 1740, rate: '70.2%' },
-                { step: 'تشغيل البث/الفيديو (Video Launch)', count: 1560, rate: '62.9%' },
-                { step: 'إكمال المشاهدة (Completion > 70%)', count: 1280, rate: '51.6%' }
-            ],
-            retention: {
-                day1: '84.2%',
-                day7: '71.5%',
-                day30: '58.9%',
-                churnRate: '4.8%'
-            },
-            liveEvents: [
-                { time: 'الآن', text: 'مستخدم من القاهرة بدأ مشاهدة بث مباشر: ريال مدريد vs مانشستر سيتي ⚽', tag: 'بث كورة' },
-                { time: 'منذ 15 ثانية', text: 'مستخدم من الرياض يبحث عن: مسلسلات رمضان 2026 🌙', tag: 'بحث' },
-                { time: 'منذ 40 ثانية', text: 'مستخدم من دبي فتح فيلم Gladiator II بجودة 4K 🎬', tag: 'سينما' },
-                { time: 'منذ دقيقة', text: 'مستخدم من الإسكندرية أنهى مشاهدة مسلسل قيامة عثمان (الحلقة 175) 🍿', tag: 'إكمال' },
-                { time: 'منذ دقيقتين', text: 'تثبيت تطبيق جديد على شاشة ذكية: Xiaomi TV Box S (جدة) 📺', tag: 'تثبيت جديد' }
-            ]
-        };
-
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify(stats));
-    }
-
-    // POST /api/heartbeat
-    if (url.pathname === '/api/heartbeat' && req.method === 'POST') {
-        const body = await parseBody(req);
-        const deviceId = body.deviceId || 'unknown';
-        db.activePings[deviceId] = Date.now();
-        saveDB();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'ok' }));
-    }
-
-    // POST /api/install
-    if (url.pathname === '/api/install' && req.method === 'POST') {
-        const body = await parseBody(req);
-        db.installs.push({
-            id: body.deviceId || ('m_' + Date.now()),
-            device: body.deviceModel || 'هاتف أندرويد',
-            type: body.deviceType || 'هاتف 📱',
-            country: body.country || 'مصر 🇪🇬',
-            time: Date.now()
-        });
-        saveDB();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'ok' }));
-    }
-
-    // POST /api/session/start
-    if (url.pathname === '/api/session/start' && req.method === 'POST') {
-        const body = await parseBody(req);
-        db.sessions.push({
-            id: body.sessionId || ('s_' + Date.now()),
-            device: body.deviceModel || 'هاتف أندرويد',
-            type: body.deviceType || 'هاتف 📱',
-            country: body.country || 'مصر 🇪🇬',
-            start: Date.now(),
-            end: null,
-            duration: 0,
-            section: body.section || 'الرئيسية 🎬',
-            status: 'online'
-        });
-        saveDB();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'ok' }));
-    }
-
-    // POST /api/session/end
-    if (url.pathname === '/api/session/end' && req.method === 'POST') {
-        const body = await parseBody(req);
-        const s = db.sessions.find(x => x.id === body.sessionId) || db.sessions[db.sessions.length - 1];
-        if (s) {
-            s.end = Date.now();
-            s.duration = body.durationSeconds || Math.round((s.end - s.start) / 1000);
-            s.status = 'closed';
-        }
-        saveDB();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'ok' }));
-    }
-
-    // POST /api/view
-    if (url.pathname === '/api/view' && req.method === 'POST') {
-        const body = await parseBody(req);
-        const title = body.title || 'محتوى غير محدد';
-        let item = db.views.find(v => v.title === title);
-        if (item) {
-            item.count = (item.count || 1) + 1;
-        } else {
-            db.views.unshift({
-                title: title,
-                category: body.category || 'عام',
-                count: 1,
-                completion: '85%'
-            });
-        }
-        saveDB();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'ok' }));
-    }
-
-    // POST /api/search
-    if (url.pathname === '/api/search' && req.method === 'POST') {
-        const body = await parseBody(req);
-        const query = (body.query || '').trim();
-        if (query) {
-            db.searches[query] = (db.searches[query] || 0) + 1;
-            saveDB();
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ status: 'ok' }));
-    }
-
-    res.writeHead(404);
-    res.end('Not Found');
+  return sendJson(res, 404, { error: "Not found" });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Mashad Telemetry & Analytics Server running on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`MadarTV analytics dashboard: http://${HOST}:${PORT}`);
+  if (!process.env.GA_PROPERTY_ID) console.log("Set GA_PROPERTY_ID to connect a real Analytics property.");
 });

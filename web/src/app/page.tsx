@@ -8,6 +8,7 @@ import LiveTvView from "@/components/LiveTvView";
 import PlayerModal, { StreamSource } from "@/components/PlayerModal";
 import { ArabseedDetail, ArabseedEpisode, ArabseedItem, ArabseedSeason } from "@/lib/arabseed";
 import { Bookmark, Star, Trash2 } from "lucide-react";
+import { trackCompletedSearch, trackContentOpen } from "@/lib/analytics";
 
 type Tab = "home" | "movies" | "series" | "anime" | "matches" | "favorites";
 interface DetailSnapshot {
@@ -38,6 +39,13 @@ export default function HomePage() {
     poster?: string;
     streams: StreamSource[];
   }>({ isOpen: false, title: "", streams: [] });
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (query.length < 2) return;
+    const timer = window.setTimeout(() => trackCompletedSearch(query), 800);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     try {
@@ -103,6 +111,7 @@ export default function HomePage() {
   };
 
   const handleSelectItem = async (item: ArabseedItem) => {
+    trackContentOpen(item.title, item.isSeries);
     const requestId = ++detailRequestId.current;
     setDetailHistory([]);
     setSelectedDetailItem(item);

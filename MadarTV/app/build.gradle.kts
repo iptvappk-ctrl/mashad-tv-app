@@ -6,6 +6,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Firebase configuration is supplied locally by the project owner. Keeping this
+// conditional lets contributors build the app before Firebase registration is complete.
+if (file("google-services.json").isFile) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 val releaseStoreFile = providers.environmentVariable("MASHAD_RELEASE_STORE_FILE").orNull
 val releaseStorePassword = providers.environmentVariable("MASHAD_RELEASE_STORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("MASHAD_RELEASE_KEY_ALIAS").orNull
@@ -75,6 +81,9 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.androidx.fragment)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.analytics)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))

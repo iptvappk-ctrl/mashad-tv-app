@@ -3031,6 +3031,10 @@ private fun MashadPlayerScreen(
 
                 streamUrl = resolvedStreamUrl!!,
 
+                contentTitle = detail.item.title,
+
+                contentType = if (detail.item.type == ArabseedType.SERIES) "series" else "movie",
+
                 onError = {
 
                     resolvedStreamUrl = null
@@ -3567,6 +3571,10 @@ private fun NativeStreamPlayer(
 
     streamUrl: String,
 
+    contentTitle: String,
+
+    contentType: String,
+
     onError: () -> Unit = {}
 
 ) {
@@ -3631,9 +3639,20 @@ private fun NativeStreamPlayer(
 
             .build().apply {
 
+                var playbackStartedLogged = false
+
                 addListener(object : Player.Listener {
 
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (isPlaying && !playbackStartedLogged) {
+                            playbackStartedLogged = true
+                            com.madar.tv.core.MashadTelemetry.trackPlaybackStarted(contentType, contentTitle)
+                        }
+                    }
+
                     override fun onPlayerError(error: PlaybackException) {
+
+                        com.madar.tv.core.MashadTelemetry.trackPlaybackError(contentType)
 
                         onError()
 

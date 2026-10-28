@@ -52,6 +52,19 @@ fun YacineStreamPlayer(
             .setLoadControl(loadControl)
             .build()
             .apply {
+                var playbackStartedLogged = false
+                addListener(object : Player.Listener {
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (isPlaying && !playbackStartedLogged) {
+                            playbackStartedLogged = true
+                            com.madar.tv.core.MashadTelemetry.trackPlaybackStarted("live")
+                        }
+                    }
+
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        com.madar.tv.core.MashadTelemetry.trackPlaybackError("live")
+                    }
+                })
                 val dataSourceFactory = DefaultHttpDataSource.Factory()
                     .setUserAgent(stream.userAgent)
                     .setAllowCrossProtocolRedirects(true)
