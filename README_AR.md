@@ -19,18 +19,18 @@ npm install
 npm run dev
 ```
 
-يفتح على `http://localhost:3000`. إعداد Firebase Web اختياري إلى أن تسجل Web app في مشروع Firebase وتملأ `web/.env.local` وفق `web/.env.example`.
+يفتح على `http://localhost:3000`. إعداد Firebase Web موجود محلياً في `web/.env.local`، وهو مستبعد من Git.
 
 ## تشغيل لوحة التحليلات
 
 ```powershell
 Set-Location "C:\Users\hassa\Desktop\all project\iptv app\dashboard"
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 npm install
 npm start
 ```
 
-يفتح الخادم افتراضياً على `http://127.0.0.1:4040`. أضف رقم خاصية GA4 إلى `GA_PROPERTY_ID`، ووفّر اعتماداً للقراءة فقط عبر Google Application Default Credentials أو حساب خدمة مخزّن خارج المشروع. لا ترفع ملف اعتماد إلى GitHub. التفاصيل في [دليل Firebase Analytics ولوحة الإدارة](./DOCUMENTATION/08_FIREBASE_ANALYTICS_AND_DASHBOARD.md).
+يفتح الخادم افتراضياً على `http://127.0.0.1:4040`. رقم خاصية GA4 مضبوط محلياً. يلزم ملف حساب الخدمة للقراءة فقط في `C:\Users\hassa\.config\madartv\analytics-reader.json` حتى تتصل اللوحة بالتقارير. لا ترفع ملف الاعتماد إلى GitHub. التفاصيل في [دليل Firebase Analytics ولوحة الإدارة](./DOCUMENTATION/08_FIREBASE_ANALYTICS_AND_DASHBOARD.md).
 
 ## بناء تطبيق Android
 
@@ -39,7 +39,7 @@ Set-Location "C:\Users\hassa\Desktop\all project\iptv app\MadarTV"
 .\gradlew.bat :app:assembleDebug
 ```
 
-لإعداد Firebase Android، ضع `google-services.json` محلياً في `MadarTV/app/` ثم أعد البناء. الملف مستبعد من Git. من دون إعداد Firebase يظل البناء ممكناً، لكن التطبيق لن يسجل أحداث Analytics.
+إعداد Firebase Android موجود محلياً في `MadarTV/app/google-services.json`، والملف مستبعد من Git. البناء الحالي يمر عبر Google Services plugin.
 
 ## البيانات المسجلة
 
@@ -51,4 +51,4 @@ Set-Location "C:\Users\hassa\Desktop\all project\iptv app\MadarTV"
 
 ## حالة الربط
 
-مشروع Firebase `madartv` وتطبيق Android `com.madar.tv` مسجلان. ملف إعداد Android غير موجود في المستودع، وتسجيل تطبيق الويب وإعداد قراءة GA4 يحتاجان استكمالاً من حساب Firebase/Google. إلى أن تتم هذه الخطوات لا يمكن أن تعرض اللوحة بيانات استخدام حقيقية.
+مشروع Firebase `madartv` وتطبيقا Android والويب مسجلان. خاصية GA4 رقمها `561118297`، وData API مفعّلة، وبُعد `content_title` مسجل. حساب `madartv-analytics-reader` لديه Viewer فقط مع حجب مقاييس التكلفة والإيراد. لا تعرض اللوحة الأرقام الحقيقية حتى يتوفر ملف الخدمة في المسار المحلي أعلاه وتصل أحداث من بناء Android أو الويب المهيأ.

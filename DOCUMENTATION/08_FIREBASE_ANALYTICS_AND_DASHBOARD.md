@@ -15,28 +15,33 @@
 
 لا يرسل القياس المخصص UUID دائم للجهاز، أو موديله، أو عنوان IP يدوياً، أو بلد مستنتجاً محلياً، أو رابط سيرفر البث، أو كلمات البحث. تعطيل Advertising ID مضاف في Manifest. تظل طريقة جمع Analytics الافتراضية خاضعة لإعداد Firebase والقوانين وسياسة الخصوصية والموافقة اللازمة عند التوزيع.
 
-## حالة المشروع المسجل
+## حالة الربط في 28 أكتوبر 2026
 
 - مشروع Firebase: `madartv`، باسم العرض MadarTV.
-- Android package: `com.madar.tv` ومسجل في المشروع.
-- موقع تقارير Google Analytics: مصر، ومشاركة البيانات الاختيارية مع خدمات Google والمقارنة والدعم ومختصي الحساب متوقفة بحسب اختيار مالك المشروع أثناء الإنشاء.
-- إعداد `google-services.json` لم يُضف إلى المستودع، وتطبيق Web لم يكتمل تسجيله بعد. لذلك لا تبدأ أحداث Firebase حتى يكتمل الربط ويعاد بناء/نشر العميلين.
-- لم تكن هناك تقارير استخدام تاريخية في الخاصية عند فحصها أثناء الإعداد. الأرقام ستبدأ بعد جمع أحداث من إصدارات مهيأة.
+- Android package: `com.madar.tv`، ومعرّف التطبيق `1:409052366723:android:b3f343cd7702d71c3bd8b6`.
+- Web app مسجل باسم `MadarTV Web`، ومعرّفه `1:409052366723:web:8d88766ff14bd4bc3bd8b6`.
+- خاصية GA4: `561118297`. موقع Analytics هو مصر، ومشاركة البيانات الاختيارية مع خدمات Google والمقارنة والدعم ومختصي الحساب متوقفة بحسب اختيار مالك المشروع.
+- إعدادات الويب موجودة في `web/.env.local`، وإعداد Android المحلي في `MadarTV/app/google-services.json`. كلاهما مستبعد من Git.
+- Google Analytics Data API مفعّلة في مشروع Google Cloud `madartv`.
+- البُعد المخصص `Content title` بنطاق Event ومفتاح `content_title` مسجل لعرض أكثر الأعمال مشاهدة.
+- حساب الخدمة `madartv-analytics-reader@madartv.iam.gserviceaccount.com` لديه دور Viewer على خاصية GA4، مع تقييد مقاييس التكلفة والإيراد. لا يملك أدواراً على موارد المشروع، ولا تُرسل له رسائل بريد.
+- ملف اعتماد حساب الخدمة غير محفوظ في المشروع أو Git. مكانه المحلي المقصود `C:/Users/hassa/.config/madartv/analytics-reader.json`.
+- لم تكن هناك أحداث تاريخية أو مستخدمون نشطون في الخاصية عند الفحص. تبدأ الأرقام بعد تشغيل نسخة مهيأة من الويب أو Android وجمع أحداث فعلية.
 
 ## إعداد Android
 
-1. في Firebase Console، افتح `madartv` ثم إعدادات المشروع > تطبيقات Android، ونزّل ملف `google-services.json` للحزمة `com.madar.tv`.
-2. ضعه محلياً داخل `MadarTV/app/`. الملف يحتوي معرّفات Firebase عامة، ويظل مستبعداً من Git لتجنب ربطه بنسخة نشر من غير قصد.
-3. Gradle يطبق Google Services plugin فقط عندما يجد الملف، وبذلك يمكن بناء التطبيق قبل إكمال الإعداد.
-4. أعد بناء التطبيق وثبّت النسخة الجديدة على جهاز للاستخدام. الأحداث التي يسجلها APK قديم لا تتحول بأثر رجعي إلى أحداث Firebase.
+1. ملف `MadarTV/app/google-services.json` موجود محلياً للحزمة `com.madar.tv`، ومولّد من معرّف التطبيق ومفتاح Android الظاهرين في إعدادات Google Cloud/Firebase.
+2. الملف يحتوي معرّفات Firebase عامة، ويظل مستبعداً من Git. لا تضع فيه اعتماد حساب الخدمة.
+3. Gradle يطبق Google Services plugin عند وجود الملف؛ اجتاز البناء المحلي `:app:assembleDebug` معالجة الملف وإنتاج APK.
+4. ثبّت النسخة الجديدة على جهاز للاستخدام. الأحداث التي يسجلها APK قديم لا تتحول بأثر رجعي إلى أحداث Firebase.
 
 يستخدم المشروع Firebase BoM `34.19.0` للحفاظ على `minSdk 23`؛ الإصدارات الأحدث من Analytics رفعت الحد الأدنى إلى API 24. لا تستخدم أحدث BoM إلا إذا كان قرار المنتج رفع الحد الأدنى للنظام إلى Android 7 أو أحدث.
 
 ## إعداد الويب
 
-1. من Firebase Console أضف Web app إلى `madartv`.
-2. انسخ الإعداد العام إلى `web/.env.local` وفق أسماء المتغيرات في `web/.env.example`.
-3. أعد تشغيل Next.js أو ابنِ وانشر نسخة الموقع بعد إعداد المتغيرات.
+1. تطبيق `MadarTV Web` مسجل في Firebase.
+2. إعداداته العامة موجودة محلياً في `web/.env.local` وفق أسماء المتغيرات في `web/.env.example`.
+3. اجتاز `npm run build` بعد إعداد المتغيرات. أعد تشغيل Next.js عند تغييرها.
 
 متغيرات Firebase Web لا تحتوي مفتاح حساب خدمة. لا تضع اعتماد Data API أو ملف خدمة Google في متغير يبدأ بـ `NEXT_PUBLIC_`.
 
@@ -46,14 +51,14 @@
 
 ```powershell
 Set-Location "C:\Users\hassa\Desktop\all project\iptv app\dashboard"
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 npm install
 npm start
 ```
 
-املأ `GA_PROPERTY_ID` من صفحة إعداد خاصية Google Analytics. ثم أنشئ اعتماداً للقراءة فقط، وامنحه دور Viewer على خاصية GA4. جهّز Data API في Google Cloud ووفّر الاعتماد للخادم المحلي عبر `GOOGLE_APPLICATION_CREDENTIALS` أو Application Default Credentials. لا تنسخ JSON الخاص بحساب الخدمة إلى مجلد المشروع أو GitHub. تبقى لوحة الإدارة مربوطة افتراضياً بـ `127.0.0.1`.
+رقم الخاصية مضبوط في `dashboard/.env` كـ `561118297`، وData API مفعّلة. حساب الخدمة للقراءة فقط مضاف إلى الخاصية بدور Viewer مع حجب مقاييس التكلفة والإيراد. ضع ملف JSON الذي نزّلته من Google Cloud Console في `C:/Users/hassa/.config/madartv/analytics-reader.json`؛ متغير `GOOGLE_APPLICATION_CREDENTIALS` يشير إلى هذا المسار. لا تنسخ الملف إلى مجلد المشروع أو GitHub. تبقى لوحة الإدارة مربوطة افتراضياً بـ `127.0.0.1`.
 
-لظهور أسماء الأعمال في التقرير، افتح Analytics > Admin > Custom definitions وأنشئ بُعد Event-scoped باسم `content_title` ومفتاح الحدث `content_title`. الإعداد لا يعيد تسمية الأحداث القديمة، وقد لا يصير جاهزاً للتقارير فوراً.
+البُعد Event-scoped `Content title` ومفتاحه `content_title` مسجل. لا يعيد الإعداد تسمية الأحداث القديمة، وقد يتأخر ظهوره في التقارير بعد وصول أول أحداث جديدة.
 
 ## محتوى اللوحة وحدود التقارير
 
