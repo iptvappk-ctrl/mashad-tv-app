@@ -2963,6 +2963,9 @@ private fun MashadPlayerScreen(
 
     }
 
+    var playerPrompt by remember(activeServer) { mutableStateOf<String?>(null) }
+    var promptNeedsRetry by remember(activeServer) { mutableStateOf(false) }
+
 
 
     // Auto-hiding controls (overlay)
@@ -3027,10 +3030,21 @@ private fun MashadPlayerScreen(
 
     }
 
-    LaunchedEffect(resolvedStreamUrl) {
+    LaunchedEffect(resolvedStreamUrl, resolving, activeServer) {
+        if (resolving || activeServer == null) return@LaunchedEffect
         val stream = resolvedStreamUrl
-        if (stream?.startsWith("https://", ignoreCase = true) == true) {
-            openMadarPlayer(context, stream, detail.item.title)
+        if (stream.isNullOrBlank()) {
+            promptNeedsRetry = false
+            playerPrompt = "لم يتم تجهيز رابط فيديو مباشر لهذا السيرفر. جرّب سيرفرًا آخر."
+        } else if (!stream.startsWith("https://", ignoreCase = true)) {
+            promptNeedsRetry = false
+            playerPrompt = "هذا السيرفر لا يوفّر رابط HTTPS صالحًا لمشغل مشهد. جرّب سيرفرًا آخر."
+        } else if (!openMadarPlayer(context, stream, detail.item.title)) {
+            promptNeedsRetry = true
+            playerPrompt = "مشغل مشهد غير مثبت. ثبّت تطبيق مشغل مشهد على الهاتف ثم اضغط إعادة المحاولة."
+        } else {
+            playerPrompt = null
+            promptNeedsRetry = false
         }
     }
 
@@ -3076,317 +3090,19 @@ private fun MashadPlayerScreen(
 
         } else if (resolvedStreamUrl?.startsWith("https://", ignoreCase = true) == true) {
 
-            // HTTPS links are handed to the companion player to avoid starting a second stream here.
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("تم فتح المشغل المصاحب", color = MashadColors.GoldLight, fontSize = 14.sp)
+                Text("جاري فتح الحلقة في مشغل مشهد…", color = MashadColors.GoldLight, fontSize = 14.sp)
             }
-
-        } else if (resolvedStreamUrl != null) {
-
-            NativeStreamPlayer(
-                streamUrl = resolvedStreamUrl!!,
-                contentTitle = detail.item.title,
-                contentType = if (detail.item.type == ArabseedType.SERIES) "series" else "movie",
-                onError = { resolvedStreamUrl = null },
-            )
 
         } else {
 
-            // 🌐 Clean Web Embed Fallback (Forced Fullscreen via CSS/JS injection)
-
-            AndroidView(
-
-                modifier = Modifier.fillMaxSize(),
-
-                factory = { ctx ->
-
-                    WebView(ctx).apply {
-
-                        keepScreenOn = true
-
-                        setBackgroundColor(android.graphics.Color.BLACK)
-
-                        settings.apply {
-
-                            javaScriptEnabled = true
-
-                            domStorageEnabled = true
-
-                            databaseEnabled = true
-
-                            mediaPlaybackRequiresUserGesture = false
-
-                            @Suppress("DEPRECATION")
-
-                            allowContentAccess = true
-
-                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-
-                            useWideViewPort = true
-
-                            loadWithOverviewMode = true
-
-                            javaScriptCanOpenWindowsAutomatically = false
-
-                            setSupportMultipleWindows(false)
-
-                            userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-
-                        }
-
-                        webChromeClient = object : WebChromeClient() {
-
-                            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean = false
-
-                            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean { result?.confirm(); return true }
-
-                            override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean { result?.confirm(); return true }
-
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-
-                                super.onProgressChanged(view, newProgress)
-
-                                if (newProgress > 50) {
-
-                                    view?.evaluateJavascript("""
-
-                                        (function(){
-
-                                            var style = document.getElementById('mashad_fs_css');
-
-                                            if (!style) {
-
-                                                style = document.createElement('style');
-
-                                                style.id = 'mashad_fs_css';
-
-                                                style.innerHTML = `
-
-                                                    * { box-sizing: border-box !important; }
-
-                                                    html, body {
-
-                                                        width: 100vw !important;
-
-                                                        height: 100vh !important;
-
-                                                        margin: 0 !important;
-
-                                                        padding: 0 !important;
-
-                                                        overflow: hidden !important;
-
-                                                        background: #000 !important;
-
-                                                    }
-
-                                                    video {
-
-                                                        width: 100vw !important;
-
-                                                        height: 100vh !important;
-
-                                                        max-width: 100vw !important;
-
-                                                        max-height: 100vh !important;
-
-                                                        position: fixed !important;
-
-                                                        top: 0 !important;
-
-                                                        left: 0 !important;
-
-                                                        z-index: 999999 !important;
-
-                                                        object-fit: contain !important;
-
-                                                        background: #000 !important;
-
-                                                    }
-
-                                                    iframe, #player, .video-js, .jwplayer, div[id*="player"], div[class*="player"] {
-
-                                                        width: 100vw !important;
-
-                                                        height: 100vh !important;
-
-                                                        max-width: 100vw !important;
-
-                                                        max-height: 100vh !important;
-
-                                                        position: fixed !important;
-
-                                                        top: 0 !important;
-
-                                                        left: 0 !important;
-
-                                                        z-index: 99999 !important;
-
-                                                        background: #000 !important;
-
-                                                    }
-
-                                                    header, footer, nav, .ad, .banner, .ads, [id*="ad"], [class*="ad"] {
-
-                                                        display: none !important;
-
-                                                    }
-
-                                                `;
-
-                                                document.head.appendChild(style);
-
-                                            }
-
-                                        })();
-
-                                    """.trimIndent(), null)
-
-                                }
-
-                            }
-
-                        }
-
-                        webViewClient = object : WebViewClient() {
-
-                            override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean {
-
-                                val target = request.url.toString()
-
-                                if (ArabseedRepository.isAd(target)) return true
-
-                                return false
-
-                            }
-
-                            override fun onPageFinished(view: WebView, url: String?) {
-
-                                super.onPageFinished(view, url)
-
-                                view.evaluateJavascript("""
-
-                                    (function(){
-
-                                        window.open = function(){ return null; };
-
-                                        window.alert = function(){ return true; };
-
-                                        var style = document.getElementById('mashad_fs_css');
-
-                                        if (!style) {
-
-                                            style = document.createElement('style');
-
-                                            style.id = 'mashad_fs_css';
-
-                                            style.innerHTML = `
-
-                                                * { box-sizing: border-box !important; }
-
-                                                html, body {
-
-                                                    width: 100vw !important;
-
-                                                    height: 100vh !important;
-
-                                                    margin: 0 !important;
-
-                                                    padding: 0 !important;
-
-                                                    overflow: hidden !important;
-
-                                                    background: #000 !important;
-
-                                                }
-
-                                                video {
-
-                                                    width: 100vw !important;
-
-                                                    height: 100vh !important;
-
-                                                    max-width: 100vw !important;
-
-                                                    max-height: 100vh !important;
-
-                                                    position: fixed !important;
-
-                                                    top: 0 !important;
-
-                                                    left: 0 !important;
-
-                                                    z-index: 999999 !important;
-
-                                                    object-fit: contain !important;
-
-                                                    background: #000 !important;
-
-                                                }
-
-                                                iframe, #player, .video-js, .jwplayer, div[id*="player"], div[class*="player"] {
-
-                                                    width: 100vw !important;
-
-                                                    height: 100vh !important;
-
-                                                    max-width: 100vw !important;
-
-                                                    max-height: 100vh !important;
-
-                                                    position: fixed !important;
-
-                                                    top: 0 !important;
-
-                                                    left: 0 !important;
-
-                                                    z-index: 99999 !important;
-
-                                                    background: #000 !important;
-
-                                                }
-
-                                                header, footer, nav, .ad, .banner, .ads, [id*="ad"], [class*="ad"] {
-
-                                                    display: none !important;
-
-                                                }
-
-                                            `;
-
-                                            document.head.appendChild(style);
-
-                                        }
-
-                                        var v = document.querySelector('video');
-
-                                        if (v) { v.play().catch(function(){}); }
-
-                                    })();
-
-                                """.trimIndent(), null)
-
-                            }
-
-                        }
-
-                        loadUrl(server.embedUrl, ArabseedRepository.getEmbedHeaders())
-
-                    }
-
-                },
-
-                update = { wv ->
-
-                    if (wv.url != server.embedUrl) {
-
-                        wv.loadUrl(server.embedUrl, ArabseedRepository.getEmbedHeaders())
-
-                    }
-
-                },
-
-            )
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "تعذر تجهيز رابط صالح لمشغل مشهد. اختر سيرفرًا آخر.",
+                    color = MashadColors.GoldLight,
+                    fontSize = 14.sp,
+                )
+            }
 
         }
 
@@ -3599,7 +3315,12 @@ private fun MashadPlayerScreen(
         if (controlsVisible && resolvedStreamUrl?.startsWith("https://", ignoreCase = true) == true) {
             androidx.compose.material3.Surface(
                 modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
-                onClick = { openMadarPlayer(context, resolvedStreamUrl!!, detail.item.title) },
+                onClick = {
+                    if (!openMadarPlayer(context, resolvedStreamUrl!!, detail.item.title)) {
+                        promptNeedsRetry = true
+                        playerPrompt = "مشغل مشهد غير مثبت. ثبّت تطبيق مشغل مشهد على الهاتف ثم اضغط إعادة المحاولة."
+                    }
+                },
                 color = Color(0xDD252B3D),
                 shape = RoundedCornerShape(14.dp),
             ) {
@@ -3613,39 +3334,66 @@ private fun MashadPlayerScreen(
             }
         }
 
+        playerPrompt?.let { message ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { playerPrompt = null },
+                title = {
+                    Text(if (promptNeedsRetry) "مشغل مشهد غير مثبت" else "تعذر تشغيل هذا السيرفر")
+                },
+                text = { Text(message) },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            if (promptNeedsRetry) {
+                                val stream = resolvedStreamUrl
+                                val opened = stream?.startsWith("https://", ignoreCase = true) == true
+                                    && openMadarPlayer(context, stream, detail.item.title)
+                                if (opened) {
+                                    playerPrompt = null
+                                    promptNeedsRetry = false
+                                } else {
+                                    playerPrompt = "مشغل مشهد ما زال غير مثبت. ثبّته ثم اضغط إعادة المحاولة."
+                                }
+                            } else {
+                                playerPrompt = null
+                            }
+                        },
+                    ) {
+                        Text(if (promptNeedsRetry) "إعادة المحاولة" else "حسنًا")
+                    }
+                },
+                dismissButton = {
+                    if (promptNeedsRetry) {
+                        androidx.compose.material3.TextButton(onClick = { playerPrompt = null }) {
+                            Text("إغلاق")
+                        }
+                    }
+                },
+            )
+        }
+
     }
 
 }
 
-private fun openMadarPlayer(context: Context, streamUrl: String, title: String) {
+private fun openMadarPlayer(context: Context, streamUrl: String, title: String): Boolean {
     val packageName = "com.madar.player"
     val playerIntent = context.packageManager.getLaunchIntentForPackage(packageName)
-    if (playerIntent != null) {
-        playerIntent.putExtra("com.madar.player.extra.STREAM_URL", streamUrl)
-        playerIntent.putExtra("com.madar.player.extra.TITLE", title)
-        playerIntent.putExtra(
-            "com.madar.player.extra.USER_AGENT",
-            ArabseedRepository.getPlayerUserAgent(),
-        )
-        playerIntent.putExtra(
-            "com.madar.player.extra.REFERER",
-            ArabseedRepository.getPlayerHeaders().values.firstOrNull().orEmpty(),
-        )
+    playerIntent ?: return false
+    playerIntent.putExtra("com.madar.player.extra.STREAM_URL", streamUrl)
+    playerIntent.putExtra("com.madar.player.extra.TITLE", title)
+    playerIntent.putExtra(
+        "com.madar.player.extra.USER_AGENT",
+        ArabseedRepository.getPlayerUserAgent(),
+    )
+    playerIntent.putExtra(
+        "com.madar.player.extra.REFERER",
+        ArabseedRepository.getPlayerHeaders().values.firstOrNull().orEmpty(),
+    )
+    return runCatching {
         context.startActivity(playerIntent)
-        return
-    }
-
-    val playStoreUri = Uri.parse("market://details?id=" + packageName)
-    runCatching {
-        context.startActivity(Intent(Intent.ACTION_VIEW, playStoreUri))
-    }.onFailure {
-        context.startActivity(
-            Intent(
-                Intent.ACTION_VIEW,
-                Uri.parse("https://play.google.com/store/apps/details?id=" + packageName),
-            ),
-        )
-    }
+        true
+    }.getOrDefault(false)
 }
 
 
