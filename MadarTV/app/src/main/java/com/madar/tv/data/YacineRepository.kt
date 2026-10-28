@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 object YacineRepository {
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ALL CONSTANTS — 6-layer encrypted via X.s() (v6 engine)
+    // Legacy encoded constants; values are recoverable from the client APK.
     // Pipeline: XOR(K1)→ROT-L(3)→XOR(K2)→Caesar(+17)→Nibble-Swap→PosXOR(K3)
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -47,7 +47,7 @@ object YacineRepository {
     private var lastCategoriesFetch = 0L
     private const val CATEGORIES_CACHE_TTL = 10 * 60 * 1000L // 10 minutes
 
-    private val cachedChannels = java.util.concurrent.ConcurrentHashMap<Int, Pair<Long, List<YacineChannel>>>()
+    private val cachedChannels = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<YacineChannel>>>()
     private const val CHANNELS_CACHE_TTL = 10 * 60 * 1000L // 10 minutes
 
     private var cachedEvents: List<YacineEvent> = emptyList()
@@ -96,7 +96,7 @@ object YacineRepository {
             val list = (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 YacineCategory(
-                    id = obj.getInt("id"),
+                    id = obj.optString("id", ""),
                     name = obj.getString("name"),
                     logo = obj.optString("logo", ""),
                     childCount = obj.optInt("child_count", 0)
@@ -111,7 +111,7 @@ object YacineRepository {
     }
 
     // ─── Channels in a category ───────────────────────────────────────────────────
-    suspend fun getChannels(categoryId: Int, forceRefresh: Boolean = false): List<YacineChannel> = withContext(Dispatchers.IO) {
+    suspend fun getChannels(categoryId: String, forceRefresh: Boolean = false): List<YacineChannel> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         if (!forceRefresh) {
             cachedChannels[categoryId]?.let { (time, channels) ->
@@ -128,7 +128,7 @@ object YacineRepository {
             val list = (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 YacineChannel(
-                    id = obj.getInt("id"),
+                    id = obj.optString("id", ""),
                     name = obj.getString("name"),
                     logo = obj.optString("logo", ""),
                     isHide = obj.optInt("is_hide", 0),
@@ -151,39 +151,56 @@ object YacineRepository {
         runCatching {
             val json = JSONObject(decryptResponse("events"))
             val arr = json.getJSONArray("data")
-            val list = (0 until arr.length()).map { i ->
+            val allEvents = (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
-                val t1 = obj.getJSONObject("team_1")
-                val t2 = obj.getJSONObject("team_2")
+                val t1 = obj.optJSONObject("team_1") ?: JSONObject()
+                val t2 = obj.optJSONObject("team_2") ?: JSONObject()
                 YacineEvent(
-                    id = obj.getLong("id"),
+                    id = obj.optString("id", ""),
                     champions = obj.optString("champions", ""),
                     channel = obj.optString("channel", ""),
                     startTime = obj.optLong("start_time", 0L),
                     endTime = obj.optLong("end_time", 0L),
                     commentary = obj.optString("commentary", ""),
                     team1 = YacineTeam(
-                        id = t1.optInt("id", 0),
+                        id = t1.optString("id", ""),
                         name = t1.optString("name", ""),
                         logo = t1.optString("logo", "")
                     ),
                     team2 = YacineTeam(
-                        id = t2.optInt("id", 0),
+                        id = t2.optString("id", ""),
                         name = t2.optString("name", ""),
                         logo = t2.optString("logo", "")
                     )
                 )
-            }
-            if (list.isNotEmpty()) {
-                cachedEvents = list
-                lastEventsFetch = now
-            }
-            list
+            }.filter { it.id.isNotEmpty() }
+            val currentSec = now / 1000
+            val sorted = allEvents.sortedWith(
+                compareBy<YacineEvent> {
+                    if (currentSec in it.startTime..it.endTime) 0 else 1
+                }.thenBy { it.startTime }
+            )
+            cachedEvents = sorted
+            lastEventsFetch = now
+            sorted
         }.getOrElse { cachedEvents }
     }
 
+    // ─── Sports Channels Helper (beIN SPORTS / Alkass) ───────────────────────────
+    suspend fun getSportsChannels(): List<YacineChannel> = withContext(Dispatchers.IO) {
+        runCatching {
+            val cats = getCategories()
+            val sportsCat = cats.firstOrNull { it.name.contains("beIN SPORTS", ignoreCase = true) }
+                ?: cats.firstOrNull { it.name.contains("SPORTS", ignoreCase = true) }
+                ?: cats.firstOrNull()
+            if (sportsCat != null) {
+                getChannels(sportsCat.id)
+            } else emptyList()
+        }.getOrElse { emptyList() }
+    }
+
     // ─── Event Streams ────────────────────────────────────────────────────────────
-    suspend fun getEventStreams(eventId: Long): List<YacineStream> = withContext(Dispatchers.IO) {
+    suspend fun getEventStreams(eventId: String): List<YacineStream> = withContext(Dispatchers.IO) {
         runCatching {
             val json = JSONObject(decryptResponse("event/$eventId"))
             parseStreams(json.getJSONArray("data"))
@@ -191,7 +208,7 @@ object YacineRepository {
     }
 
     // ─── Channel Streams ──────────────────────────────────────────────────────────
-    suspend fun getChannelStreams(channelId: Int): List<YacineStream> = withContext(Dispatchers.IO) {
+    suspend fun getChannelStreams(channelId: String): List<YacineStream> = withContext(Dispatchers.IO) {
         runCatching {
             val json = JSONObject(decryptResponse("channel/$channelId"))
             parseStreams(json.getJSONArray("data"))

@@ -98,7 +98,10 @@ export default function PlayerModal({
     currentStream?.url &&
       !currentStream.url.includes(".m3u8") &&
       !currentStream.url.includes("/api/proxy/stream") &&
-      !currentStream.url.includes(".mp4")
+      !currentStream.url.includes(".mp4") &&
+      !currentStream.url.includes("govid.live") &&
+      !currentStream.url.includes("datahowa") &&
+      !currentStream.url.includes("pl.dood")
   );
 
   // Initialize and attach HLS stream
@@ -450,7 +453,11 @@ export default function PlayerModal({
         {/* Video Element or Embed Iframe Fallback */}
         {isEmbed || useIframeFallback ? (
           <iframe
-            src={currentStream.url}
+            src={
+              currentStream.url.startsWith("/api/")
+                ? currentStream.url
+                : `/api/proxy/embed?url=${encodeURIComponent(currentStream.url)}`
+            }
             className="w-full h-full border-0 rounded-3xl"
             allowFullScreen
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"

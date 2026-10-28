@@ -16,7 +16,7 @@ data class TmdbCatalog(
 object TmdbRepository {
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ALL CONSTANTS — 6-layer encrypted via X.s() (v6 engine)
+    // Legacy encoded constants; values are recoverable from the client APK.
     // ═══════════════════════════════════════════════════════════════════════
 
     private val _tab = byteArrayOf(3, 20, 27, 32, 168.toByte(), 21, 156.toByte(), 149.toByte(), 207.toByte(), 78, 221.toByte(), 113, 97, 102, 231.toByte(), 250.toByte(), 246.toByte(), 139.toByte(), 5, 26, 145.toByte(), 169.toByte(), 140.toByte(), 37, 180.toByte(), 59, 104, 107)
@@ -112,4 +112,36 @@ object TmdbRepository {
             connection.disconnect()
         }
     }
+    // Search poster by movie/series title via TMDB
+    fun searchPoster(title: String, isMovie: Boolean = true): String? {
+        if (API_KEY.isBlank() || title.isBlank()) return null
+        return try {
+            val cleanTitle = title
+                .replace(Regex("""(?i)(\d{4}|HD|4K|1080p|720p|BluRay|WEB-DL)"""), "")
+                .trim()
+            if (cleanTitle.length < 2) return null
+            val mediaPath = if (isMovie) "movie" else "tv"
+            val encoded = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
+            val urlStr = "$API_BASE/search/$mediaPath?api_key=$API_KEY&language=ar&query=$encoded&page=1&include_adult=false"
+            val conn = (java.net.URL(urlStr).openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 4_000
+                readTimeout = 5_000
+                setRequestProperty(ACCEPT_HDR, ACCEPT_JSON)
+                setRequestProperty(UA_HDR, UA_VAL)
+            }
+            try {
+                if (conn.responseCode !in 200..299) return null
+                val json = org.json.JSONObject(conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+                val results = json.optJSONArray("results") ?: return null
+                for (i in 0 until minOf(results.length(), 3)) {
+                    val item = results.optJSONObject(i) ?: continue
+                    val poster = item.optString("poster_path").takeIf { it.startsWith("/") }
+                    if (poster != null) return "$IMAGE_BASE$poster"
+                }
+                null
+            } finally { conn.disconnect() }
+        } catch (_: Exception) { null }
+    }
+
+
 }

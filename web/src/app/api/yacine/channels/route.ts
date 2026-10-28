@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const categoryId = parseInt(searchParams.get("categoryId") || "0", 10);
+  const categoryId = searchParams.get("categoryId") || "";
 
   if (!categoryId) {
     return NextResponse.json({ success: false, error: "Missing categoryId" }, { status: 400 });

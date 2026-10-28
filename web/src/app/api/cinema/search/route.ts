@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchArabseed } from "@/lib/arabseed";
+import { aggregator } from "@/lib/providers/aggregator";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const results = await searchArabseed(q);
+    const results = await aggregator.searchAll(q);
     return NextResponse.json({ success: true, data: results });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

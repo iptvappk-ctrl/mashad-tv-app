@@ -1,17 +1,19 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Play,
-  Star,
-  Film,
-  Tv,
-  Loader2,
-  Sparkles,
-  Heart,
+  ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Film,
   Flame,
+  Heart,
+  LoaderCircle,
+  Play,
+  Search,
+  Sparkles,
+  Star,
+  Tv,
 } from "lucide-react";
 import { ArabseedItem } from "@/lib/arabseed";
 
@@ -28,9 +30,10 @@ interface CinemaViewProps {
   }) => void;
   favorites: ArabseedItem[];
   onToggleFavorite: (item: ArabseedItem) => void;
+  onBrowseTab?: (tab: "movies" | "series") => void;
 }
 
-const GENRE_FILTERS = [
+const filters = [
   { id: "all", label: "الكل", icon: Sparkles },
   { id: "foreign_movies", label: "أفلام أجنبية", icon: Film },
   { id: "arabic_movies", label: "أفلام عربية", icon: Film },
@@ -38,29 +41,105 @@ const GENRE_FILTERS = [
   { id: "foreign_series", label: "مسلسلات أجنبية", icon: Tv },
   { id: "arabic_series", label: "مسلسلات عربية", icon: Tv },
   { id: "turkish_series", label: "مسلسلات تركية", icon: Tv },
-  { id: "ramadan", label: "مسلسلات رمضان 2026", icon: Sparkles },
+  { id: "ramadan", label: "رمضان", icon: Sparkles },
   { id: "anime", label: "أنمي وكرتون", icon: Sparkles },
-  { id: "action", label: "أكشن وإثارة", icon: Flame },
+  { id: "action", label: "أكشن", icon: Flame },
   { id: "horror", label: "رعب وغموض", icon: Film },
-  { id: "wrestling", label: "عروض مصارعة", icon: Flame },
+  { id: "wrestling", label: "مصارعة", icon: Flame },
 ];
 
-const FILTER_TITLES: Record<string, string> = {
-  all: "أحدث الإضافات الحصرية",
-  movies: "أحدث الأفلام الحصرية",
-  series: "أحدث المسلسلات الحصرية",
-  foreign_movies: "أحدث الأفلام الأجنبية الحصرية",
-  arabic_movies: "أحدث الأفلام العربية الجديدة",
-  turkish_movies: "أحدث الأفلام التركية المترجمة",
-  foreign_series: "أحدث المسلسلات الأجنبية كاملة",
-  arabic_series: "أحدث المسلسلات العربية والمصرية",
-  turkish_series: "أحدث المسلسلات التركية والمدبلجة",
-  ramadan: "مسلسلات رمضان 2026 الحصرية",
-  anime: "أحدث عروض الأنمي والكرتون",
-  action: "أقوى أفلام ومسلسلات الأكشن والإثارة",
-  horror: "أفلام ومسلسلات الرعب والغموض",
-  wrestling: "أحدث عروض المصارعة الحرة WWE",
+const sectionNames: Record<string, string> = {
+  all: "أحدث الإضافات",
+  movies: "أفلام تستاهل وقتك",
+  series: "مسلسلات تستاهل المتابعة",
+  foreign_movies: "أفلام أجنبية",
+  arabic_movies: "أفلام عربية",
+  turkish_movies: "أفلام تركية",
+  foreign_series: "مسلسلات أجنبية",
+  arabic_series: "مسلسلات عربية",
+  turkish_series: "مسلسلات تركية",
+  ramadan: "مسلسلات رمضان",
+  anime: "أنمي وكرتون",
+  action: "أكشن ومغامرة",
+  horror: "رعب وغموض",
+  wrestling: "عروض مصارعة",
 };
+
+
+
+function PosterCard({
+  item,
+  isFavorite,
+  resolving,
+  onOpen,
+  onPlay,
+  onFavorite,
+}: {
+  item: ArabseedItem;
+  isFavorite: boolean;
+  resolving: boolean;
+  onOpen: () => void;
+  onPlay: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onFavorite: (event: React.MouseEvent<HTMLButtonElement>) => void;
+}) {
+  return (
+    <article
+      onClick={onOpen}
+      className="group relative min-w-0 cursor-pointer overflow-hidden rounded-[20px] border border-slate-200 bg-white shadow-[0_6px_20px_rgba(35,49,78,0.07)] transition duration-300 hover:-translate-y-1 hover:border-indigo-200 hover:shadow-[0_14px_28px_rgba(48,63,130,0.14)]"
+    >
+      <div className="relative aspect-[0.72] overflow-hidden bg-slate-100">
+        <img
+          src={(item.poster?.startsWith("//") ? "https:" + item.poster : item.poster) || "/logo.jpg"}
+          alt={item.title}
+          loading="lazy"
+          className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
+          onError={(event) => { event.currentTarget.src = "/logo.jpg"; }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/10 to-transparent" />
+        <span className="absolute right-2.5 top-2.5 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-extrabold text-slate-700 shadow-sm">
+          {item.quality || (item.isSeries ? "مسلسل" : "فيلم")}
+        </span>
+        {item.rating && (
+          <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-slate-950/75 px-2 py-1 text-[10px] font-bold text-white backdrop-blur">
+            <Star size={11} className="fill-amber-300 text-amber-300" /> {item.rating}
+          </span>
+        )}
+        <button
+          type="button"
+          aria-label={isFavorite ? "إزالة من قائمتي" : "إضافة إلى قائمتي"}
+          onClick={onFavorite}
+          className={`absolute left-2.5 top-10 grid h-8 w-8 place-items-center rounded-full shadow-sm transition ${isFavorite ? "bg-rose-500 text-white" : "bg-white/90 text-slate-600 hover:text-rose-500"}`}
+        >
+          <Heart size={15} className={isFavorite ? "fill-current" : ""} />
+        </button>
+        <div className="absolute inset-x-0 bottom-0 p-3.5 text-white">
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-white/85">
+            <span className="rounded-full bg-white/15 px-2 py-0.5 backdrop-blur">{item.category || (item.isSeries ? "مسلسل" : "فيلم")}</span>
+            {item.year && <span>{item.year}</span>}
+          </div>
+          <h3 className="line-clamp-2 text-sm font-extrabold leading-5">{item.title}</h3>
+        </div>
+        <button
+          type="button"
+          onClick={onPlay}
+          disabled={resolving}
+          aria-label={`تشغيل ${item.title}`}
+          className="absolute bottom-3 left-3 grid h-10 w-10 translate-y-2 place-items-center rounded-full bg-white text-indigo-700 opacity-0 shadow-lg transition group-hover:translate-y-0 group-hover:opacity-100 focus:translate-y-0 focus:opacity-100 max-sm:translate-y-0 max-sm:opacity-100"
+        >
+          {resolving ? <LoaderCircle size={17} className="animate-spin" /> : <Play size={16} className="fill-current" />}
+        </button>
+
+      </div>
+      <button
+        type="button"
+        onClick={(event) => { event.stopPropagation(); onOpen(); }}
+        className="flex w-full items-center justify-between px-3.5 py-3 text-right text-[11px] font-bold text-slate-600 transition hover:text-indigo-700"
+      >
+        <span>التفاصيل والحلقات</span><ArrowLeft size={14} />
+      </button>
+    </article>
+  );
+}
 
 export default function CinemaView({
   activeTab = "home",
@@ -70,116 +149,113 @@ export default function CinemaView({
   onPlayStream,
   favorites,
   onToggleFavorite,
+  onBrowseTab,
 }: CinemaViewProps) {
-  const [activeFilter, setActiveFilter] = useState("all");
+  const [filter, setFilter] = useState("all");
   const [items, setItems] = useState<ArabseedItem[]>([]);
+  const [homeMovies, setHomeMovies] = useState<ArabseedItem[]>([]);
+  const [homeSeries, setHomeSeries] = useState<ArabseedItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-  // Sync internal filter with activeTab prop
   useEffect(() => {
-    if (activeTab === "movies") setActiveFilter("foreign_movies");
-    else if (activeTab === "series") setActiveFilter("foreign_series");
-    else if (activeTab === "anime") setActiveFilter("anime");
-    else if (selectedGenre) setActiveFilter(selectedGenre);
-    else setActiveFilter("all");
+    if (selectedGenre) setFilter(selectedGenre);
+    else setFilter("all");
     setPage(1);
   }, [activeTab, selectedGenre]);
 
-  // Fetch items based on search or category
   useEffect(() => {
-    let isCancelled = false;
-
-    async function fetchData() {
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        if (searchQuery.trim()) {
-          const res = await fetch(`/api/cinema/search?q=${encodeURIComponent(searchQuery.trim())}`);
-          const data = await res.json();
-          if (!isCancelled && data.success) {
-            setItems(data.data || []);
+        const query = searchQuery.trim();
+        if (query) {
+          const response = await fetch(`/api/cinema/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
+          const result = await response.json();
+          if (!cancelled) {
+            setItems(result.success && Array.isArray(result.data) ? result.data : []);
+            setHomeMovies([]);
+            setHomeSeries([]);
             setHasMore(false);
           }
-        } else {
-          let endpoint = `/api/cinema/movies?page=${page}`;
-          if (activeFilter === "all") {
-            endpoint = `/api/cinema/movies?page=${page}`;
-          } else {
-            endpoint = `/api/cinema/category?slug=${activeFilter}&page=${page}`;
-          }
-
-          const res = await fetch(endpoint);
-          const data = await res.json();
-          if (!isCancelled && data.success) {
-            setItems(data.data || []);
-            setHasMore((data.data || []).length >= 8);
-          }
+          return;
         }
-      } catch (err) {
-        console.error("Failed to load cinema items:", err);
-      } finally {
-        if (!isCancelled) setLoading(false);
-      }
-    }
 
-    fetchData();
+        if (activeTab === "home" && filter === "all") {
+          const [movieResponse, seriesResponse] = await Promise.all([
+            fetch(`/api/cinema/movies?page=${page}`, { signal: controller.signal }),
+            fetch(`/api/cinema/series?page=${page}`, { signal: controller.signal }),
+          ]);
+          const [movieResult, seriesResult] = await Promise.all([movieResponse.json(), seriesResponse.json()]);
+          if (!cancelled) {
+            const movies = movieResult.success && Array.isArray(movieResult.data) ? movieResult.data : [];
+            const series = seriesResult.success && Array.isArray(seriesResult.data) ? seriesResult.data : [];
+            setHomeMovies(movies);
+            setHomeSeries(series);
+            setItems([...movies, ...series]);
+            setHasMore(movies.length >= 8 || series.length >= 8);
+          }
+          return;
+        }
+
+        const slug = filter !== "all" ? filter : activeTab;
+        const endpoint = filter === "all" && (activeTab === "movies" || activeTab === "series")
+          ? `/api/cinema/${activeTab}?page=${page}`
+          : `/api/cinema/category?slug=${encodeURIComponent(slug)}&page=${page}`;
+        const response = await fetch(endpoint, { signal: controller.signal });
+        const result = await response.json();
+        if (!cancelled) {
+          const nextItems = result.success && Array.isArray(result.data) ? result.data : [];
+          setItems(nextItems);
+          setHomeMovies([]);
+          setHomeSeries([]);
+          setHasMore(nextItems.length >= 8);
+        }
+      } catch (error) {
+        if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
+          console.error("Cinema listing could not be loaded:", error);
+          setItems([]);
+          setHomeMovies([]);
+          setHomeSeries([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, searchQuery.trim() ? 250 : 0);
 
     return () => {
-      isCancelled = true;
+      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
     };
-  }, [searchQuery, activeFilter, page]);
+  }, [activeTab, filter, page, searchQuery]);
 
-  // Quick Play handler from card
-  const handleQuickPlay = async (e: React.MouseEvent, item: ArabseedItem) => {
-    e.stopPropagation();
+  const featured = useMemo(() => items.find((item) => item.poster) || items[0], [items]);
+  const isHome = activeTab === "home" && filter === "all" && !searchQuery.trim();
+  const pageTitle = searchQuery.trim()
+    ? `نتائج البحث عن «${searchQuery.trim()}»`
+    : sectionNames[filter === "all" ? activeTab : filter] || "أحدث الأعمال";
+
+  const playQuickly = async (event: React.MouseEvent<HTMLButtonElement>, item: ArabseedItem) => {
+    event.stopPropagation();
     setResolvingId(item.id);
-
     try {
-      const detRes = await fetch(`/api/cinema/detail?url=${encodeURIComponent(item.pageUrl)}`);
-      const detData = await detRes.json();
-
-      if (detData.success && detData.data) {
-        const detail = detData.data;
-        if (detail.servers && detail.servers.length > 0) {
-          const srv = detail.servers[0];
-          const resRes = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(srv.embedUrl)}`);
-          const resData = await resRes.json();
-          const playUrl = resData.playUrl || resData.data?.playUrl;
-
-          if (resData.success && playUrl) {
-            onPlayStream({
-              title: item.title,
-              subtitle: srv.name,
-              poster: item.poster,
-              streams: [{ name: srv.name, url: playUrl }],
-            });
-            return;
-          }
-
-          // Fallback to embed player directly!
-          onPlayStream({
-            title: item.title,
-            subtitle: srv.name,
-            poster: item.poster,
-            streams: [{ name: srv.name, url: srv.embedUrl }],
-          });
-          return;
-        }
-
-        if (detail.proxiedStream) {
-          onPlayStream({
-            title: item.title,
-            subtitle: "سيرفر مَشْهَد المباشر",
-            poster: item.poster,
-            streams: [{ name: "سيرفر مَشْهَد المباشر", url: detail.proxiedStream }],
-          });
-          return;
-        }
+      const response = await fetch(`/api/cinema/detail?url=${encodeURIComponent(item.pageUrl)}`);
+      const result = await response.json();
+      const detail = result.data;
+      const server = detail?.servers?.[0];
+      if (!result.success || !server?.embedUrl) {
+        onSelectItem(item);
+        return;
       }
-
-      onSelectItem(item);
+      const resolvedResponse = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(server.embedUrl)}`);
+      const resolved = await resolvedResponse.json();
+      const url = resolved.playUrl || resolved.data?.playUrl || server.embedUrl;
+      onPlayStream({ title: item.title, subtitle: server.name, poster: item.poster, streams: [{ name: server.name, url }] });
     } catch {
       onSelectItem(item);
     } finally {
@@ -187,249 +263,126 @@ export default function CinemaView({
     }
   };
 
-  return (
-    <div className="space-y-6">
-      {/* ── Filter Bar (Mashhad Luxury Gold Pills) ───────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-4 bg-[#0D111A] border border-[#1D273B] p-3 rounded-2xl shadow-xl">
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar w-full sm:w-auto">
-          {GENRE_FILTERS.map((f) => {
-            const Icon = f.icon;
-            const isActive = activeFilter === f.id;
-            return (
-              <button
-                key={f.id}
-                onClick={() => {
-                  setActiveFilter(f.id);
-                  setPage(1);
-                }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all duration-200 ${
-                  isActive
-                    ? "bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black shadow-gold font-black scale-[1.02]"
-                    : "bg-[#121824] text-gray-300 hover:text-white hover:bg-[#182234]"
-                }`}
-              >
-                <Icon size={14} className={isActive ? "text-black" : "text-[#E5B842]"} />
-                <span>{f.label}</span>
-              </button>
-            );
-          })}
-        </div>
+  const renderCard = (item: ArabseedItem) => (
+    <PosterCard
+      key={`${item.providerId || "source"}:${item.id}`}
+      item={item}
+      isFavorite={favorites.some((favorite) => favorite.id === item.id)}
+      resolving={resolvingId === item.id}
+      onOpen={() => onSelectItem(item)}
+      onPlay={(event) => { void playQuickly(event, item); }}
+      onFavorite={(event) => { event.stopPropagation(); onToggleFavorite(item); }}
+    />
+  );
 
-        <div className="flex items-center gap-2 text-xs font-bold text-gray-400">
-          <span>الصفحة {page}</span>
-          <span>•</span>
-          <span className="text-[#E5B842] font-black">{items.length} عمل متاح</span>
+  if (loading && items.length === 0) {
+    return (
+      <div className="space-y-7">
+        <div className="skeleton-shimmer h-72 rounded-[28px] sm:h-80" />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+          {Array.from({ length: 12 }).map((_, index) => <div key={index} className="skeleton-shimmer aspect-[0.72] rounded-[20px]" />)}
         </div>
       </div>
+    );
+  }
 
-      {/* ── Section Title ─────────────────────────────────────────── */}
-      <div className="flex items-center justify-between border-b border-[#1D273B] pb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-2.5 h-6 rounded-full bg-gradient-to-b from-[#E5B842] to-[#C69214] shadow-gold" />
-          <h2 className="text-xl font-black text-white">
-            {searchQuery.trim()
-              ? `نتائج البحث عن "${searchQuery.trim()}"`
-              : FILTER_TITLES[activeFilter] || "أحدث الأعمال الحصرية على مَشْهَد TV"}
-          </h2>
+  return (
+    <div className="space-y-8 pb-10 sm:space-y-10">
+      {!searchQuery.trim() && (
+        <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-[0_10px_28px_rgba(35,49,78,0.05)] sm:rounded-[26px] sm:p-3">
+          <div className="no-scrollbar flex gap-2 overflow-x-auto px-1 py-0.5">
+            {filters.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => { setFilter(id); setPage(1); }}
+                className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold transition ${filter === id ? "bg-indigo-600 text-white shadow-md shadow-indigo-200" : "bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"}`}
+              >
+                <Icon size={14} />{label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isHome && featured && (
+        <section className="relative isolate overflow-hidden rounded-[30px] border border-indigo-100 bg-gradient-to-l from-indigo-50 via-white to-emerald-50 shadow-[0_18px_50px_rgba(47,61,116,0.09)]">
+          <div className="absolute -left-16 -top-24 h-72 w-72 rounded-full bg-indigo-200/35 blur-3xl" />
+          <div className="relative grid min-h-[310px] items-center gap-7 p-5 sm:p-8 md:grid-cols-[1fr_230px] md:p-10 lg:min-h-[360px] lg:grid-cols-[1fr_270px]">
+            <div className="relative z-10 max-w-2xl">
+              <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-extrabold text-indigo-700 shadow-sm ring-1 ring-indigo-100">
+                <Sparkles size={14} /> اقتراح اليوم
+              </span>
+              <h1 className="mt-5 text-3xl font-black leading-tight tracking-tight text-slate-900 sm:text-4xl lg:text-[42px]">حكاية جديدة مستنياك</h1>
+              <p className="mt-3 max-w-xl text-sm leading-7 text-slate-600 sm:text-base">
+                تصفّح أحدث الأفلام والمسلسلات، واختار العمل اللي يناسب مزاجك.
+              </p>
+              <div className="mt-6 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
+                <span className="rounded-full bg-white px-3 py-1.5 shadow-sm">{featured.isSeries ? "مسلسل" : "فيلم"}</span>
+                {featured.year && <span className="rounded-full bg-white px-3 py-1.5 shadow-sm">{featured.year}</span>}
+                {featured.quality && <span className="rounded-full bg-white px-3 py-1.5 shadow-sm">{featured.quality}</span>}
+              </div>
+              <div className="mt-7 flex flex-wrap gap-3">
+                <button type="button" onClick={() => onSelectItem(featured)} className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-indigo-200 transition hover:bg-indigo-700">
+                  <Play size={16} className="fill-current" /> اكتشف التفاصيل
+                </button>
+                <button type="button" onClick={() => onToggleFavorite(featured)} className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:border-rose-200 hover:text-rose-600">
+                  <Heart size={16} /> أضف لقائمتي
+                </button>
+              </div>
+            </div>
+            <button type="button" onClick={() => onSelectItem(featured)} className="group relative mx-auto block w-40 overflow-hidden rounded-[24px] border-4 border-white shadow-[0_16px_35px_rgba(28,39,74,0.22)] transition hover:-translate-y-1 sm:w-48 md:w-full">
+              <img src={featured.poster || "/logo.jpg"} alt={featured.title} className="aspect-[0.72] w-full object-cover transition duration-500 group-hover:scale-105" onError={(event) => { event.currentTarget.src = "/logo.jpg"; }} />
+              <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/90 to-transparent p-4 pt-12 text-right text-sm font-extrabold text-white">{featured.title}</span>
+            </button>
+          </div>
+        </section>
+      )}
+
+      <section className="space-y-5">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-extrabold uppercase tracking-[0.15em] text-indigo-600">{searchQuery.trim() ? "بحث المكتبة" : "مختار ليك"}</p>
+            <h2 className="mt-1 text-xl font-black text-slate-900 sm:text-2xl">{pageTitle}</h2>
+          </div>
+          <span className="hidden items-center gap-1.5 rounded-full bg-white px-3 py-2 text-[11px] font-bold text-slate-500 ring-1 ring-slate-200 sm:inline-flex">
+            <Search size={13} /> {items.length} نتيجة
+          </span>
         </div>
 
-        {loading && (
-          <div className="flex items-center gap-2 text-xs text-[#E5B842] font-bold">
-            <Loader2 size={16} className="animate-spin text-[#E5B842]" />
-            <span>جاري التحديث بأقصى سرعة...</span>
+        {items.length === 0 ? (
+          <div className="rounded-[26px] border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
+            <Film size={36} className="mx-auto text-indigo-300" />
+            <h3 className="mt-4 text-lg font-extrabold text-slate-800">مش لاقيين نتيجة دلوقتي</h3>
+            <p className="mt-1 text-sm text-slate-500">جرّب اسم تاني أو اختار تصنيف مختلف.</p>
+          </div>
+        ) : isHome ? (
+          <div className="space-y-9">
+            {homeMovies.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between"><h3 className="font-extrabold text-slate-800">أحدث الأفلام</h3><button onClick={() => onBrowseTab?.("movies")} className="inline-flex items-center gap-1 text-xs font-bold text-indigo-700">شوف الكل <ChevronLeft size={15} /></button></div>
+                <div className="no-scrollbar grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5 xl:grid-cols-6">{homeMovies.slice(0, 6).map(renderCard)}</div>
+              </div>
+            )}
+            {homeSeries.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between"><h3 className="font-extrabold text-slate-800">مسلسلات وحلقات جديدة</h3><button onClick={() => onBrowseTab?.("series")} className="inline-flex items-center gap-1 text-xs font-bold text-indigo-700">شوف الكل <ChevronLeft size={15} /></button></div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5 xl:grid-cols-6">{homeSeries.slice(0, 6).map(renderCard)}</div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5 xl:grid-cols-6">{items.map(renderCard)}</div>
+        )}
+
+        {!loading && hasMore && !searchQuery.trim() && (
+          <div className="flex items-center justify-center gap-3 pt-3">
+            <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page === 1} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 disabled:opacity-40"><ChevronRight size={18} /></button>
+            <span className="rounded-xl bg-white px-4 py-3 text-xs font-bold text-slate-600 ring-1 ring-slate-200">صفحة {page}</span>
+            <button type="button" onClick={() => setPage((current) => current + 1)} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:text-indigo-700"><ChevronLeft size={18} /></button>
           </div>
         )}
-      </div>
-
-      {/* ── Loading Skeleton Grid ─────────────────────────────────── */}
-      {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {Array.from({ length: 15 }).map((_, i) => (
-            <div
-              key={i}
-              className="bg-[#0D111A] border border-[#1D273B] rounded-2xl overflow-hidden aspect-[2/3.1] animate-pulse flex flex-col justify-end p-4 gap-2"
-            >
-              <div className="h-4 bg-[#1D273B] rounded w-3/4" />
-              <div className="h-3 bg-[#1D273B] rounded w-1/2" />
-            </div>
-          ))}
-        </div>
-      ) : items.length === 0 ? (
-        <div className="bg-[#0D111A] border border-[#1D273B] rounded-3xl p-12 text-center space-y-4 shadow-2xl">
-          <Film size={48} className="mx-auto text-[#E5B842]" />
-          <h3 className="text-lg font-black text-white">لا توجد أعمال في هذا التصنيف حالياً</h3>
-          <p className="text-xs text-gray-400">اختر تصنيفاً آخر أو تصفح الصفحة الأولى من القائمة.</p>
-          <button
-            onClick={() => {
-              setActiveFilter("all");
-              setPage(1);
-            }}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black font-black text-xs hover:shadow-gold transition"
-          >
-            العودة لكافة الأعمال
-          </button>
-        </div>
-      ) : (
-        /* ── Mashhad TV Golden Movie/Series Grid ───────────────────── */
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-5">
-          {items.map((item) => {
-            const isFav = favorites.some((f) => f.id === item.id);
-            const isResolving = resolvingId === item.id;
-
-            return (
-              <div
-                key={item.id}
-                onClick={() => onSelectItem(item)}
-                onMouseEnter={() => {
-                  fetch(`/api/cinema/detail?url=${encodeURIComponent(item.pageUrl)}`, { priority: "low" }).catch(() => {});
-                }}
-                className="group relative bg-[#0D111A] rounded-2xl overflow-hidden border border-[#1D273B] hover:border-[#E5B842]/80 cursor-pointer shadow-lg hover:shadow-[0_0_25px_rgba(229,184,66,0.25)] transition-all duration-300 transform hover:-translate-y-2 flex flex-col select-none aspect-[2/3.1]"
-              >
-                {/* Poster Image */}
-                <div className="relative w-full h-full overflow-hidden bg-black/60">
-                  <img
-                    src={item.poster}
-                    alt={item.title}
-                    loading="lazy"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/logo.jpg";
-                    }}
-                  />
-
-                  {/* Gradient Overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#07090E] via-[#07090E]/30 to-transparent" />
-
-                  {/* Top-Right: Quality Badge */}
-                  <div className="absolute top-2.5 right-2.5 z-10">
-                    <span className="px-2.5 py-0.5 rounded-lg bg-black/90 text-[#F5D061] text-[10px] font-black border border-[#E5B842]/50 shadow-md uppercase">
-                      {item.quality || (item.isSeries ? "مسلسل" : "1080p FHD")}
-                    </span>
-                  </div>
-
-                  {/* Top-Left: IMDB Rating Circle */}
-                  <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/90 text-white text-[10px] font-black border border-[#E5B842]/60 shadow-md">
-                    <Star size={10} className="fill-[#E5B842] text-[#E5B842]" />
-                    <span>{item.rating || "7.2"}</span>
-                  </div>
-
-                  {/* Favorite Heart Button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleFavorite(item);
-                    }}
-                    className={`absolute top-9 left-2.5 z-10 w-7 h-7 rounded-full flex items-center justify-center transition border shadow-md ${
-                      isFav
-                        ? "bg-[#EF4444] text-white border-red-500 scale-110"
-                        : "bg-black/80 text-gray-300 hover:text-white border-white/20 hover:scale-110"
-                    }`}
-                    title={isFav ? "إزالة من المفضلة" : "إضافة للمفضلة"}
-                  >
-                    <Heart size={13} className={isFav ? "fill-white" : ""} />
-                  </button>
-
-                  {/* Bottom Info Container */}
-                  <div className="absolute bottom-0 inset-x-0 p-3.5 flex flex-col gap-1.5 z-10">
-                    {/* Genre / Category Badge */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="px-2 py-0.5 rounded-md bg-[#E5B842]/20 text-[#F5D061] border border-[#E5B842]/30 text-[9px] font-black">
-                        {item.category || (item.isSeries ? "مسلسل" : "فيلم")}
-                      </span>
-                      {item.year && (
-                        <span className="px-1.5 py-0.5 rounded-md bg-black/70 text-gray-300 text-[9px] font-bold">
-                          {item.year}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Title */}
-                    <h3 className="text-xs sm:text-sm font-black text-white leading-tight line-clamp-2 group-hover:text-[#F5D061] transition-colors">
-                      {item.title}
-                    </h3>
-                  </div>
-
-                  {/* Hover Overlay with Large Gold Play Button */}
-                  <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col items-center justify-center gap-3 p-4 z-20 backdrop-blur-[2px]">
-                    <button
-                      onClick={(e) => handleQuickPlay(e, item)}
-                      disabled={isResolving}
-                      className="w-14 h-14 rounded-full bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black flex items-center justify-center shadow-goldGlow transform hover:scale-110 transition-all border-2 border-white/60"
-                      title="تشغيل فوري"
-                    >
-                      {isResolving ? (
-                        <Loader2 size={24} className="animate-spin text-black" />
-                      ) : (
-                        <Play size={24} className="fill-black ml-0.5" />
-                      )}
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectItem(item);
-                      }}
-                      className="px-4 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition border border-white/20 shadow-md backdrop-blur-md"
-                    >
-                      تفاصيل وسيرفرات العرض
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── Pagination Bar ─────────────────────────────────────────── */}
-      {!loading && items.length > 0 && !searchQuery.trim() && (
-        <div className="flex items-center justify-center gap-2 pt-6 pb-12">
-          <button
-            onClick={() => {
-              if (page > 1) {
-                setPage((p) => p - 1);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }
-            }}
-            disabled={page === 1}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0D111A] border border-[#1D273B] text-xs font-bold text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition"
-          >
-            <ChevronRight size={16} />
-            <span>السابق</span>
-          </button>
-
-          {[1, 2, 3, 4, 5].map((pNum) => (
-            <button
-              key={pNum}
-              onClick={() => {
-                setPage(pNum);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }}
-              className={`w-10 h-10 rounded-xl text-xs font-black transition ${
-                page === pNum
-                  ? "bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black shadow-gold scale-105"
-                  : "bg-[#0D111A] border border-[#1D273B] text-gray-300 hover:text-white hover:bg-[#161E2E]"
-              }`}
-            >
-              {pNum}
-            </button>
-          ))}
-
-          <button
-            onClick={() => {
-              if (hasMore) {
-                setPage((p) => p + 1);
-                window.scrollTo({ top: 0, behavior: "smooth" });
-              }
-            }}
-            disabled={!hasMore}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0D111A] border border-[#1D273B] text-xs font-bold text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition"
-          >
-            <span>التالي</span>
-            <ChevronLeft size={16} />
-          </button>
-        </div>
-      )}
+      </section>
     </div>
   );
 }

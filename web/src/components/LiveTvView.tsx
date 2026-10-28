@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Tv,
   Play,
@@ -14,12 +14,13 @@ import {
   Search,
   Flame,
   Volume2,
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
+  CheckCircle2,
+  History,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { YacineCategory, YacineChannel, YacineEvent } from "@/lib/yacine";
-import { FootballMatch } from "@/lib/football";
+import { FootballMatch, TOP_LEAGUES } from "@/lib/football";
 
 interface LiveTvViewProps {
   searchQuery: string;
@@ -31,16 +32,53 @@ interface LiveTvViewProps {
   }) => void;
 }
 
+// Strictly European Top 5 + Champions League event filter
+function isTopEuropeanEvent(ev: YacineEvent): boolean {
+  const champ = ev.champions || "";
+  const blacklist = [
+    "النخبة", "آسيا", "اسيا", "الكويت", "قطر", "البحرين", "عمان", "العراق",
+    "الجزائر", "تونس", "المغرب", "إفريقيا", "افريقيا", "الخليج", "أبطال آسيا", "ابطال اسيا"
+  ];
+  if (blacklist.some((b) => champ.includes(b))) return false;
+
+  const whitelist = [
+    "أبطال أوروبا", "ابطال اوروبا", "أوروبا", "اوروبا",
+    "إنجليزي", "انجليزي", "إسباني", "اسباني", "إيطالي", "ايطالي",
+    "ألماني", "الماني", "فرنسي",
+    "Champions League", "Premier League", "La Liga", "Serie A", "Bundesliga", "Ligue 1"
+  ];
+  if (whitelist.some((w) => champ.includes(w))) return true;
+
+  const t1 = ev.team1?.name || "";
+  const t2 = ev.team2?.name || "";
+  const europeanTeams = [
+    "ريال مدريد", "برشلونة", "أتلتيكو", "ليفربول", "مانشستر", "آرسنال", "تشيلسي",
+    "توتنهام", "بايرن", "دورتموند", "ليفركوزن", "ميلان", "إنتر", "يوفنتوس",
+    "نابولي", "روما", "باريس", "موناكو", "مارسيليا"
+  ];
+  return europeanTeams.some((t) => t1.includes(t) || t2.includes(t));
+}
+
+const LEAGUE_FILTERS = [
+  { id: "all", label: "جميع الدوريات الكبرى" },
+  { id: "uefa.champions", label: "دوري أبطال أوروبا" },
+  { id: "eng.1", label: "الدوري الإنجليزي" },
+  { id: "esp.1", label: "الدوري الإسباني" },
+  { id: "ita.1", label: "الدوري الإيطالي" },
+  { id: "ger.1", label: "الدوري الألماني" },
+  { id: "fra.1", label: "الدوري الفرنسي" },
+];
+
 export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProps) {
-  const [subTab, setSubTab] = useState<"matches" | "channels">("matches");
+  // 3 Primary Tabs: Upcoming/Live | Results | Channels
+  const [activeTab, setActiveTab] = useState<"upcoming" | "results" | "channels">("upcoming");
+  const [selectedLeagueFilter, setSelectedLeagueFilter] = useState("all");
 
   const [categories, setCategories] = useState<YacineCategory[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | number | null>(null);
   const [channels, setChannels] = useState<YacineChannel[]>([]);
   const [matches, setMatches] = useState<FootballMatch[]>([]);
   const [events, setEvents] = useState<YacineEvent[]>([]);
-
-  const [matchFilter, setMatchFilter] = useState<"all" | "live" | "upcoming" | "finished">("all");
 
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [loadingChannels, setLoadingChannels] = useState(false);
@@ -48,7 +86,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [resolvingStreamId, setResolvingStreamId] = useState<number | string | null>(null);
 
-  // Load initial data
+  // Initial load
   useEffect(() => {
     async function loadData() {
       // 1. Categories
@@ -65,7 +103,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
         setLoadingCategories(false);
       }
 
-      // 2. Football matches from ESPN
+      // 2. Football matches (ESPN Top 5 + UCL)
       try {
         const matchRes = await fetch("/api/football/matches");
         const matchData = await matchRes.json();
@@ -120,6 +158,41 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
       isCancelled = true;
     };
   }, [selectedCategory]);
+
+  // Filtered Yacine live events (Top European Only)
+  const filteredEvents = useMemo(() => {
+    return events.filter(isTopEuropeanEvent);
+  }, [events]);
+
+  // Split matches into Upcoming/Live vs Finished
+  const upcomingMatches = useMemo(() => {
+    return matches.filter((m) => m.status === "in" || m.status === "pre");
+  }, [matches]);
+
+  const finishedMatches = useMemo(() => {
+    return matches.filter((m) => m.status === "post");
+  }, [matches]);
+
+  const liveMatchesCount = useMemo(() => {
+    return matches.filter((m) => m.status === "in").length;
+  }, [matches]);
+
+  // Filter by selected league
+  const visibleUpcomingMatches = useMemo(() => {
+    if (selectedLeagueFilter === "all") return upcomingMatches;
+    return upcomingMatches.filter((m) => m.leagueCode === selectedLeagueFilter);
+  }, [upcomingMatches, selectedLeagueFilter]);
+
+  const visibleFinishedMatches = useMemo(() => {
+    if (selectedLeagueFilter === "all") return finishedMatches;
+    return finishedMatches.filter((m) => m.leagueCode === selectedLeagueFilter);
+  }, [finishedMatches, selectedLeagueFilter]);
+
+  const filteredChannels = useMemo(() => {
+    return channels.filter((ch) =>
+      searchQuery ? ch.name.toLowerCase().includes(searchQuery.toLowerCase()) : true
+    );
+  }, [channels, searchQuery]);
 
   // Handle Play Channel
   const handlePlayChannel = async (channel: YacineChannel) => {
@@ -179,12 +252,11 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
     }
   };
 
-  // Handle Play match from ESPN card (link to corresponding channel)
-  const handlePlayEspnMatch = async (m: FootballMatch) => {
+  // Handle Play Match Card (Connects to Yacine event or opens beIN SPORTS 1)
+  const handlePlayMatchCard = async (m: FootballMatch) => {
     setResolvingStreamId(m.id);
     try {
-      // 1. Check if there is an event matching team name
-      const matchingEvent = events.find(
+      const matchingEvent = filteredEvents.find(
         (ev) =>
           ev.team1.name.includes(m.homeTeam) ||
           ev.team2.name.includes(m.awayTeam) ||
@@ -197,13 +269,13 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
         return;
       }
 
-      // 2. Otherwise open beIN SPORTS 1 direct live stream (Instant Fast-Path)
-      const res = await fetch("/api/yacine/stream?type=channel&id=1424");
+      // Fast-path: open beIN SPORTS 1 HD
+      const res = await fetch("/api/yacine/stream?type=channel&id=7972915523234028871");
       const data = await res.json();
 
       if (data.success && data.data?.length > 0) {
         const streams = data.data.map((s: any) => ({
-          name: s.name || "سيرفر البث",
+          name: s.name || "سيرفر البث الرئيسي",
           url: s.playUrl,
         }));
 
@@ -214,7 +286,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
           streams,
         });
       } else {
-        alert(`جاري تجهيز بث لمباراة ${m.homeTeam} vs ${m.awayTeam}. يمكنك اختيار القناة الناقلة من قسم القنوات.`);
+        alert(`جاري تجهيز البث لمباراة ${m.homeTeam} ضد ${m.awayTeam}. يمكنك اختيار القناة الناقلة من قسم القنوات.`);
       }
     } catch {
       alert("تعذر تشغيل البث المباشر.");
@@ -223,103 +295,134 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
     }
   };
 
-  // Filter Matches
-  const filteredMatches = matches.filter((m) => {
-    if (matchFilter === "live") return m.status === "in";
-    if (matchFilter === "upcoming") return m.status === "pre";
-    if (matchFilter === "finished") return m.status === "post";
-    return true;
-  });
-
-  const liveCount = matches.filter((m) => m.status === "in").length;
-
-  const filteredChannels = channels.filter((ch) =>
-    searchQuery ? ch.name.toLowerCase().includes(searchQuery.toLowerCase()) : true
-  );
+  const handleRefreshMatches = async () => {
+    setLoadingMatches(true);
+    try {
+      const matchRes = await fetch("/api/football/matches");
+      const matchData = await matchRes.json();
+      if (matchData.success) {
+        setMatches(matchData.data || []);
+      }
+    } catch {}
+    setLoadingMatches(false);
+  };
 
   return (
-    <div className="space-y-8 animate-fadeIn pb-24">
-      {/* ── Sub-Tab Switcher: Matches vs Channels (Same as Android App!) ── */}
+    <div className="live-tv-light space-y-8 animate-fadeIn pb-24">
+      {/* ── Top Primary Navigation Tabs (3 Tabs as Requested) ── */}
       <div className="flex items-center justify-center">
-        <div className="flex items-center gap-2 bg-mashad-card/90 p-1.5 rounded-2xl border border-mashad-border/80 shadow-2xl max-w-md w-full backdrop-blur-xl">
+        <div className="flex items-center gap-2 bg-mashad-card/90 p-1.5 rounded-2xl border border-mashad-border/80 shadow-2xl max-w-2xl w-full backdrop-blur-xl">
+          {/* Tab 1: Upcoming & Live */}
           <button
-            onClick={() => setSubTab("matches")}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs sm:text-sm font-black transition-all duration-300 ${
-              subTab === "matches"
+            onClick={() => setActiveTab("upcoming")}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition-all duration-300 ${
+              activeTab === "upcoming"
                 ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black shadow-gold scale-[1.02]"
                 : "text-gray-300 hover:text-white hover:bg-white/5"
             }`}
           >
-            <Radio size={17} className={subTab === "matches" ? "text-black" : "text-red-500"} />
-            <span>⚽ بثوث المباريات الحية</span>
-            {events.length > 0 && (
+            <Radio size={16} className={activeTab === "upcoming" ? "text-black" : "text-red-500"} />
+            <span>المباريات القادمة والمباشرة</span>
+            {liveMatchesCount > 0 && (
               <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-black animate-pulse">
-                {events.length}
+                {liveMatchesCount} لايف
               </span>
             )}
           </button>
 
+          {/* Tab 2: Finished Match Results */}
           <button
-            onClick={() => setSubTab("channels")}
-            className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-xs sm:text-sm font-black transition-all duration-300 ${
-              subTab === "channels"
+            onClick={() => setActiveTab("results")}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition-all duration-300 ${
+              activeTab === "results"
                 ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black shadow-gold scale-[1.02]"
                 : "text-gray-300 hover:text-white hover:bg-white/5"
             }`}
           >
-            <Tv size={17} />
-            <span>📺 باقات القنوات ({categories.length})</span>
+            <History size={16} />
+            <span>نتائج المباريات</span>
+            {finishedMatches.length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-white/10 text-[10px] font-bold">
+                {finishedMatches.length}
+              </span>
+            )}
+          </button>
+
+          {/* Tab 3: Channels */}
+          <button
+            onClick={() => setActiveTab("channels")}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition-all duration-300 ${
+              activeTab === "channels"
+                ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black shadow-gold scale-[1.02]"
+                : "text-gray-300 hover:text-white hover:bg-white/5"
+            }`}
+          >
+            <Tv size={16} />
+            <span>باقات القنوات</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-white/10 text-[10px] font-bold">
+              {categories.length}
+            </span>
           </button>
         </div>
       </div>
 
-      {/* ── TAB 1: MATCHES (Active Live Broadcasts + Schedule) ─────────── */}
-      {subTab === "matches" ? (
-        <div className="space-y-10">
-          {/* 1. Yacine Live Broadcast Events (TOP PRIORITY - WITH PLAY BUTTON!) */}
-          <section className="space-y-4">
-            <div className="flex items-center justify-between border-b border-mashad-border/60 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-red-500/20 text-red-500 border border-red-500/40 flex items-center justify-center shadow-live">
-                  <Radio size={18} className="live-badge-glow" />
-                </div>
-                <div>
-                  <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
-                    <span>بثوث المباريات المباشرة الآن</span>
-                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 live-badge-glow" />
-                  </h2>
-                  <p className="text-xs text-gray-400">سيرفرات بث فيديو مباشر بجودات متعددة مع التعليق العربي</p>
-                </div>
-              </div>
-
-              <span className="text-xs text-mashad-gold font-bold">
-                {events.length > 0 ? `${events.length} مباريات منقولة لايف` : "جاري التحقق من البثوث"}
-              </span>
+      {/* ── TAB 1: UPCOMING & LIVE MATCHES (Top 5 + UCL Only) ─────────── */}
+      {activeTab === "upcoming" && (
+        <div className="space-y-8">
+          {/* League Filter Strip */}
+          <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-mashad-border/40">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
+              {LEAGUE_FILTERS.map((f) => {
+                const isSelected = selectedLeagueFilter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => setSelectedLeagueFilter(f.id)}
+                    className={`whitespace-nowrap px-3.5 py-1.5 rounded-xl text-xs font-black transition-all duration-200 ${
+                      isSelected
+                        ? "bg-mashad-gold text-black shadow-gold"
+                        : "bg-mashad-card text-gray-400 hover:text-white border border-mashad-border/60 hover:border-mashad-gold/50"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
             </div>
 
-            {loadingEvents ? (
-              <div className="py-12 flex flex-col items-center justify-center gap-3">
-                <Loader2 size={24} className="animate-spin text-mashad-gold" />
-                <p className="text-xs text-gray-400">جاري جلب سيرفرات البث المباشر...</p>
+            <button
+              onClick={handleRefreshMatches}
+              className="flex items-center gap-1.5 text-xs text-mashad-gold hover:text-mashad-goldLight px-3 py-1.5 rounded-xl bg-mashad-card border border-mashad-border/60"
+            >
+              <RefreshCw size={13} className={loadingMatches ? "animate-spin" : ""} />
+              <span>تحديث المواعيد</span>
+            </button>
+          </div>
+
+          {/* Active Live Broadcasts for European Top Matches (If any streaming) */}
+          {filteredEvents.length > 0 && (
+            <section className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-red-500/20 text-red-500 border border-red-500/40 flex items-center justify-center">
+                    <Radio size={16} className="animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
+                      <span>بثوث حية منقولة الآن 🔴</span>
+                    </h2>
+                    <p className="text-xs text-gray-400">سيرفرات نقل مباشر بجودة عالية للمباريات الأوروبية الجارية</p>
+                  </div>
+                </div>
               </div>
-            ) : events.length === 0 ? (
-              <div className="p-8 rounded-3xl bg-mashad-card/60 border border-mashad-border text-center space-y-2">
-                <p className="text-sm font-bold text-gray-300">
-                  لا توجد مباريات منقولة بالبث المباشر في هذه اللحظة ⚽
-                </p>
-                <p className="text-xs text-gray-400">
-                  يمكنك متابعة نتائج ومواعيد مباريات اليوم بالأسفل، أو مشاهدة قنوات beIN Sports مباشرة من تبويب "باقات القنوات".
-                </p>
-              </div>
-            ) : (
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {events.map((ev) => (
+                {filteredEvents.map((ev) => (
                   <div
                     key={ev.id}
                     onClick={() => handlePlayEvent(ev)}
                     className="glass-card p-5 rounded-3xl border border-mashad-border/90 hover:border-mashad-gold cursor-pointer group flex flex-col justify-between transition-all duration-300 relative overflow-hidden shadow-2xl"
                   >
-                    {/* Top League & Channel Badges */}
                     <div className="flex items-center justify-between text-xs font-bold mb-3 border-b border-white/5 pb-2.5">
                       <span className="px-3 py-1 rounded-xl bg-mashad-gold/20 text-mashad-gold border border-mashad-gold/30 font-black">
                         {ev.champions}
@@ -330,9 +433,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                       </span>
                     </div>
 
-                    {/* Teams Clash Banner */}
-                    <div className="flex items-center justify-between py-3 px-2">
-                      {/* Team 1 */}
+                    <div className="flex items-center justify-between py-2 px-2">
                       <div className="flex items-center gap-3 flex-1">
                         <div className="w-12 h-12 rounded-2xl bg-black/60 p-2 border border-white/10 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
                           <img
@@ -347,12 +448,10 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                         <span className="text-sm sm:text-base font-black text-white">{ev.team1.name}</span>
                       </div>
 
-                      {/* VS Center Badge */}
-                      <div className="px-3 py-1 rounded-xl bg-red-600/20 border border-red-500/40 text-red-400 font-black text-xs tracking-wider mx-2 live-badge-glow">
+                      <div className="px-3 py-1 rounded-xl bg-red-600/20 border border-red-500/40 text-red-400 font-black text-xs tracking-wider mx-2">
                         VS
                       </div>
 
-                      {/* Team 2 */}
                       <div className="flex items-center justify-end gap-3 flex-1">
                         <span className="text-sm sm:text-base font-black text-white text-left">{ev.team2.name}</span>
                         <div className="w-12 h-12 rounded-2xl bg-black/60 p-2 border border-white/10 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
@@ -368,7 +467,6 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                       </div>
                     </div>
 
-                    {/* Bottom Action Row */}
                     <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
                       <div className="flex items-center gap-1.5 text-xs text-gray-300">
                         <Volume2 size={15} className="text-mashad-gold" />
@@ -390,121 +488,121 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                   </div>
                 ))}
               </div>
-            )}
-          </section>
+            </section>
+          )}
 
-          {/* 2. ESPN Schedule & Scores */}
-          <section className="space-y-4 pt-4 border-t border-mashad-border/60">
-            <div className="flex items-center justify-between flex-wrap gap-4">
+          {/* Upcoming Matches Grid */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <Trophy size={20} className="text-mashad-gold" />
-                <h3 className="text-lg sm:text-xl font-black text-white">نتائج ومواعيد مباريات اليوم</h3>
+                <Calendar size={18} className="text-mashad-gold" />
+                <h3 className="text-lg font-black text-white">
+                  جدول المباريات القادمة (الدوريات الخمس الكبرى ودوري الأبطال)
+                </h3>
               </div>
-
-              {/* Status Filter */}
-              <div className="flex items-center gap-1.5 bg-mashad-card/90 p-1 rounded-2xl border border-mashad-border">
-                <button
-                  onClick={() => setMatchFilter("all")}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
-                    matchFilter === "all" ? "bg-mashad-gold text-black shadow-gold" : "text-gray-400 hover:text-white"
-                  }`}
-                >
-                  الكل ({matches.length})
-                </button>
-                <button
-                  onClick={() => setMatchFilter("live")}
-                  className={`flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-bold transition ${
-                    matchFilter === "live" ? "bg-red-600 text-white shadow-live" : "text-gray-400 hover:text-white"
-                  }`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
-                  <span>مباشر ({liveCount})</span>
-                </button>
-                <button
-                  onClick={() => setMatchFilter("upcoming")}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
-                    matchFilter === "upcoming" ? "bg-mashad-gold text-black shadow-gold" : "text-gray-400 hover:text-white"
-                  }`}
-                >
-                  القادمة
-                </button>
-                <button
-                  onClick={() => setMatchFilter("finished")}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition ${
-                    matchFilter === "finished" ? "bg-mashad-gold text-black shadow-gold" : "text-gray-400 hover:text-white"
-                  }`}
-                >
-                  انتهت
-                </button>
-              </div>
+              <span className="text-xs text-gray-400 font-bold">
+                {visibleUpcomingMatches.length} مباراة مجدولة
+              </span>
             </div>
 
             {loadingMatches ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="h-28 rounded-2xl skeleton-shimmer border border-mashad-border/60" />
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                  <div key={i} className="h-32 rounded-2xl skeleton-shimmer border border-mashad-border/60" />
                 ))}
               </div>
-            ) : filteredMatches.length === 0 ? (
-              <div className="py-10 text-center text-gray-400 text-xs rounded-2xl bg-mashad-card/30 border border-mashad-border">
-                لا توجد مباريات مسجلة لهذا التصنيف حالياً.
+            ) : visibleUpcomingMatches.length === 0 ? (
+              <div className="p-8 rounded-3xl bg-mashad-card/60 border border-mashad-border text-center space-y-2">
+                <AlertCircle size={28} className="text-mashad-gold mx-auto" />
+                <p className="text-sm font-bold text-gray-300">
+                  لا توجد مباريات قادمة مسجلة لهذا الدوري حالياً
+                </p>
+                <p className="text-xs text-gray-400">
+                  يمكنك مراجعة نتائج الجولة السابقة من تبويب "نتائج المباريات"، أو مشاهدة القنوات الرياضية مباشرة.
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
-                {filteredMatches.map((m) => {
+                {visibleUpcomingMatches.map((m) => {
                   const isLive = m.status === "in";
                   return (
                     <div
                       key={m.id}
-                      onClick={() => handlePlayEspnMatch(m)}
-                      className={`glass-card p-4 rounded-2xl flex flex-col justify-between border cursor-pointer hover:border-mashad-gold transition-all ${
-                        isLive
-                          ? "border-red-500/50 bg-gradient-to-b from-red-500/10 via-mashad-card to-mashad-card shadow-live"
-                          : "border-mashad-border/80"
+                      onClick={() => handlePlayMatchCard(m)}
+                      className={`glass-card p-4 rounded-2xl flex flex-col justify-between border cursor-pointer hover:border-mashad-gold transition-all duration-300 ${
+                        isLive ? "border-red-500/60 shadow-live bg-red-950/10" : "border-mashad-border/60"
                       }`}
                     >
-                      <div className="flex items-center justify-between text-[11px] font-bold text-gray-400 border-b border-white/5 pb-2 mb-2">
-                        <span className="line-clamp-1 max-w-[65%] text-gray-300 font-extrabold">{m.leagueName}</span>
+                      {/* Top: League Name & Time Status */}
+                      <div className="flex items-center justify-between text-[11px] mb-3 pb-2 border-b border-white/5">
+                        <span className="text-mashad-gold font-black truncate max-w-[140px]">
+                          {m.leagueName}
+                        </span>
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                          className={`px-2 py-0.5 rounded-lg font-bold flex items-center gap-1 ${
                             isLive
-                              ? "bg-red-500 text-white live-badge-glow"
-                              : m.status === "post"
-                              ? "bg-gray-800 text-gray-300"
-                              : "bg-mashad-gold/20 text-mashad-gold border border-mashad-gold/30"
+                              ? "bg-red-500 text-white animate-pulse"
+                              : "bg-white/5 text-gray-300 border border-white/10"
                           }`}
                         >
+                          {isLive && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                           {m.statusText}
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between gap-2 my-1">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          {m.homeLogo ? (
-                            <img src={m.homeLogo} alt={m.homeTeam} className="w-7 h-7 object-contain flex-shrink-0" />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-xs">⚽</div>
-                          )}
-                          <span className="text-xs font-bold text-white line-clamp-1">{m.homeTeam}</span>
+                      {/* Teams & Score/VS */}
+                      <div className="flex items-center justify-between py-2">
+                        {/* Home Team */}
+                        <div className="flex flex-col items-center flex-1 text-center gap-1.5">
+                          <div className="w-10 h-10 rounded-xl bg-black/40 p-1.5 border border-white/10 flex items-center justify-center">
+                            {m.homeLogo ? (
+                              <img src={m.homeLogo} alt={m.homeTeam} className="w-full h-full object-contain" />
+                            ) : (
+                              <div className="w-5 h-5 rounded-full bg-gray-700" />
+                            )}
+                          </div>
+                          <span className="text-xs font-bold text-white line-clamp-1 max-w-[90px]">
+                            {m.homeTeam}
+                          </span>
                         </div>
 
-                        <div className="px-2.5 py-1 bg-black/70 rounded-xl font-black text-xs text-mashad-gold border border-white/10 min-w-[50px] text-center">
-                          {m.homeScore} : {m.awayScore}
+                        {/* Center: Live Score or VS */}
+                        <div className="px-3 flex flex-col items-center">
+                          {isLive ? (
+                            <div className="text-lg font-black text-mashad-gold tracking-widest">
+                              {m.homeScore} - {m.awayScore}
+                            </div>
+                          ) : (
+                            <div className="px-2.5 py-1 rounded-lg bg-black/50 text-[11px] text-gray-400 font-black border border-white/5">
+                              VS
+                            </div>
+                          )}
                         </div>
 
-                        <div className="flex items-center justify-end gap-2 flex-1 min-w-0">
-                          <span className="text-xs font-bold text-white line-clamp-1 text-left">{m.awayTeam}</span>
-                          {m.awayLogo ? (
-                            <img src={m.awayLogo} alt={m.awayTeam} className="w-7 h-7 object-contain flex-shrink-0" />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-xs">⚽</div>
-                          )}
+                        {/* Away Team */}
+                        <div className="flex flex-col items-center flex-1 text-center gap-1.5">
+                          <div className="w-10 h-10 rounded-xl bg-black/40 p-1.5 border border-white/10 flex items-center justify-center">
+                            {m.awayLogo ? (
+                              <img src={m.awayLogo} alt={m.awayTeam} className="w-full h-full object-contain" />
+                            ) : (
+                              <div className="w-5 h-5 rounded-full bg-gray-700" />
+                            )}
+                          </div>
+                          <span className="text-xs font-bold text-white line-clamp-1 max-w-[90px]">
+                            {m.awayTeam}
+                          </span>
                         </div>
                       </div>
 
-                      <div className="mt-2 pt-1.5 border-t border-white/5 flex items-center justify-between text-[10px] text-gray-400">
-                        <span>اضغط للمشاهدة والقنوات</span>
-                        <Play size={11} className="text-mashad-gold" />
+                      {/* Action Bar */}
+                      <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between text-[11px]">
+                        <span className="text-gray-400">
+                          {isLive ? "بث مباشر عبر beIN" : "متاحة للبث عند الانطلاق"}
+                        </span>
+                        <span className="text-mashad-gold font-bold flex items-center gap-1 group-hover:translate-x-[-2px] transition-transform">
+                          <Play size={12} className="fill-mashad-gold" />
+                          <span>{isLive ? "شاهد الآن" : "البث المباشر"}</span>
+                        </span>
                       </div>
                     </div>
                   );
@@ -513,90 +611,103 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
             )}
           </section>
         </div>
-      ) : (
-        /* ── TAB 2: CHANNELS (All TV Channels Categorized) ─────────────── */
+      )}
+
+      {/* ── TAB 2: FINISHED MATCH RESULTS (Top 5 + UCL Only) ─────────── */}
+      {activeTab === "results" && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-white">باقات القنوات التلفزيونية المشفرة</h2>
-              <p className="text-xs text-gray-400">beIN Sports, SSC, أبوظبي, والباقات الترفيهية</p>
+          {/* League Filter Strip */}
+          <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-mashad-border/40">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
+              {LEAGUE_FILTERS.map((f) => {
+                const isSelected = selectedLeagueFilter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    onClick={() => setSelectedLeagueFilter(f.id)}
+                    className={`whitespace-nowrap px-3.5 py-1.5 rounded-xl text-xs font-black transition-all duration-200 ${
+                      isSelected
+                        ? "bg-mashad-gold text-black shadow-gold"
+                        : "bg-mashad-card text-gray-400 hover:text-white border border-mashad-border/60 hover:border-mashad-gold/50"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
             </div>
+
+            <span className="text-xs text-gray-400 font-bold">
+              {visibleFinishedMatches.length} نتيجة مسجلة
+            </span>
           </div>
 
-          {/* Category Pills Bar */}
-          {loadingCategories ? (
-            <div className="h-12 flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {loadingMatches ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
               {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="w-32 h-11 rounded-2xl skeleton-shimmer flex-shrink-0" />
+                <div key={i} className="h-28 rounded-2xl skeleton-shimmer border border-mashad-border/60" />
               ))}
+            </div>
+          ) : visibleFinishedMatches.length === 0 ? (
+            <div className="p-10 rounded-3xl bg-mashad-card/60 border border-mashad-border text-center space-y-2">
+              <CheckCircle2 size={32} className="text-mashad-gold mx-auto" />
+              <p className="text-sm font-bold text-gray-300">
+                لا توجد نتائج مسجلة لهذا الدوري في هذه الفترة
+              </p>
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 overflow-x-auto pb-2 no-scrollbar">
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`px-5 py-3 rounded-2xl text-xs font-black whitespace-nowrap transition-all duration-300 flex-shrink-0 ${
-                    selectedCategory === cat.id
-                      ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black shadow-gold scale-105"
-                      : "bg-mashad-card text-gray-300 hover:bg-mashad-elevated hover:text-white border border-mashad-border"
-                  }`}
-                >
-                  {cat.name}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Channels Grid */}
-          {loadingChannels ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => (
-                <div key={i} className="h-36 rounded-2xl skeleton-shimmer border border-mashad-border/60" />
-              ))}
-            </div>
-          ) : filteredChannels.length === 0 ? (
-            <div className="py-20 text-center text-gray-400 text-sm rounded-2xl bg-mashad-card/30 border border-mashad-border">
-              لا توجد قنوات متوفرة في هذه الباقة حالياً.
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {filteredChannels.map((channel) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
+              {visibleFinishedMatches.map((m) => (
                 <div
-                  key={channel.id}
-                  onClick={() => handlePlayChannel(channel)}
-                  className="glass-card p-4 rounded-3xl flex flex-col items-center justify-center gap-3.5 cursor-pointer group hover:border-mashad-gold/80 transition-all relative overflow-hidden aspect-[4/3]"
+                  key={m.id}
+                  className="glass-card p-4 rounded-2xl flex flex-col justify-between border border-mashad-border/60 hover:border-mashad-gold/60 transition-all duration-300"
                 >
-                  {/* Channel Logo */}
-                  <div className="w-16 h-16 rounded-2xl bg-black/60 border border-white/5 flex items-center justify-center p-2.5 group-hover:scale-110 transition-transform shadow-inner">
-                    {channel.logo ? (
-                      <img
-                        src={channel.logo}
-                        alt={channel.name}
-                        loading="lazy"
-                        className="w-full h-full object-contain"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      <Tv size={26} className="text-mashad-gold" />
-                    )}
+                  {/* Top Bar: League Name & "Finished" Badge */}
+                  <div className="flex items-center justify-between text-[11px] mb-2.5 pb-2 border-b border-white/5">
+                    <span className="text-mashad-gold font-black truncate max-w-[150px]">
+                      {m.leagueName}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-lg bg-white/5 text-gray-400 text-[10px] font-bold border border-white/10">
+                      انتهت المباراة ✓
+                    </span>
                   </div>
 
-                  {/* Channel Name */}
-                  <h3 className="text-xs sm:text-sm font-black text-white text-center line-clamp-1 group-hover:text-mashad-gold transition">
-                    {channel.name}
-                  </h3>
+                  {/* Teams & Final Score */}
+                  <div className="flex items-center justify-between py-2">
+                    {/* Home Team */}
+                    <div className="flex flex-col items-center flex-1 text-center gap-1.5">
+                      <div className="w-10 h-10 rounded-xl bg-black/40 p-1.5 border border-white/10 flex items-center justify-center">
+                        {m.homeLogo ? (
+                          <img src={m.homeLogo} alt={m.homeTeam} className="w-full h-full object-contain" />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full bg-gray-700" />
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-white line-clamp-1 max-w-[90px]">
+                        {m.homeTeam}
+                      </span>
+                    </div>
 
-                  {/* Hover Play Button Overlay */}
-                  <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-mashad-gold to-mashad-goldLight text-black flex items-center justify-center shadow-gold group-hover:scale-110 transition-transform">
-                      {resolvingStreamId === channel.id ? (
-                        <Loader2 size={20} className="animate-spin text-black" />
-                      ) : (
-                        <Play size={20} className="fill-black ml-0.5" />
-                      )}
+                    {/* Final Score */}
+                    <div className="px-3 flex flex-col items-center">
+                      <div className="px-3 py-1 rounded-xl bg-black/60 border border-mashad-gold/30 text-mashad-gold font-black text-base sm:text-lg tracking-wider">
+                        {m.homeScore} - {m.awayScore}
+                      </div>
+                      <span className="text-[10px] text-gray-400 mt-1 font-semibold">نتيجة نهائية</span>
+                    </div>
+
+                    {/* Away Team */}
+                    <div className="flex flex-col items-center flex-1 text-center gap-1.5">
+                      <div className="w-10 h-10 rounded-xl bg-black/40 p-1.5 border border-white/10 flex items-center justify-center">
+                        {m.awayLogo ? (
+                          <img src={m.awayLogo} alt={m.awayTeam} className="w-full h-full object-contain" />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full bg-gray-700" />
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-white line-clamp-1 max-w-[90px]">
+                        {m.awayTeam}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -604,6 +715,118 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
             </div>
           )}
         </div>
+      )}
+
+      {/* ── TAB 3: CHANNELS BROWSER ─────────────────────────────────── */}
+      {activeTab === "channels" && (
+        <section className="space-y-6">
+          {/* Category Chips Bar */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Layers size={18} className="text-mashad-gold" />
+              <h3 className="text-lg font-black text-white">اختر باقة القنوات</h3>
+            </div>
+
+            {loadingCategories ? (
+              <div className="flex items-center gap-3 overflow-x-auto py-2">
+                {[1, 2, 3, 4, 5].map((i) => (
+                  <div key={i} className="h-10 w-28 rounded-xl skeleton-shimmer" />
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5 overflow-x-auto pb-2 scrollbar-none">
+                {categories.map((cat) => {
+                  const isSelected = selectedCategory === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => setSelectedCategory(cat.id)}
+                      className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border ${
+                        isSelected
+                          ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black border-transparent shadow-gold font-black scale-105"
+                          : "bg-mashad-card text-gray-300 border-mashad-border/80 hover:border-mashad-gold/60 hover:text-white"
+                      }`}
+                    >
+                      <Tv size={14} className={isSelected ? "text-black" : "text-mashad-gold"} />
+                      <span>{cat.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Channels Grid */}
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-400">
+                {filteredChannels.length} قناة متاحة في هذه الباقة
+              </span>
+            </div>
+
+            {loadingChannels ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => (
+                  <div key={i} className="aspect-[4/3] rounded-2xl skeleton-shimmer" />
+                ))}
+              </div>
+            ) : filteredChannels.length === 0 ? (
+              <div className="py-16 text-center text-gray-400 rounded-3xl bg-mashad-card/40 border border-mashad-border">
+                <p className="text-sm font-bold">لا توجد قنوات مطابقة لبحثك</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
+                {filteredChannels.map((channel) => (
+                  <div
+                    key={channel.id}
+                    onClick={() => handlePlayChannel(channel)}
+                    className="glass-card group p-3 rounded-2xl border border-mashad-border/80 hover:border-mashad-gold cursor-pointer transition-all duration-300 flex flex-col items-center justify-between aspect-[4/3] relative overflow-hidden shadow-lg hover:shadow-gold hover:scale-[1.03]"
+                  >
+                    {/* Live Pulse Dot */}
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/60 border border-white/10 text-[9px] text-red-400 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
+                      LIVE
+                    </div>
+
+                    {/* Channel Logo */}
+                    <div className="flex-1 flex items-center justify-center p-2 w-full">
+                      {channel.logo ? (
+                        <img
+                          src={channel.logo}
+                          alt={channel.name}
+                          className="max-h-14 max-w-full object-contain filter group-hover:brightness-110 transition-all"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = "none";
+                          }}
+                        />
+                      ) : (
+                        <Tv size={32} className="text-mashad-muted group-hover:text-mashad-gold transition-colors" />
+                      )}
+                    </div>
+
+                    {/* Channel Name */}
+                    <div className="w-full text-center border-t border-white/5 pt-1.5">
+                      <p className="text-xs font-bold text-white truncate group-hover:text-mashad-gold transition-colors">
+                        {channel.name}
+                      </p>
+                    </div>
+
+                    {/* Hover Play Button Overlay */}
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-mashad-gold to-mashad-goldLight text-black flex items-center justify-center shadow-gold scale-75 group-hover:scale-100 transition-transform">
+                        {resolvingStreamId === channel.id ? (
+                          <Loader2 size={18} className="animate-spin text-black" />
+                        ) : (
+                          <Play size={18} className="fill-black ml-0.5" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
       )}
     </div>
   );

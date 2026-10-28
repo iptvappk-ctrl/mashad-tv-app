@@ -21,8 +21,7 @@ import java.util.concurrent.TimeUnit
 object MashadTelemetry {
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ALL CONSTANTS — 6-layer encrypted (XOR→ROT→XOR→Caesar→Nibble→PosXOR)
-    // No plain-text string literals exist in this file.
+    // Legacy encoded constants are decoded at runtime; this is not encryption.
     // ═══════════════════════════════════════════════════════════════════════
 
     private val _tpu = byteArrayOf(129.toByte(), 158.toByte(), 154.toByte(), 44, 163.toByte(), 56, 196.toByte(), 62, 205.toByte(), 64, 219.toByte(), 214.toByte(), 233.toByte(), 104, 110, 240.toByte(), 142.toByte(), 134.toByte(), 138.toByte(), 26, 158.toByte(), 33)

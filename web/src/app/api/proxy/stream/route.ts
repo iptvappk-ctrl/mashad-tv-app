@@ -58,7 +58,8 @@ export async function GET(req: NextRequest) {
     // Case 1: M3U8 Playlist -> Rewrite segment URLs to pass through proxy
     if (isM3u8 && response.ok) {
       const playlistText = await response.text();
-      const parsedTarget = new URL(targetUrl);
+      const actualBaseUrl = response.url || targetUrl;
+      const parsedTarget = new URL(actualBaseUrl);
 
       const rewritten = playlistText
         .split("\n")

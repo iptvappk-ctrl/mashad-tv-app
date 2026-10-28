@@ -63,8 +63,8 @@ fun YacineStreamPlayer(
                             if (stream.referer.isNotEmpty()) put("Referer", stream.referer)
                         }
                     )
-                val mediaSource = HlsMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(stream.url))
+                val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                val mediaSource = mediaSourceFactory.createMediaSource(MediaItem.fromUri(stream.url))
                 setMediaSource(mediaSource)
                 prepare()
                 playWhenReady = true

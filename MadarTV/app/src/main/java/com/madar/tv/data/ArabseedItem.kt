@@ -19,6 +19,7 @@ data class ArabseedItem(
     val pageUrl: String,
     val category: String,
     val overview: String = "",
+    val providerName: String = "عرب سيد",
 ) {
     override fun toString(): String = id
 }
@@ -29,6 +30,7 @@ data class ArabseedDetail(
     val item: ArabseedItem,
     val servers: List<ArabseedServer>,
     val preResolvedStream: String? = null,
+    val cast: List<String> = emptyList(),
 ) {
     override fun toString(): String = item.id
 }

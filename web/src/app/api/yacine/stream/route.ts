@@ -6,14 +6,17 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const type = searchParams.get("type"); // "channel" or "event"
-  const id = parseInt(searchParams.get("id") || "0", 10);
+  const rawId = searchParams.get("id") || "";
 
-  if (!id || (type !== "channel" && type !== "event")) {
+  if (!rawId || (type !== "channel" && type !== "event")) {
     return NextResponse.json({ success: false, error: "Invalid parameters" }, { status: 400 });
   }
 
   try {
-    const rawStreams = type === "channel" ? await getStreamsForChannel(id) : await getStreamsForEvent(id);
+    const rawStreams =
+      type === "channel"
+        ? await getStreamsForChannel(rawId)
+        : await getStreamsForEvent(rawId);
 
     // Format streams with direct and proxied playback URLs
     const formatted = rawStreams.map((s) => {

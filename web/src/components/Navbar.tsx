@@ -1,24 +1,26 @@
 "use client";
 
 import React from "react";
-import {
-  Home,
-  Film,
-  Tv,
-  Sparkles,
-  Radio,
-  Search,
-  Heart,
-  Crown,
-} from "lucide-react";
+import { Film, Heart, Home, Radio, Search, Sparkles, Tv } from "lucide-react";
+
+type Tab = "home" | "movies" | "series" | "anime" | "matches" | "favorites";
 
 interface NavbarProps {
-  activeTab: "home" | "movies" | "series" | "anime" | "matches" | "favorites";
-  onTabChange: (tab: "home" | "movies" | "series" | "anime" | "matches" | "favorites") => void;
+  activeTab: Tab;
+  onTabChange: (tab: Tab) => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   liveMatchesCount?: number;
 }
+
+const links: { id: Tab; label: string; icon: typeof Home }[] = [
+  { id: "home", label: "الرئيسية", icon: Home },
+  { id: "movies", label: "أفلام", icon: Film },
+  { id: "series", label: "مسلسلات", icon: Tv },
+  { id: "anime", label: "أنمي", icon: Sparkles },
+  { id: "matches", label: "مباشر", icon: Radio },
+  { id: "favorites", label: "قائمتي", icon: Heart },
+];
 
 export default function Navbar({
   activeTab,
@@ -27,147 +29,101 @@ export default function Navbar({
   onSearchChange,
   liveMatchesCount = 0,
 }: NavbarProps) {
+  const search = (
+    <label className="relative block w-full">
+      <Search size={18} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" />
+      <input
+        type="search"
+        value={searchQuery}
+        onChange={(event) => onSearchChange(event.target.value)}
+        placeholder="دوّر على فيلم أو مسلسل..."
+        aria-label="ابحث عن فيلم أو مسلسل"
+        className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 pr-11 pl-4 text-sm font-semibold text-slate-800 outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:ring-4 focus:ring-indigo-100"
+      />
+    </label>
+  );
+
   return (
-    <header className="sticky top-0 z-40 w-full bg-[#080A10]/95 backdrop-blur-xl border-b border-[#1D273B] shadow-2xl">
-      <div className="w-full px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
-        {/* Right Section: Logo + Nav Links */}
-        <div className="flex items-center gap-6 overflow-x-auto no-scrollbar">
-          {/* Official Mashhad Logo */}
-          <div
+    <>
+      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 shadow-[0_3px_20px_rgba(27,39,69,0.04)] backdrop-blur-xl">
+        <div className="mx-auto flex max-w-[1440px] items-center gap-5 px-4 py-3 sm:px-6 lg:px-8">
+          <button
+            type="button"
             onClick={() => onTabChange("home")}
-            className="flex items-center gap-3 cursor-pointer flex-shrink-0 group"
+            className="flex shrink-0 items-center gap-3 rounded-2xl text-right"
+            aria-label="العودة للرئيسية"
           >
-            <div className="w-12 h-12 rounded-2xl overflow-hidden border-2 border-[#E5B842]/70 shadow-[0_0_15px_rgba(229,184,66,0.3)] flex-shrink-0 bg-black group-hover:scale-105 transition-transform duration-300">
+            <span className="grid h-11 w-11 place-items-center overflow-hidden rounded-2xl border border-indigo-100 bg-indigo-50 shadow-sm">
               <img
                 src="/logo.jpg"
-                alt="مَشْهَد TV"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/logo.png";
+                alt=""
+                className="h-full w-full object-cover"
+                onError={(event) => {
+                  event.currentTarget.src = "/logo.png";
                 }}
               />
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <span className="text-xl sm:text-2xl font-black text-white tracking-wide">
-                  مَـشْـهَـدْ
-                </span>
-                <span className="px-2 py-0.5 rounded-lg bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black text-[11px] font-black uppercase shadow-gold">
-                  TV
-                </span>
-              </div>
-              <span className="text-[10px] text-gray-400 font-semibold tracking-wider">
-                سينما حصرية • بث مباريات مباشر
-              </span>
-            </div>
-          </div>
-
-          {/* Navigation Links with Mashhad Distinctive Gold Highlights */}
-          <nav className="hidden lg:flex items-center gap-2 text-xs font-bold text-gray-300">
-            <button
-              onClick={() => onTabChange("home")}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all ${
-                activeTab === "home"
-                  ? "bg-[#E5B842] text-black font-black shadow-gold"
-                  : "hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Home size={15} />
-              <span>الرئيسية</span>
-            </button>
-
-            <button
-              onClick={() => onTabChange("movies")}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all ${
-                activeTab === "movies"
-                  ? "bg-[#E5B842] text-black font-black shadow-gold"
-                  : "hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Film size={15} />
-              <span>أفلام</span>
-            </button>
-
-            <button
-              onClick={() => onTabChange("series")}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all ${
-                activeTab === "series"
-                  ? "bg-[#E5B842] text-black font-black shadow-gold"
-                  : "hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Tv size={15} />
-              <span>مسلسلات</span>
-            </button>
-
-            <button
-              onClick={() => onTabChange("matches")}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all ${
-                activeTab === "matches"
-                  ? "bg-gradient-to-r from-red-600 to-red-700 text-white font-black shadow-live"
-                  : "hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Radio size={15} className="text-red-400 animate-pulse" />
-              <span>مباريات لايف</span>
-              {liveMatchesCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-red-500 text-white text-[9px] font-black">
-                  {liveMatchesCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => onTabChange("anime")}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all ${
-                activeTab === "anime"
-                  ? "bg-[#E5B842] text-black font-black shadow-gold"
-                  : "hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Sparkles size={15} />
-              <span>أنمي وكرتون</span>
-            </button>
-
-            <button
-              onClick={() => onTabChange("favorites")}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all ${
-                activeTab === "favorites"
-                  ? "bg-[#E5B842] text-black font-black shadow-gold"
-                  : "hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Heart size={15} />
-              <span>المفضلة</span>
-            </button>
-          </nav>
-        </div>
-
-        {/* Left Section: Search Input + Mashhad VIP Club Button */}
-        <div className="flex items-center gap-3">
-          {/* Quick Search */}
-          <div className="relative hidden md:block w-64 lg:w-72">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="ابحث عن فيلم، مسلسل، أو قناة..."
-              className="w-full bg-[#121824] border border-[#1D273B] text-xs text-white placeholder-gray-400 py-2.5 pr-10 pl-4 rounded-xl focus:outline-none focus:border-[#E5B842] focus:ring-1 focus:ring-[#E5B842] transition"
-            />
-            <Search size={16} className="absolute right-3.5 top-3 text-gray-400 pointer-events-none" />
-          </div>
-
-          {/* Golden VIP Club Button */}
-          <button
-            onClick={() => alert("مرحباً بك في نادي مَشْهَد VIP! كافة المحتويات متاحة مجاناً بأعلى جودة وبدون إعلانات.")}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B842] via-[#F5D061] to-[#C69214] text-black text-xs font-black shadow-gold hover:shadow-goldGlow hover:scale-105 active:scale-95 transition-all flex-shrink-0"
-          >
-            <Crown size={16} className="fill-black" />
-            <span className="hidden sm:inline">نادي مشهد VIP</span>
-            <span className="sm:hidden">VIP</span>
+            </span>
+            <span className="hidden sm:block">
+              <span className="block text-lg font-black leading-tight tracking-tight text-slate-900">مَشْهَد</span>
+              <span className="block text-[10px] font-semibold text-slate-500">اختار حكايتك</span>
+            </span>
           </button>
+
+          <nav className="hidden items-center gap-1 lg:flex" aria-label="التنقل الرئيسي">
+            {links.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onTabChange(id)}
+                className={`relative inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold transition ${
+                  activeTab === id
+                    ? "bg-indigo-50 text-indigo-700"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                }`}
+              >
+                <Icon size={16} />
+                {label}
+                {id === "matches" && liveMatchesCount > 0 && (
+                  <span className="min-w-5 rounded-full bg-rose-500 px-1.5 py-0.5 text-center text-[10px] font-black text-white">
+                    {liveMatchesCount}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+
+          <div className="hidden min-w-48 flex-1 md:block lg:max-w-sm">{search}</div>
+          <span className="mr-auto hidden items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-700 sm:inline-flex">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            مكتبة بتتجدد
+          </span>
         </div>
-      </div>
-    </header>
+        <div className="border-t border-slate-100 px-4 py-2.5 md:hidden">{search}</div>
+      </header>
+
+      <nav
+        aria-label="التنقل للموبايل"
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-slate-200 bg-white/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_28px_rgba(31,43,72,0.08)] backdrop-blur-xl lg:hidden"
+      >
+        {links.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onTabChange(id)}
+            className={`relative flex min-w-0 flex-col items-center gap-1 rounded-xl py-1.5 text-[10px] font-bold ${
+              activeTab === id ? "text-indigo-700" : "text-slate-500"
+            }`}
+          >
+            <span className={`grid h-8 w-10 place-items-center rounded-xl ${activeTab === id ? "bg-indigo-50" : ""}`}>
+              <Icon size={18} />
+            </span>
+            <span>{label}</span>
+            {id === "matches" && liveMatchesCount > 0 && (
+              <span className="absolute right-1/2 top-0 mr-1.5 h-2 w-2 rounded-full bg-rose-500" />
+            )}
+          </button>
+        ))}
+      </nav>
+    </>
   );
 }

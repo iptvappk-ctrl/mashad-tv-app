@@ -10,6 +10,8 @@ export interface ArabseedItem {
   year?: string;
   rating?: string;
   isSeries: boolean;
+  providerId?: string;
+  providerName?: string;
 }
 
 export interface ArabseedServer {
@@ -32,6 +34,7 @@ export interface ArabseedSeason {
 export interface ArabseedDetail {
   item: ArabseedItem;
   overview: string;
+  cast?: string[];
   servers: ArabseedServer[];
   seasons: ArabseedSeason[];
   episodes: ArabseedEpisode[];
@@ -259,6 +262,31 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
         .text()
         .trim() || "لا يوجد وصف متوفر.";
 
+    const castNames = new Set<string>();
+    $("[itemprop='actor'] [itemprop='name'], [itemprop='actor'], .Actors a, .actors a, .actor a, .cast a, .Cast a, .cast-list a, .post__actors a")
+      .each((_, el) => {
+        const name = $(el).attr("content") || $(el).text().trim();
+        if (name && name.length < 80) castNames.add(name);
+      });
+    $("script[type='application/ld+json']").each((_, el) => {
+      try {
+        const parsed = JSON.parse($(el).text());
+        const nodes = Array.isArray(parsed) ? parsed : [parsed];
+        for (const node of nodes) {
+          const graph = Array.isArray(node?.["@graph"]) ? node["@graph"] : [node];
+          for (const entity of graph) {
+            const actors = Array.isArray(entity?.actor) ? entity.actor : entity?.actor ? [entity.actor] : [];
+            for (const actor of actors) {
+              const name = typeof actor === "string" ? actor : actor?.name;
+              if (typeof name === "string" && name.trim().length < 80) castNames.add(name.trim());
+            }
+          }
+        }
+      } catch {
+        // Ignore malformed metadata from the source page.
+      }
+    });
+
     // Parse Watch Servers
     const servers: ArabseedServer[] = [];
     const sourceHtml = watchHtml || pageHtml;
@@ -341,6 +369,7 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
         isSeries,
       },
       overview,
+      cast: Array.from(castNames),
       servers,
       seasons,
       episodes,

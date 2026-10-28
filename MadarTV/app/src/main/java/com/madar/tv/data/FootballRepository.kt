@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 object FootballRepository {
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ENCRYPTED CONSTANTS — 6-layer obfuscation via X.s() / X.j() (v6)
+    // Legacy encoded constants; values are recoverable from the client APK.
     // Pipeline: XOR(K1)→ROT-L(3)→XOR(K2)→Caesar(+17)→Nibble-Swap→PosXOR(K3)
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -93,17 +93,96 @@ object FootballRepository {
 
     private fun fetchLeagueMatches(code: String, leagueName: String): List<FootballMatch> {
         val url = EP.format(code)
-        val req = Request.Builder()
-            .url(url)
-            .header(UH, UV)
-            .header(AH, AJ)
-            .build()
+        val allMatches = mutableListOf<FootballMatch>()
+        val seenIds = mutableSetOf<String>()
 
-        val resp = client.newCall(req).execute()
-        val body = resp.body?.string() ?: return emptyList()
-        val json = JSONObject(body)
-        val events = json.optJSONArray("events") ?: return emptyList()
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .header(UH, UV)
+                .header(AH, AJ)
+                .build()
 
+            val resp = client.newCall(req).execute()
+            val body = resp.body?.string() ?: return emptyList()
+            val json = JSONObject(body)
+            val events = json.optJSONArray("events")
+            if (events != null) {
+                val parsed = parseEvents(events, code, leagueName)
+                for (m in parsed) {
+                    if (seenIds.add(m.id)) allMatches.add(m)
+                }
+            }
+
+            // Calendar check for next upcoming matchday
+            val sdfUtc = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            val todayIso = sdfUtc.format(Date())
+
+            val leaguesArr = json.optJSONArray("leagues")
+            val leagueObj = leaguesArr?.optJSONObject(0)
+            val calendar = leagueObj?.optJSONArray("calendar")
+
+            var nextDateStr: String? = null
+            if (calendar != null) {
+                for (i in 0 until calendar.length()) {
+                    val d = calendar.optString(i, "")
+                    if (d.length >= 10 && d.substring(0, 10) >= todayIso) {
+                        nextDateStr = d.substring(0, 10).replace("-", "")
+                        break
+                    }
+                }
+            }
+
+            if (!nextDateStr.isNullOrBlank()) {
+                try {
+                    val upUrl = if (url.contains("?")) "$url&dates=$nextDateStr" else "$url?dates=$nextDateStr"
+                    val upReq = Request.Builder().url(upUrl).header(UH, UV).header(AH, AJ).build()
+                    val upResp = client.newCall(upReq).execute()
+                    val upBody = upResp.body?.string() ?: ""
+                    val upJson = JSONObject(upBody)
+                    val upEvents = upJson.optJSONArray("events")
+                    if (upEvents != null) {
+                        val parsedUp = parseEvents(upEvents, code, leagueName)
+                        for (m in parsedUp) {
+                            if (seenIds.add(m.id)) allMatches.add(m)
+                        }
+                    }
+                } catch (_: Exception) {}
+            } else if (code == "uefa.champions") {
+                // Check next 4 Tuesdays for Champions League matchdays
+                val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+                for (i in 1..28) {
+                    cal.add(Calendar.DAY_OF_YEAR, 1)
+                    if (cal.get(Calendar.DAY_OF_WEEK) == Calendar.TUESDAY) {
+                        val dStr = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }.format(cal.time)
+                        try {
+                            val uclUrl = if (url.contains("?")) "$url&dates=$dStr" else "$url?dates=$dStr"
+                            val uclReq = Request.Builder().url(uclUrl).header(UH, UV).header(AH, AJ).build()
+                            val uclResp = client.newCall(uclReq).execute()
+                            val uclBody = uclResp.body?.string() ?: ""
+                            val uclJson = JSONObject(uclBody)
+                            val uclEvents = uclJson.optJSONArray("events")
+                            if (uclEvents != null && uclEvents.length() > 0) {
+                                val parsedUcl = parseEvents(uclEvents, code, leagueName)
+                                for (m in parsedUcl) {
+                                    if (seenIds.add(m.id)) allMatches.add(m)
+                                }
+                                break
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        return allMatches
+    }
+
+    private fun parseEvents(events: org.json.JSONArray, code: String, leagueName: String): List<FootballMatch> {
         val list = mutableListOf<FootballMatch>()
         for (i in 0 until events.length()) {
             val ev = events.getJSONObject(i)
@@ -152,6 +231,13 @@ object FootballRepository {
 
             val timeDisplay = formatMatchTime(dateStr, state, shortDetail)
 
+            // Parse kickoff time for notification scheduling
+            val kickoffMs = try {
+                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'", Locale.US)
+                sdf.timeZone = TimeZone.getTimeZone("UTC")
+                sdf.parse(dateStr)?.time
+            } catch (_: Exception) { null }
+
             list += FootballMatch(
                 id = id,
                 leagueName = leagueName,
@@ -167,6 +253,7 @@ object FootballRepository {
                 timeOrStatus = timeDisplay,
                 state = state,
                 matchDate = dateStr,
+                kickoffEpochMs = kickoffMs,
             )
         }
         return list

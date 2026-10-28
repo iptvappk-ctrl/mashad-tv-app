@@ -15,4 +15,6 @@ data class FootballMatch(
     val timeOrStatus: String,
     val state: String, // "pre", "in", "post"
     val matchDate: String,
+    val kickoffEpochMs: Long? = null,  // UTC epoch millis for match kick-off
+    val league: String = leagueName,   // alias for notification use
 )

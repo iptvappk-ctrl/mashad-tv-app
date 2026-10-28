@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getArabseedDetail } from "@/lib/arabseed";
+import { aggregator } from "@/lib/providers/aggregator";
 
 export const dynamic = "force-dynamic";
 
@@ -12,14 +12,14 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const detail = await getArabseedDetail(pageUrl);
+    const detail = await aggregator.getDetail(pageUrl);
     if (!detail) {
       return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     }
 
     // Format directStream with proxy if present
     let proxiedStream = detail.directStream;
-    if (proxiedStream) {
+    if (proxiedStream && (proxiedStream.includes(".m3u8") || proxiedStream.includes("datahowa"))) {
       proxiedStream = `/api/proxy/stream?url=${encodeURIComponent(proxiedStream)}&ref=${encodeURIComponent("https://govid.live/")}`;
     }
 

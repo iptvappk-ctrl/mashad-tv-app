@@ -1,12 +1,12 @@
 export interface YacineCategory {
-  id: number;
+  id: string | number;
   name: string;
   logo: string;
   childCount: number;
 }
 
 export interface YacineChannel {
-  id: number;
+  id: string | number;
   name: string;
   logo: string;
   isHide: number;
@@ -14,13 +14,13 @@ export interface YacineChannel {
 }
 
 export interface YacineTeam {
-  id: number;
+  id: string | number;
   name: string;
   logo: string;
 }
 
 export interface YacineEvent {
-  id: number;
+  id: string | number;
   champions: string;
   channel: string;
   startTime: number;
@@ -53,7 +53,7 @@ let cachedCategories: YacineCategory[] = [];
 let categoriesFetchTime = 0;
 const CATEGORIES_TTL = 15 * 60 * 1000; // 15 minutes
 
-const channelCache = new Map<number, { data: YacineChannel[]; time: number }>();
+const channelCache = new Map<string, { data: YacineChannel[]; time: number }>();
 const CHANNEL_TTL = 15 * 60 * 1000;
 
 let cachedEvents: YacineEvent[] = [];
@@ -133,21 +133,22 @@ export async function getYacineCategories(force = false): Promise<YacineCategory
   }
 }
 
-export async function getYacineChannels(categoryId: number, force = false): Promise<YacineChannel[]> {
+export async function getYacineChannels(categoryId: string | number, force = false): Promise<YacineChannel[]> {
+  const catKey = String(categoryId);
   const now = Date.now();
-  const cached = channelCache.get(categoryId);
+  const cached = channelCache.get(catKey);
   if (!force && cached && now - cached.time < CHANNEL_TTL) {
     return cached.data;
   }
 
   try {
-    const raw = await fetchFromYacine(`categories/${categoryId}/channels`);
+    const raw = await fetchFromYacine(`categories/${catKey}/channels`);
     const parsed = JSON.parse(raw);
     const data = Array.isArray(parsed) ? parsed : Array.isArray(parsed.data) ? parsed.data : [];
 
     const channels: YacineChannel[] = data
       .map((item: any) => ({
-        id: item.id,
+        id: String(item.id),
         name: item.name || "",
         logo: item.logo || "",
         isHide: item.is_hide || 0,
@@ -156,10 +157,10 @@ export async function getYacineChannels(categoryId: number, force = false): Prom
       .filter((c: YacineChannel) => c.isHide === 0)
       .sort((a: YacineChannel, b: YacineChannel) => b.priority - a.priority);
 
-    channelCache.set(categoryId, { data: channels, time: now });
+    channelCache.set(catKey, { data: channels, time: now });
     return channels;
   } catch (err) {
-    console.error(`Yacine channels error for cat ${categoryId}:`, err);
+    console.error(`Yacine channels error for cat ${catKey}:`, err);
     return cached ? cached.data : [];
   }
 }
@@ -201,7 +202,7 @@ export async function getYacineEvents(force = false): Promise<YacineEvent[]> {
   }
 }
 
-export async function getStreamsForChannel(channelId: number): Promise<YacineStream[]> {
+export async function getStreamsForChannel(channelId: number | string): Promise<YacineStream[]> {
   const cacheKey = `channel:${channelId}`;
   const now = Date.now();
   const cached = streamCache.get(cacheKey);
@@ -224,7 +225,7 @@ export async function getStreamsForChannel(channelId: number): Promise<YacineStr
   }
 }
 
-export async function getStreamsForEvent(eventId: number): Promise<YacineStream[]> {
+export async function getStreamsForEvent(eventId: number | string): Promise<YacineStream[]> {
   const cacheKey = `event:${eventId}`;
   const now = Date.now();
   const cached = streamCache.get(cacheKey);

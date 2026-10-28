@@ -68,22 +68,12 @@ node server.js
 
 ---
 
-## 4. خطوات بناء تطبيق الأندرويد واجتياز الفحص الأمني (Android Release Build)
+## 4. بناء تطبيق Android
 
-لبناء نسخة الـ APK النهائية وتشفيرها:
+من مجلد `MadarTV` شغّل:
 
-### الخطوة 1: تشغيل أمر البناء
 ```powershell
-cd "c:\Users\hassa\Desktop\all project\iptv app\MadarTV"
-.\gradlew assembleRelease
+.\gradlew.bat :app:assembleDebug :app:assembleRelease
 ```
 
-### الخطوة 2: تشغيل سكريبت فحص وتشفير الـ DEX
-يقوم هذا السكريبت بفحص ملفات الـ DEX والتأكد من نجاح تشفير الـ 21 نصاً حساساً، ثم نسخ الملف النهائي مباشرة إلى سطح المكتب:
-```powershell
-python "C:\Users\hassa\.gemini\antigravity\brain\fc4e6998-e55e-4163-a7c5-cd3b90af1411\scratch\verify_and_copy_apk.py"
-```
-
-### الملف النهائي الناتج:
-يتم حفظ الملف الجاهز للتثبيت على الهواتف والشاشات في:
-`c:\Users\hassa\Desktop\Mashad.apk` (حجمه ~6 MB).
+نسخة Release تستخدم R8 لتقليل الكود وإعادة تسمية الرموز. هذا تشويش للكود وليس تشفيراً للـAPK. عند عدم ضبط متغيرات توقيع Release الأربعة الموضحة في [توثيق حماية APK](./03_SECURITY_OBFUSCATION_V6.md)، ينتج البناء ملف `app/build/outputs/apk/release/app-release-unsigned.apk` غير موقّع؛ لا توزعه قبل توقيعه بمفتاح الإصدار المحفوظ خارج المستودع. لا يوجد حالياً سكريبت تحقق أمني أو نسخ آلي إلى سطح المكتب ضمن المشروع.

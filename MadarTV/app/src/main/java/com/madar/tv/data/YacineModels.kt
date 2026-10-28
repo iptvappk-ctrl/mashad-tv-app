@@ -1,14 +1,14 @@
 package com.madar.tv.data
 
 data class YacineCategory(
-    val id: Int,
+    val id: String,
     val name: String,
     val logo: String,
     val childCount: Int
 )
 
 data class YacineChannel(
-    val id: Int,
+    val id: String,
     val name: String,
     val logo: String,
     val isHide: Int,
@@ -16,13 +16,13 @@ data class YacineChannel(
 )
 
 data class YacineTeam(
-    val id: Int,
+    val id: String,
     val name: String,
     val logo: String
 )
 
 data class YacineEvent(
-    val id: Long,
+    val id: String,
     val champions: String,
     val channel: String,
     val startTime: Long,

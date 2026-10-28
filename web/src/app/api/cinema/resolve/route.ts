@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveDirectStream } from "@/lib/arabseed";
+import { aggregator } from "@/lib/providers/aggregator";
 
 export const dynamic = "force-dynamic";
 
@@ -12,25 +12,32 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const direct = await resolveDirectStream(serverUrl);
-    if (!direct) {
-      return NextResponse.json({
-        success: false,
-        error: "Could not resolve direct stream for this server",
-      });
+    const direct = await aggregator.resolveStream(serverUrl);
+    const finalUrl = direct || serverUrl;
+
+    let playUrl = finalUrl;
+    if (finalUrl.includes(".m3u8") || finalUrl.includes("datahowa")) {
+      playUrl = `/api/proxy/stream?url=${encodeURIComponent(finalUrl)}&ref=${encodeURIComponent("https://govid.live/")}`;
     }
 
-    const proxied = `/api/proxy/stream?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://govid.live/")}`;
     return NextResponse.json({
       success: true,
-      playUrl: proxied,
-      rawUrl: direct,
+      playUrl,
+      rawUrl: finalUrl,
       data: {
-        rawUrl: direct,
-        playUrl: proxied,
+        rawUrl: finalUrl,
+        playUrl,
       },
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({
+      success: true,
+      playUrl: serverUrl,
+      rawUrl: serverUrl,
+      data: {
+        rawUrl: serverUrl,
+        playUrl: serverUrl,
+      },
+    });
   }
 }

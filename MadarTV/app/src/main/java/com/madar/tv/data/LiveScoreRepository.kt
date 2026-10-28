@@ -22,7 +22,7 @@ data class LiveScoreSnapshot(
 object LiveScoreRepository {
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ALL CONSTANTS — 6-layer encrypted via X.s() (v6 engine)
+    // Legacy encoded constants; values are recoverable from the client APK.
     // ═══════════════════════════════════════════════════════════════════════
 
     private val _ab = byteArrayOf(3, 20, 27, 32, 168.toByte(), 21, 156.toByte(), 149.toByte(), 202.toByte(), 199.toByte(), 82, 86, 105, 225.toByte(), 239.toByte(), 116, 92, 171.toByte(), 160.toByte(), 28, 152.toByte(), 11, 32, 38, 181.toByte(), 23, 66, 65, 88, 81, 87, 231.toByte())

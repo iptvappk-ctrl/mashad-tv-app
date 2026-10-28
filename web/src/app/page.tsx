@@ -1,403 +1,269 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Navbar from "@/components/Navbar";
-import Sidebar from "@/components/Sidebar";
 import CinemaView from "@/components/CinemaView";
 import DetailView from "@/components/DetailView";
 import LiveTvView from "@/components/LiveTvView";
 import PlayerModal, { StreamSource } from "@/components/PlayerModal";
-import { ArabseedItem, ArabseedDetail } from "@/lib/arabseed";
-import { Bookmark, Film, Play, Star, Trash2 } from "lucide-react";
+import { ArabseedDetail, ArabseedEpisode, ArabseedItem, ArabseedSeason } from "@/lib/arabseed";
+import { Bookmark, Star, Trash2 } from "lucide-react";
+
+type Tab = "home" | "movies" | "series" | "anime" | "matches" | "favorites";
+interface DetailSnapshot {
+  item: ArabseedItem;
+  detail: ArabseedDetail | null;
+  seriesReference: ArabseedDetail | null;
+  episodeReference: ArabseedDetail | null;
+}
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState<
-    "home" | "movies" | "series" | "anime" | "matches" | "favorites"
-  >("home");
-  const [selectedGenre, setSelectedGenre] = useState<string | undefined>(undefined);
+  const [activeTab, setActiveTab] = useState<Tab>("home");
   const [searchQuery, setSearchQuery] = useState("");
   const [favorites, setFavorites] = useState<ArabseedItem[]>([]);
   const [liveMatchesCount, setLiveMatchesCount] = useState(0);
-
-  // Detail View State (Full Page in Main Area - Wecima Style)
   const [selectedDetailItem, setSelectedDetailItem] = useState<ArabseedItem | null>(null);
   const [selectedDetailData, setSelectedDetailData] = useState<ArabseedDetail | null>(null);
+  const [seriesReference, setSeriesReference] = useState<ArabseedDetail | null>(null);
+  const [episodeReference, setEpisodeReference] = useState<ArabseedDetail | null>(null);
+  const [detailHistory, setDetailHistory] = useState<DetailSnapshot[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [resolvingServer, setResolvingServer] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<ArabseedItem[]>([]);
-
-  // Global Player State
+  const detailRequestId = useRef(0);
   const [playerState, setPlayerState] = useState<{
     isOpen: boolean;
     title: string;
     subtitle?: string;
     poster?: string;
     streams: StreamSource[];
-  }>({
-    isOpen: false,
-    title: "",
-    streams: [],
-  });
+  }>({ isOpen: false, title: "", streams: [] });
 
-  // Load Favorites from LocalStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem("mashad_favorites");
-      if (saved) {
-        setFavorites(JSON.parse(saved));
-      }
-    } catch {}
+      if (saved) setFavorites(JSON.parse(saved));
+    } catch { /* Ignore malformed local data and keep the list usable. */ }
   }, []);
 
-  // Save Favorites to LocalStorage
   const handleToggleFavorite = (item: ArabseedItem) => {
-    setFavorites((prev) => {
-      let updated: ArabseedItem[];
-      if (prev.some((f) => f.id === item.id)) {
-        updated = prev.filter((f) => f.id !== item.id);
-      } else {
-        updated = [item, ...prev];
-      }
-      try {
-        localStorage.setItem("mashad_favorites", JSON.stringify(updated));
-      } catch {}
+    setFavorites((previous) => {
+      const updated = previous.some((saved) => saved.id === item.id)
+        ? previous.filter((saved) => saved.id !== item.id)
+        : [item, ...previous];
+      try { localStorage.setItem("mashad_favorites", JSON.stringify(updated)); } catch { /* Storage may be disabled. */ }
       return updated;
     });
   };
 
-  // Pre-load recommendations from movies
   useEffect(() => {
-    async function fetchRecs() {
+    let cancelled = false;
+    async function fetchRecommendations() {
       try {
-        const res = await fetch("/api/cinema/movies?page=1");
-        const data = await res.json();
-        if (data.success && Array.isArray(data.data)) {
-          setRecommendations(data.data.slice(0, 10));
-        }
-      } catch {}
+        const response = await fetch("/api/cinema/movies?page=1");
+        const result = await response.json();
+        if (!cancelled && result.success && Array.isArray(result.data)) setRecommendations(result.data.slice(0, 10));
+      } catch { /* Recommendations are supplementary. */ }
     }
-    fetchRecs();
+    void fetchRecommendations();
+    return () => { cancelled = true; };
   }, []);
 
-  // Poll Live Matches Count for Navbar Badge
   useEffect(() => {
+    let cancelled = false;
     async function fetchMatchesCount() {
       try {
-        const res = await fetch("/api/football/matches");
-        const data = await res.json();
-        if (data.success && Array.isArray(data.data)) {
-          const live = data.data.filter((m: any) => m.status === "in").length;
-          setLiveMatchesCount(live);
+        const response = await fetch("/api/football/matches");
+        const result = await response.json();
+        if (!cancelled && result.success && Array.isArray(result.data)) {
+          setLiveMatchesCount(result.data.filter((match: { status?: string }) => match.status === "in").length);
         }
-      } catch {}
+      } catch { /* The badge remains at zero when match data is unavailable. */ }
     }
-
-    fetchMatchesCount();
+    void fetchMatchesCount();
     const interval = setInterval(fetchMatchesCount, 45000);
-    return () => clearInterval(interval);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
-  // Handle selecting an item to open Wecima Detail View
+  const fetchDetail = async (item: ArabseedItem, requestId: number) => {
+    try {
+      const response = await fetch(`/api/cinema/detail?url=${encodeURIComponent(item.pageUrl)}`);
+      const result = await response.json();
+      if (requestId === detailRequestId.current && result.success && result.data) {
+        const nextDetail = result.data as ArabseedDetail;
+        setSelectedDetailData(nextDetail);
+        return nextDetail;
+      }
+    } catch (error) {
+      console.error("Failed to load media detail:", error);
+    } finally {
+      if (requestId === detailRequestId.current) setLoadingDetail(false);
+    }
+    return null;
+  };
+
   const handleSelectItem = async (item: ArabseedItem) => {
+    const requestId = ++detailRequestId.current;
+    setDetailHistory([]);
+    setSelectedDetailItem(item);
+    setSelectedDetailData(null);
+    setSeriesReference(null);
+    setEpisodeReference(null);
+    setLoadingDetail(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    const result = await fetchDetail(item, requestId);
+    if (result && requestId === detailRequestId.current && (item.isSeries || result.item.isSeries)) {
+      setSeriesReference(result);
+      setEpisodeReference(result);
+    }
+  };
+
+  const pushCurrentDetail = () => {
+    if (!selectedDetailItem) return;
+    setDetailHistory((previous) => [...previous, {
+      item: selectedDetailItem,
+      detail: selectedDetailData,
+      seriesReference,
+      episodeReference,
+    }]);
+  };
+
+  const handleSelectPart = async (season: ArabseedSeason) => {
+    if (!selectedDetailItem) return;
+    pushCurrentDetail();
+    const requestId = ++detailRequestId.current;
+    const item = { ...selectedDetailItem, title: season.title, pageUrl: season.pageUrl, isSeries: true };
     setSelectedDetailItem(item);
     setSelectedDetailData(null);
     setLoadingDetail(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
-
-    try {
-      const res = await fetch(`/api/cinema/detail?url=${encodeURIComponent(item.pageUrl)}`);
-      const data = await res.json();
-      if (data.success && data.data) {
-        setSelectedDetailData(data.data);
-      }
-    } catch (err) {
-      console.error("Failed to load item detail:", err);
-    } finally {
-      setLoadingDetail(false);
-    }
+    const result = await fetchDetail(item, requestId);
+    if (result && requestId === detailRequestId.current) setEpisodeReference(result);
   };
 
-  // Handle Selecting an Episode inside DetailView
-  const handleSelectEpisode = async (epUrl: string, epTitle: string) => {
+  const handleSelectEpisode = async (episode: ArabseedEpisode) => {
     if (!selectedDetailItem) return;
+    pushCurrentDetail();
+    const requestId = ++detailRequestId.current;
+    const parentEpisodeList = selectedDetailData?.episodes?.length ? selectedDetailData : episodeReference;
+    if (parentEpisodeList) setEpisodeReference(parentEpisodeList);
+    const item = { ...selectedDetailItem, title: episode.title, pageUrl: episode.pageUrl, isSeries: true };
+    setSelectedDetailItem(item);
+    setSelectedDetailData(null);
     setLoadingDetail(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
-
-    try {
-      const res = await fetch(`/api/cinema/detail?url=${encodeURIComponent(epUrl)}`);
-      const data = await res.json();
-      if (data.success && data.data) {
-        setSelectedDetailData(data.data);
-        setSelectedDetailItem((prev) =>
-          prev ? { ...prev, title: epTitle, pageUrl: epUrl } : null
-        );
-      }
-    } catch (err) {
-      console.error("Failed to load episode detail:", err);
-    } finally {
-      setLoadingDetail(false);
-    }
+    await fetchDetail(item, requestId);
   };
 
-  // Handle Playing a server from DetailView
+  const handleBackFromDetail = () => {
+    detailRequestId.current += 1;
+    setLoadingDetail(false);
+    const previous = detailHistory[detailHistory.length - 1];
+    if (previous) {
+      setDetailHistory((history) => history.slice(0, -1));
+      setSelectedDetailItem(previous.item);
+      setSelectedDetailData(previous.detail);
+      setSeriesReference(previous.seriesReference);
+      setEpisodeReference(previous.episodeReference);
+      return;
+    }
+    setSelectedDetailItem(null);
+    setSelectedDetailData(null);
+    setSeriesReference(null);
+    setEpisodeReference(null);
+  };
+
+  const handlePlayStream = (data: { title: string; subtitle?: string; poster?: string; streams: StreamSource[] }) => {
+    setPlayerState({ isOpen: true, title: data.title, subtitle: data.subtitle, poster: data.poster, streams: data.streams });
+  };
+
   const handlePlayServer = async (serverUrl: string, serverName: string) => {
     setResolvingServer(serverUrl);
     try {
-      if (
-        serverUrl.includes("/api/proxy/stream") ||
-        serverUrl.endsWith(".m3u8") ||
-        serverUrl.endsWith(".mp4")
-      ) {
+      if (serverUrl.includes("/api/proxy/stream") || serverUrl.endsWith(".m3u8") || serverUrl.endsWith(".mp4")) {
         handlePlayStream({
-          title: selectedDetailItem?.title || "مشاهدة العرض",
+          title: selectedDetailItem?.title || "مشاهدة العمل",
           subtitle: serverName,
           poster: selectedDetailItem?.poster,
           streams: [{ name: serverName, url: serverUrl }],
         });
         return;
       }
-
-      const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(serverUrl)}`);
-      const data = await res.json();
-      const playUrl = data.playUrl || data.data?.playUrl;
-
-      if (data.success && playUrl) {
-        handlePlayStream({
-          title: selectedDetailItem?.title || "مشاهدة العرض",
-          subtitle: serverName,
-          poster: selectedDetailItem?.poster,
-          streams: [{ name: serverName, url: playUrl }],
-        });
-      } else if (selectedDetailData?.proxiedStream) {
-        handlePlayStream({
-          title: selectedDetailItem?.title || "مشاهدة العرض",
-          subtitle: "سيرفر بديل مباشر",
-          poster: selectedDetailItem?.poster,
-          streams: [{ name: "سيرفر بديل مباشر", url: selectedDetailData.proxiedStream }],
-        });
-      } else {
-        alert("تعذر تشغيل هذا السيرفر حالياً. يرجى تجربة سيرفر آخر.");
-      }
+      const response = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(serverUrl)}`);
+      const result = await response.json();
+      const playUrl = result.playUrl || result.data?.playUrl || serverUrl;
+      handlePlayStream({
+        title: selectedDetailItem?.title || "مشاهدة العمل",
+        subtitle: serverName,
+        poster: selectedDetailItem?.poster,
+        streams: [{ name: serverName, url: playUrl }],
+      });
     } catch {
-      alert("حدث خطأ في تشغيل السيرفر.");
+      handlePlayStream({
+        title: selectedDetailItem?.title || "مشاهدة العمل",
+        subtitle: serverName,
+        poster: selectedDetailItem?.poster,
+        streams: [{ name: serverName, url: serverUrl }],
+      });
     } finally {
       setResolvingServer(null);
     }
   };
 
-  const handlePlayStream = (data: {
-    title: string;
-    subtitle?: string;
-    poster?: string;
-    streams: StreamSource[];
-  }) => {
-    setPlayerState({
-      isOpen: true,
-      title: data.title,
-      subtitle: data.subtitle,
-      poster: data.poster,
-      streams: data.streams,
-    });
-  };
-
-  const closePlayer = () => {
-    setPlayerState((prev) => ({ ...prev, isOpen: false }));
+  const changeTab = (tab: Tab) => {
+    detailRequestId.current += 1;
+    setActiveTab(tab);
+    setSelectedDetailItem(null);
+    setSelectedDetailData(null);
+    setSeriesReference(null);
+    setEpisodeReference(null);
+    setDetailHistory([]);
+    setSearchQuery("");
   };
 
   return (
-    <div
-      dir="rtl"
-      className="min-h-screen flex flex-col bg-[#07090E] text-[#F3F4F6] selection:bg-[#E5B842] selection:text-black font-sans"
-    >
-      {/* ── Top Navbar ────────────────────────────────────────────── */}
-      <Navbar
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          setSelectedDetailItem(null);
-          setSelectedDetailData(null);
-          setSelectedGenre(undefined);
-          setSearchQuery("");
-        }}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        liveMatchesCount={liveMatchesCount}
-      />
-
-      {/* ── Main Two-Column Wecima Layout ─────────────────────────── */}
-      <div className="flex-1 w-full max-w-[1920px] mx-auto flex flex-col lg:flex-row gap-6 p-4 sm:p-6">
-        {/* Main Content Area (Takes left in RTL = lg:order-2) */}
-        <main className="order-1 lg:order-2 flex-1 min-w-0">
-          {selectedDetailItem ? (
-            <DetailView
-              item={selectedDetailItem}
-              detail={selectedDetailData}
-              loading={loadingDetail}
-              onBack={() => {
-                setSelectedDetailItem(null);
-                setSelectedDetailData(null);
-              }}
-              onPlayServer={handlePlayServer}
-              resolvingServer={resolvingServer}
-              isFavorite={favorites.some((f) => f.id === selectedDetailItem.id)}
-              onToggleFavorite={() => handleToggleFavorite(selectedDetailItem)}
-              onSelectEpisode={handleSelectEpisode}
-              recommendations={recommendations}
-              onSelectRecommendation={(rec) => {
-                handleSelectItem(rec);
-              }}
-            />
-          ) : activeTab === "matches" ? (
-            <LiveTvView searchQuery={searchQuery} onPlayStream={handlePlayStream} />
-          ) : activeTab === "favorites" ? (
-            /* ── Favorites Grid ───────────────────────────────────── */
-            <div className="space-y-6">
-              <div className="flex items-center justify-between border-b border-[#1E293B] pb-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-2.5 h-6 rounded-full bg-[#EF4444]" />
-                  <h2 className="text-xl font-black text-white">
-                    قائمة المشاهدة لاحقاً ({favorites.length})
-                  </h2>
-                </div>
-
-                {favorites.length > 0 && (
-                  <button
-                    onClick={() => {
-                      if (confirm("هل تريد إفراغ قائمة المفضلة بالكامل؟")) {
-                        setFavorites([]);
-                        localStorage.removeItem("mashad_favorites");
-                      }
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-600/15 text-red-400 hover:bg-red-600 hover:text-white text-xs font-bold transition"
-                  >
-                    <Trash2 size={14} />
-                    <span>مسح الكل</span>
-                  </button>
-                )}
-              </div>
-
-              {favorites.length === 0 ? (
-                <div className="bg-[#121A28] border border-[#1E293B] rounded-3xl p-12 text-center space-y-4">
-                  <Bookmark size={48} className="mx-auto text-gray-500" />
-                  <h3 className="text-lg font-black text-white">لا توجد أعمال في المفضلة بعد</h3>
-                  <p className="text-xs text-gray-400">
-                    اضغط على أيقونة القلب على أي فيلم أو مسلسل لحفظه هنا والرجوع إليه لاحقاً.
-                  </p>
-                  <button
-                    onClick={() => setActiveTab("home")}
-                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black text-xs font-black hover:shadow-gold transition"
-                  >
-                    تصفح الأعمال الآن
-                  </button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-5">
-                  {favorites.map((item) => (
-                    <div
-                      key={item.id}
-                      onClick={() => handleSelectItem(item)}
-                      className="group relative bg-[#0D111A] rounded-2xl overflow-hidden border border-[#1D273B] hover:border-[#E5B842]/80 cursor-pointer shadow-lg hover:shadow-gold transition-all duration-300 transform hover:-translate-y-1.5 flex flex-col select-none aspect-[2/3.1]"
-                    >
-                      <div className="relative w-full h-full overflow-hidden bg-black/40">
-                        <img
-                          src={item.poster}
-                          alt={item.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = "/logo.jpg";
-                          }}
-                        />
-
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F17] via-[#0B0F17]/30 to-transparent" />
-
-                        {/* Top Quality Badge */}
-                        <div className="absolute top-2.5 right-2.5 z-10">
-                          <span className="px-2.5 py-0.5 rounded-lg bg-black/85 text-yellow-400 text-[10px] font-black border border-yellow-400/40 shadow-md">
-                            {item.quality || "WEB-DL"}
-                          </span>
-                        </div>
-
-                        {/* Top Rating */}
-                        <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/85 text-white text-[10px] font-black border border-yellow-500/50 shadow-md">
-                          <Star size={10} className="fill-yellow-400 text-yellow-400" />
-                          <span>{item.rating || "6.8"}</span>
-                        </div>
-
-                        {/* Remove from favs */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleToggleFavorite(item);
-                          }}
-                          className="absolute top-9 left-2.5 z-10 w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center shadow-md hover:scale-110 transition"
-                          title="إزالة من المفضلة"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-
-                        <div className="absolute bottom-0 inset-x-0 p-3 flex flex-col gap-1.5 z-10">
-                          <span className="px-2 py-0.5 rounded-md bg-[#2563EB]/80 text-white text-[9px] font-black w-fit">
-                            {item.category || (item.isSeries ? "مسلسل" : "فيلم")}
-                          </span>
-                          <h3 className="text-xs sm:text-sm font-black text-white leading-tight line-clamp-2">
-                            {item.title}
-                          </h3>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            /* ── Cinema View Grid (Home / Movies / Series / Anime) ─── */
-            <CinemaView
-              activeTab={activeTab}
-              selectedGenre={selectedGenre}
-              searchQuery={searchQuery}
-              onSelectItem={handleSelectItem}
-              onPlayStream={handlePlayStream}
-              favorites={favorites}
-              onToggleFavorite={handleToggleFavorite}
-            />
-          )}
-        </main>
-
-        {/* Wecima Left/Right Sidebar (Takes right in RTL = lg:order-1) */}
-        <div className="order-2 lg:order-1 w-full lg:w-72 flex-shrink-0">
-          <Sidebar
-            activeTab={activeTab}
-            onTabChange={(tab) => {
-              setActiveTab(tab);
-              setSelectedDetailItem(null);
-              setSelectedDetailData(null);
-              setSelectedGenre(undefined);
-            }}
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            selectedGenre={selectedGenre}
-            onSelectGenre={(genre) => {
-              setSelectedGenre(genre);
-              setSelectedDetailItem(null);
-              setSelectedDetailData(null);
-              if (activeTab === "matches" || activeTab === "favorites") {
-                setActiveTab("home");
-              }
-            }}
+    <div dir="rtl" className="min-h-screen bg-[#f5f7fb] font-sans text-slate-800 selection:bg-indigo-200 selection:text-indigo-950">
+      <Navbar activeTab={activeTab} onTabChange={changeTab} searchQuery={searchQuery} onSearchChange={setSearchQuery} liveMatchesCount={liveMatchesCount} />
+      <main className="mx-auto min-h-[calc(100vh-78px)] w-full max-w-[1440px] px-4 pb-28 pt-5 sm:px-6 sm:pt-8 lg:px-8 lg:pb-12">
+        {selectedDetailItem ? (
+          <DetailView
+            item={selectedDetailItem}
+            detail={selectedDetailData}
+            loading={loadingDetail}
+            onBack={handleBackFromDetail}
+            onPlayServer={handlePlayServer}
+            resolvingServer={resolvingServer}
+            isFavorite={favorites.some((favorite) => favorite.id === selectedDetailItem.id)}
+            onToggleFavorite={() => handleToggleFavorite(selectedDetailItem)}
+            onSelectEpisode={handleSelectEpisode}
+            onSelectPart={handleSelectPart}
+            seriesReference={seriesReference}
+            episodeReference={episodeReference}
+            recommendations={recommendations}
+            onSelectRecommendation={(recommendation) => { void handleSelectItem(recommendation); }}
           />
-        </div>
-      </div>
-
-      {/* ── Global Video Player Modal ─────────────────────────────── */}
-      {playerState.isOpen && (
-        <PlayerModal
-          title={playerState.title}
-          subtitle={playerState.subtitle}
-          poster={playerState.poster}
-          streams={playerState.streams}
-          onClose={closePlayer}
-        />
-      )}
+        ) : searchQuery.trim() ? (
+          <CinemaView
+            activeTab={activeTab === "movies" || activeTab === "series" || activeTab === "anime" ? activeTab : "home"}
+            searchQuery={searchQuery}
+            onSelectItem={(item) => { void handleSelectItem(item); }}
+            onPlayStream={handlePlayStream}
+            favorites={favorites}
+            onToggleFavorite={handleToggleFavorite}
+            onBrowseTab={changeTab}
+          />
+        ) : activeTab === "matches" ? (
+          <LiveTvView searchQuery={searchQuery} onPlayStream={handlePlayStream} />
+        ) : activeTab === "favorites" ? (
+          <section className="space-y-5">
+            <div className="flex items-end justify-between gap-3"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-rose-600">محفوظاتك</p><h1 className="mt-1 text-2xl font-black text-slate-900">قائمتي <span className="text-base font-bold text-slate-400">({favorites.length})</span></h1></div>{favorites.length > 0 && <button type="button" onClick={() => { setFavorites([]); localStorage.removeItem("mashad_favorites"); }} className="inline-flex items-center gap-2 rounded-xl border border-rose-100 bg-white px-3.5 py-2.5 text-xs font-bold text-rose-600 hover:bg-rose-50"><Trash2 size={14} /> مسح القائمة</button>}</div>
+            {favorites.length === 0 ? <div className="rounded-[26px] border border-dashed border-slate-300 bg-white px-5 py-16 text-center"><Bookmark size={38} className="mx-auto text-slate-300" /><h2 className="mt-3 font-extrabold text-slate-800">لسه ما حفظتش أعمال</h2><p className="mt-1 text-sm text-slate-500">اضغط على القلب في أي فيلم أو مسلسل عشان تلاقيه هنا.</p><button onClick={() => changeTab("home")} className="mt-5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-extrabold text-white">اكتشف المكتبة</button></div> : <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5 xl:grid-cols-6">{favorites.map((item) => <article key={item.id} onClick={() => { void handleSelectItem(item); }} className="group cursor-pointer overflow-hidden rounded-[20px] border border-slate-200 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg"><div className="relative"><img src={item.poster || "/logo.jpg"} alt={item.title} className="aspect-[0.72] w-full object-cover" onError={(event) => { event.currentTarget.src = "/logo.jpg"; }} /><span className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[9px] font-extrabold text-slate-700">{item.quality || (item.isSeries ? "مسلسل" : "فيلم")}</span><button type="button" onClick={(event) => { event.stopPropagation(); handleToggleFavorite(item); }} aria-label="إزالة من قائمتي" className="absolute left-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-white text-rose-600 shadow-sm"><Trash2 size={14} /></button><span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/85 to-transparent p-3 pt-10 text-xs font-extrabold text-white">{item.title}</span></div><div className="flex items-center justify-between p-3 text-[10px] font-bold text-slate-500"><span>{item.category || (item.isSeries ? "مسلسل" : "فيلم")}</span>{item.rating && <span className="inline-flex items-center gap-1"><Star size={11} className="fill-amber-400 text-amber-400" />{item.rating}</span>}</div></article>)}</div>}
+          </section>
+        ) : (
+          <CinemaView activeTab={activeTab} searchQuery={searchQuery} onSelectItem={(item) => { void handleSelectItem(item); }} onPlayStream={handlePlayStream} favorites={favorites} onToggleFavorite={handleToggleFavorite} onBrowseTab={changeTab} />
+        )}
+      </main>
+      {playerState.isOpen && <PlayerModal title={playerState.title} subtitle={playerState.subtitle} poster={playerState.poster} streams={playerState.streams} onClose={() => setPlayerState((state) => ({ ...state, isOpen: false }))} />}
     </div>
   );
 }

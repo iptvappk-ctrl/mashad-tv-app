@@ -13,7 +13,7 @@ import java.net.URL
 object PublicChannelRepository {
 
     // ═══════════════════════════════════════════════════════════════════════
-    // ALL CONSTANTS — 6-layer encrypted via X.s() (v6 engine)
+    // Legacy encoded constants; values are recoverable from the client APK.
     // ═══════════════════════════════════════════════════════════════════════
 
     private val _pu = byteArrayOf(3, 20, 27, 32, 168.toByte(), 21, 156.toByte(), 149.toByte(), 68, 198.toByte(), 220.toByte(), 113, 230.toByte(), 230.toByte(), 111, 120, 253.toByte(), 141.toByte(), 11, 19, 17, 161.toByte(), 46, 37, 190.toByte(), 188.toByte(), 75, 193.toByte(), 209.toByte(), 243.toByte(), 86, 109, 97, 95, 140.toByte(), 3, 129.toByte(), 152.toByte(), 187.toByte(), 110, 90, 135.toByte(), 205.toByte(), 72, 49, 55, 228.toByte(), 218.toByte(), 215.toByte(), 229.toByte(), 107, 250.toByte(), 120, 43, 133.toByte(), 130.toByte(), 31, 26, 175.toByte(), 36, 48, 184.toByte(), 148.toByte(), 74, 108, 84, 253.toByte())
