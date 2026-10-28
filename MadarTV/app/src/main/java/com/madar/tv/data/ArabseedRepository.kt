@@ -482,7 +482,11 @@ object ArabseedRepository {
 
         }
 
-        val items = parseListing(html, defaultType)
+        // Normalize the primary provider before exposing a category page. The
+        // home screen can render this result before secondary providers finish.
+        val items = MultiProviderRepository.mergeCatalogItems(
+            parseListing(html, defaultType),
+        )
 
         if (items.isNotEmpty()) {
 
