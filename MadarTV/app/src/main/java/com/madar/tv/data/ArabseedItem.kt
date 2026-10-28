@@ -22,6 +22,7 @@ data class ArabseedItem(
     val providerName: String = "عرب سيد",
     val parentSeriesTitle: String? = null,
     val parentSeriesPageUrl: String? = null,
+    val latestEpisodeLabel: String = "",
 ) {
     override fun toString(): String = id
 }

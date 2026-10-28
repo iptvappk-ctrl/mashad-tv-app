@@ -83,6 +83,9 @@ object FavoritesRepository {
                     category     = obj.optString("category"),
                     overview     = obj.optString("overview"),
                     providerName = obj.optString("providerName", "عرب سيد"),
+                    parentSeriesTitle = obj.optString("parentSeriesTitle").ifBlank { null },
+                    parentSeriesPageUrl = obj.optString("parentSeriesPageUrl").ifBlank { null },
+                    latestEpisodeLabel = obj.optString("latestEpisodeLabel"),
                 )
             }
         } catch (_: Exception) { emptyList() }
@@ -104,6 +107,9 @@ object FavoritesRepository {
                 put("category",     item.category)
                 put("overview",     item.overview)
                 put("providerName", item.providerName)
+                put("parentSeriesTitle", item.parentSeriesTitle ?: "")
+                put("parentSeriesPageUrl", item.parentSeriesPageUrl ?: "")
+                put("latestEpisodeLabel", item.latestEpisodeLabel)
             }
             arr.put(obj)
         }

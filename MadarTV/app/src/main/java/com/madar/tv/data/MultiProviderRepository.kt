@@ -617,7 +617,9 @@ object MultiProviderRepository {
 
                     || href.contains("/series/") || href.contains("/serie/") || href.contains("/مسلسل")
 
-                    || title.contains("مسلسل") || title.contains("الحلقة")
+                    || title.contains("مسلسل")
+                    || SeriesCatalogParser.isEpisode(title, href)
+                    || SeriesCatalogParser.seasonNumber(title, href) != null
 
 
 
@@ -1345,7 +1347,7 @@ object MultiProviderRepository {
 
         if (type == ArabseedType.SERIES) {
             normalized = normalized.replace(
-                Regex("""(?i)\s+(?:الموسم|موسم|season|الحلقة|حلقة|episode|ep)\s*.*$"""),
+                Regex("""(?i)\s+(?:الموسم|موسم|season|الجزء|جزء|part|الحلقة|حلقة|episode|ep)\s*.*$"""),
                 " ",
             )
         }
@@ -1359,10 +1361,110 @@ object MultiProviderRepository {
     }
 
     private fun titleKeys(item: ArabseedItem): Set<String> =
-        listOf(item.title, item.arabicTitle)
+        listOfNotNull(item.parentSeriesTitle, item.title, item.arabicTitle)
             .map { normalizeTitle(it, item.type) }
             .filter { it.length >= 2 }
             .toSet()
+
+    private fun seriesEntryKeys(item: ArabseedItem): Set<String> {
+        val titleKeys = titleKeys(item)
+        val season = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+            ?: SeriesCatalogParser.seasonNumber(item.arabicTitle, item.pageUrl)
+            ?: 1
+        val part = SeriesCatalogParser.partNumber(item.title, item.pageUrl)
+            ?: SeriesCatalogParser.partNumber(item.arabicTitle, item.pageUrl)
+            ?: 1
+        val episode = SeriesCatalogParser.episodeNumber(item.title, item.pageUrl)
+            ?: SeriesCatalogParser.episodeNumber(item.arabicTitle, item.pageUrl)
+        val identity = buildString {
+            append("part=$part|season=$season")
+            episode?.let { append("|episode=$it") }
+        }
+        return titleKeys.mapTo(linkedSetOf()) { "$it|$identity" }
+    }
+
+    private fun seriesBaseTitle(item: ArabseedItem): String {
+        val raw = item.parentSeriesTitle?.takeIf(String::isNotBlank)
+            ?: item.arabicTitle.takeIf(String::isNotBlank)
+            ?: item.title
+        return SeriesCatalogParser.cleanSeriesTitle(raw)
+            .replace(Regex("""(?i)\b(?:مسلسل|series|مترجم|مدبلج|WEB[- ]?DL|1080p|720p|480p|HD)\b"""), " ")
+            .replace(Regex("""(?<!\d)(?:19|20)\d{2}(?!\d)"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim(' ', '-', '|', ':', '·')
+            .ifBlank { item.title }
+    }
+
+    private fun collapseSeriesEntries(items: List<ArabseedItem>): List<ArabseedItem> {
+        val groups = mutableListOf<MutableList<Pair<Int, ArabseedItem>>>()
+
+        items.forEachIndexed { index, item ->
+            if (item.type != ArabseedType.SERIES) return@forEachIndexed
+            val keys = titleKeys(item)
+            val year = releaseYear(item)
+            val group = groups.firstOrNull { entries ->
+                val sample = entries.first().second
+                val sampleYear = releaseYear(sample)
+                val yearsCompatible = sampleYear.isBlank() || year.isBlank() || sampleYear == year
+                yearsCompatible && titleKeys(sample).any(keys::contains)
+            }
+            if (group == null) groups += mutableListOf(index to item) else group += index to item
+        }
+
+        val representatives = groups.associate { entries ->
+            val latest = entries.maxWithOrNull(
+                compareBy<Pair<Int, ArabseedItem>> {
+                    SeriesCatalogParser.seasonNumber(it.second.title, it.second.pageUrl)
+                        ?: SeriesCatalogParser.partNumber(it.second.title, it.second.pageUrl)
+                        ?: 1
+                }.thenBy {
+                    SeriesCatalogParser.partNumber(it.second.title, it.second.pageUrl) ?: 1
+                }.thenBy {
+                    SeriesCatalogParser.episodeNumber(it.second.title, it.second.pageUrl)
+                        ?: SeriesCatalogParser.episodeNumber(it.second.arabicTitle, it.second.pageUrl)
+                        ?: 0
+                }.thenBy { -it.first },
+            ) ?: entries.first()
+            val selected = latest.second
+            val baseTitle = seriesBaseTitle(selected)
+            val season = SeriesCatalogParser.seasonNumber(selected.title, selected.pageUrl)
+                ?: SeriesCatalogParser.seasonNumber(selected.arabicTitle, selected.pageUrl)
+            val part = SeriesCatalogParser.partNumber(selected.title, selected.pageUrl)
+                ?: SeriesCatalogParser.partNumber(selected.arabicTitle, selected.pageUrl)
+            val episode = SeriesCatalogParser.episodeNumber(selected.title, selected.pageUrl)
+                ?: SeriesCatalogParser.episodeNumber(selected.arabicTitle, selected.pageUrl)
+            val label = when {
+                episode != null && season != null && season > 1 -> "الموسم $season · الحلقة $episode"
+                episode != null -> "أحدث حلقة · $episode"
+                season != null && season > 1 -> "أحدث موسم · $season"
+                part != null && part > 1 -> "الجزء $part"
+                else -> selected.latestEpisodeLabel
+            }
+            val sameProviderSeriesPage = entries.asSequence()
+                .map { it.second }
+                .firstOrNull {
+                    it.providerName == selected.providerName
+                        && !SeriesCatalogParser.isEpisode(it.title, it.pageUrl)
+                        && it.pageUrl != selected.pageUrl
+                }
+
+            entries.first().first to selected.copy(
+                title = baseTitle,
+                arabicTitle = baseTitle,
+                parentSeriesTitle = selected.parentSeriesTitle?.takeIf(String::isNotBlank) ?: baseTitle,
+                parentSeriesPageUrl = selected.parentSeriesPageUrl
+                    ?: sameProviderSeriesPage?.pageUrl,
+                latestEpisodeLabel = label,
+            )
+        }.toMap()
+
+        return buildList {
+            items.forEachIndexed { index, item ->
+                if (item.type != ArabseedType.SERIES) add(item)
+                else representatives[index]?.let(::add)
+            }
+        }
+    }
 
     private fun releaseYear(item: ArabseedItem): String =
         listOf(item.year, item.title, item.arabicTitle)
@@ -1416,9 +1518,6 @@ object MultiProviderRepository {
         for (item in items) {
             if (expectedType != null && item.type != expectedType) continue
             if (item.title.isBlank() || !item.pageUrl.startsWith("http", ignoreCase = true)) continue
-            if (SeriesCatalogParser.isEpisode(item.title, item.pageUrl)
-                || SeriesCatalogParser.isEpisode(item.arabicTitle, item.pageUrl)
-            ) continue
 
             val keys = titleKeys(item)
             if (keys.isEmpty()) continue
@@ -1428,12 +1527,15 @@ object MultiProviderRepository {
                 if (current.pageUrl == item.pageUrl) return@indexOfFirst true
                 val currentYear = releaseYear(current)
                 val yearsCompatible = currentYear.isBlank() || year.isBlank() || currentYear == year
-                yearsCompatible && titleKeys(current).any(keys::contains)
+                val sameWorkTitle = titleKeys(current).any(keys::contains)
+                if (!yearsCompatible || !sameWorkTitle) return@indexOfFirst false
+                item.type != ArabseedType.SERIES
+                    || seriesEntryKeys(current).any(seriesEntryKeys(item)::contains)
             }
             if (duplicateIndex < 0) unique += item
             else unique[duplicateIndex] = mergeDuplicate(unique[duplicateIndex], item)
         }
-        return unique
+        return collapseSeriesEntries(unique)
     }
     // Fetch og:image from the source page
     private fun fetchOgImage(pageUrl: String): String? {

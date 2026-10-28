@@ -1638,11 +1638,12 @@ private fun MashadCard(item: ArabseedItem, onClick: () -> Unit) {
 
 
 
-        if (item.year.isNotBlank() || item.category.isNotBlank()) {
+        val cardSubtitle = item.latestEpisodeLabel.ifBlank { item.category }
+        if (item.year.isNotBlank() || cardSubtitle.isNotBlank()) {
 
             Text(
 
-                text = "${item.year} · ${item.category}".trim(' ', '·'),
+                text = "${item.year} · $cardSubtitle".trim(' ', '·'),
 
                 color = MashadColors.GoldLight,
 
@@ -2042,7 +2043,12 @@ private fun MashadDetailScreen(
 
                             )
 
-                            Text(item.category, color = MashadColors.GoldLight, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                item.latestEpisodeLabel.ifBlank { item.category },
+                                color = MashadColors.GoldLight,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
 
                         }
 
