@@ -70,6 +70,15 @@ async function buildStats(range) {
     };
   }
 
+  const credentialsPath = (process.env.GOOGLE_APPLICATION_CREDENTIALS || "").trim();
+  if (credentialsPath && !fs.existsSync(credentialsPath)) {
+    return {
+      configured: false,
+      setup: "missing_credentials",
+      message: "ملف اعتماد Google Analytics غير موجود في المسار المحلي المحدد. احفظ ملف JSON خارج المشروع ثم أعد تشغيل لوحة الإدارة.",
+    };
+  }
+
   const client = getAnalyticsClient();
   const dates = rangeDates(range);
   const base = { dateRanges: [dates] };
@@ -183,9 +192,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === "/api/health") {
+    const credentialsPath = (process.env.GOOGLE_APPLICATION_CREDENTIALS || "").trim();
     return sendJson(res, 200, {
       ok: true,
       configured: Boolean((process.env.GA_PROPERTY_ID || "").trim()),
+      credentialsConfigured: credentialsPath ? fs.existsSync(credentialsPath) : null,
       host: HOST,
     });
   }

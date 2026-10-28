@@ -39,7 +39,7 @@
       <section id="setup" class="banner" aria-live="polite">
         <h2 id="setupTitle">اربط لوحة الإدارة بخاصية Analytics</h2>
         <p id="setupMessage">لن تظهر بيانات قبل إعداد الوصول. اللوحة لا تستخدم أرقامًا تجريبية.</p>
-        <ol>
+        <ol id="setupSteps">
           <li>سجّل تطبيق الويب داخل مشروع Firebase، وأضف إعداداته العامة إلى <code>web/.env.local</code>.</li>
           <li>فعّل Google Analytics Data API في مشروع Google Cloud، وأضف حساب خدمة بصلاحية Viewer على خاصية Analytics.</li>
           <li>اضبط <code>GA_PROPERTY_ID</code> وبيانات Application Default Credentials في بيئة تشغيل لوحة الإدارة.</li>
@@ -140,13 +140,16 @@
         const response = await fetch(`/api/stats?range=${selectedRange}`, { cache: 'no-store' });
         const data = await response.json();
         if (!data.configured) {
-          byId('setupTitle').textContent = 'إعداد الربط مطلوب';
+          const missingCredentials = data.setup === 'missing_credentials';
+          byId('setupTitle').textContent = missingCredentials ? 'ملف اعتماد القراءة غير موجود' : 'إعداد الربط مطلوب';
           byId('setupMessage').textContent = data.message || 'أكمل إعداد خاصية Analytics لعرض الأرقام الحقيقية.';
+          byId('setupSteps').hidden = missingCredentials;
           byId('setup').classList.add('show');
           showState('لن تظهر مؤشرات قبل وصول البيانات الفعلية من Analytics.');
           return;
         }
         if (!response.ok) {
+          byId('setupSteps').hidden = false;
           byId('setupTitle').textContent = 'تعذر الوصول إلى Analytics';
           byId('setupMessage').textContent = data.message || 'راجع إعداد الحساب والصلاحيات الموضحة أدناه.';
           byId('setup').classList.add('show');
