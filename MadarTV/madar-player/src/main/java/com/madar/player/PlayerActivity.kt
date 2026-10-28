@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -34,9 +35,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -47,6 +53,7 @@ import com.google.android.gms.cast.framework.CastButtonFactory
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.cast.framework.media.RemoteMediaClient
+import java.util.Locale
 
 class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -102,10 +109,50 @@ private fun PlayerScreen(streamUrl: String, title: String, userAgent: String, re
         mutableStateOf(preferences.getString("quality", "تلقائي") ?: "تلقائي")
     }
     var qualityMenuExpanded by remember { mutableStateOf(false) }
+    var currentTrackInfo by remember(streamUrl) { mutableStateOf("جارٍ فحص مسارات المصدر") }
+    var adaptiveTracksAvailable by remember(streamUrl) { mutableStateOf<Boolean?>(null) }
+    var downloadedBytes by remember(streamUrl) { mutableLongStateOf(0L) }
     val qualityChoices = listOf("تلقائي", "توفير البيانات", "480p", "720p", "1080p", "أعلى جودة")
 
     DisposableEffect(player) {
         onDispose { player.release() }
+    }
+
+    DisposableEffect(player) {
+        val tracksListener = object : androidx.media3.common.Player.Listener {
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                val videoGroups = tracks.groups.filter {
+                    it.type == C.TRACK_TYPE_VIDEO && it.isSupported
+                }
+                val selectedFormat = videoGroups.asSequence()
+                    .flatMap { group ->
+                        (0 until group.length).asSequence()
+                            .filter(group::isTrackSelected)
+                            .map(group::getTrackFormat)
+                    }
+                    .firstOrNull()
+                adaptiveTracksAvailable = videoGroups.any { group ->
+                    (0 until group.length).count(group::isTrackSupported) > 1
+                }
+                currentTrackInfo = selectedFormat?.let(::formatDescription)
+                    ?: "لم تُحدد جودة فيديو بعد"
+            }
+        }
+        val analyticsListener = object : AnalyticsListener {
+            override fun onLoadCompleted(
+                eventTime: AnalyticsListener.EventTime,
+                loadEventInfo: LoadEventInfo,
+                mediaLoadData: MediaLoadData,
+            ) {
+                downloadedBytes += loadEventInfo.bytesLoaded
+            }
+        }
+        player.addListener(tracksListener)
+        player.addAnalyticsListener(analyticsListener)
+        onDispose {
+            player.removeListener(tracksListener)
+            player.removeAnalyticsListener(analyticsListener)
+        }
     }
 
     androidx.compose.runtime.LaunchedEffect(trackSelector, selectedQuality) {
@@ -174,7 +221,7 @@ private fun PlayerScreen(streamUrl: String, title: String, userAgent: String, re
                     DropdownMenuItem(
                         text = {
                             Text(
-                                "التغيير يعتمد على الجودات التي يوفّرها المصدر",
+                                "التلقائي يكيّف الجودة مع الشبكة؛ توفير البيانات يختار أقل مسار متاح حتى 480p. يلزم أن يوفّر المصدر أكثر من جودة.",
                                 fontSize = 11.sp,
                                 color = Color.Gray,
                             )
@@ -192,6 +239,34 @@ private fun PlayerScreen(streamUrl: String, title: String, userAgent: String, re
                     }
                 },
             )
+        }
+
+        Surface(
+            modifier = Modifier.align(Alignment.BottomStart).padding(16.dp),
+            color = Color(0xD9272C3D),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text("الجودة الحالية: $currentTrackInfo", color = Color.White, fontSize = 12.sp)
+                val sourceStatus = when (adaptiveTracksAvailable) {
+                    true -> when (selectedQuality) {
+                        "تلقائي" -> "تلقائي: الجودة تتكيف مع سرعة الشبكة"
+                        "توفير البيانات" -> "توفير البيانات: أقل مسار متاح حتى 480p"
+                        else -> "اختيار يدوي؛ الجودات تتبع ما يوفّره المصدر"
+                    }
+                    false -> "المصدر بجودة واحدة؛ لا يمكن ضغط بياناته على الهاتف"
+                    null -> "جارٍ فحص الجودات التي يوفّرها المصدر"
+                }
+                Text(sourceStatus, color = Color(0xFFD5D8E0), fontSize = 10.sp)
+                Text(
+                    "بيانات مستلمة في الجلسة: ${formatMegabytes(downloadedBytes)} MB تقريبًا",
+                    color = Color(0xFFD5D8E0),
+                    fontSize = 10.sp,
+                )
+            }
         }
     }
 }
@@ -215,6 +290,18 @@ private fun applyQuality(trackSelector: DefaultTrackSelector, label: String) {
     }
     trackSelector.setParameters(builder)
 }
+
+private fun formatDescription(format: Format): String {
+    val height = format.height.takeIf { it != Format.NO_VALUE && it > 0 }
+        ?.let { "${it}p" } ?: "دقة غير معلنة"
+    val bitrate = format.bitrate.takeIf { it != Format.NO_VALUE && it > 0 }
+        ?.let { " · معدل المصدر ${String.format(Locale.US, "%.1f", it / 1_000_000f)} Mbps" }
+        .orEmpty()
+    return height + bitrate
+}
+
+private fun formatMegabytes(bytes: Long): String =
+    String.format(Locale.US, "%.1f", bytes / (1024f * 1024f))
 
 @Composable
 private fun InvalidStreamScreen() {
