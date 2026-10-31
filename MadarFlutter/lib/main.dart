@@ -696,6 +696,7 @@ class _CatalogPageState extends State<CatalogPage> {
   List<Map<String, dynamic>> _subcategories = [];
   List<MediaItem> _items = [];
   String _tabId = 'home', _path = 'main/', _categoryId = 'all';
+  String _resultsQuery = '';
   bool _searchOpen = false,
       _busy = true,
       _providersBusy = false,
@@ -788,11 +789,14 @@ class _CatalogPageState extends State<CatalogPage> {
     }
     final request = ++_request;
     final query = _search.text.trim();
+    final queryChanged = query != _resultsQuery;
+    if (queryChanged) _resultsQuery = query;
     final path = _path;
     final tab = _tabId;
     setState(() {
       _busy = true;
       _providersBusy = false;
+      if (queryChanged) _items = [];
       if (reset && query.isEmpty && _items.isEmpty) _error = null;
     });
     try {
@@ -891,14 +895,22 @@ class _CatalogPageState extends State<CatalogPage> {
       setState(() {
         _items = merged;
         _providersBusy = false;
-        if (_items.isEmpty) _error = 'المصادر لم ترجع محتوى لهذه القائمة الآن.';
+        if (_items.isEmpty) {
+          _error = query.isNotEmpty
+              ? 'ما لقيناش نتائج مطابقة. جرّب كتابة الاسم بطريقة مختلفة.'
+              : 'المصادر لم ترجع محتوى لهذه القائمة الآن.';
+        }
       });
       if (merged.isNotEmpty) widget.onItems(merged);
     } catch (error) {
       if (mounted && request == _request)
         setState(() {
           _providersBusy = false;
-          if (_items.isEmpty) _error = '$error';
+          if (_items.isEmpty) {
+            _error = query.isNotEmpty
+                ? 'تعذر البحث الآن. تأكد من الاتصال وحاول مرة أخرى.'
+                : '$error';
+          }
         });
     }
   }
@@ -944,11 +956,41 @@ class _CatalogPageState extends State<CatalogPage> {
     setState(() {
       _searchOpen = !_searchOpen;
       if (!_searchOpen) {
+        _request++;
         _search.clear();
+        _resultsQuery = '';
         _items = [];
+        _busy = true;
+        _providersBusy = false;
+        _error = null;
       }
     });
     if (!_searchOpen) unawaited(_load(reset: true));
+  }
+
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    final query = value.trim();
+    if (query != _resultsQuery) {
+      _request++;
+      _resultsQuery = query;
+      setState(() {
+        _items = [];
+        _busy = query.isNotEmpty;
+        _providersBusy = false;
+        _error = null;
+        _page = 1;
+        _hasMore = true;
+      });
+    }
+    if (query.isEmpty) {
+      unawaited(_load(reset: true));
+      return;
+    }
+    _debounce = Timer(
+      const Duration(milliseconds: 420),
+      () => _load(reset: true),
+    );
   }
 
   Widget _topBar() => Padding(
@@ -961,21 +1003,18 @@ class _CatalogPageState extends State<CatalogPage> {
               controller: _search,
               autofocus: true,
               textInputAction: TextInputAction.search,
-              onChanged: (_) {
+              onChanged: _onSearchChanged,
+              onSubmitted: (_) {
                 _debounce?.cancel();
-                _debounce = Timer(
-                  const Duration(milliseconds: 420),
-                  () => _load(reset: true),
-                );
+                _load(reset: true);
               },
-              onSubmitted: (_) => _load(reset: true),
               decoration: InputDecoration(
                 hintText: 'ابحث عن فيلم أو مسلسل',
                 prefixIcon: const Icon(Icons.search, color: _brick),
                 suffixIcon: IconButton(
                   onPressed: () {
                     _search.clear();
-                    _load(reset: true);
+                    _onSearchChanged('');
                   },
                   icon: const Icon(Icons.close),
                 ),
@@ -2229,6 +2268,10 @@ class _DetailPageState extends State<DetailPage> {
             ],
             if (widget.item.isSeries) ...[
               if (_isEpisodeCard) ...[
+                if (episodes.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _downloadEpisodeCard(episodes.last, season),
+                ],
                 const SizedBox(height: 13),
                 _serverSection(
                   _servers,
@@ -2240,6 +2283,8 @@ class _DetailPageState extends State<DetailPage> {
               const SizedBox(height: 13),
               _seasonsSection(season, episodes),
             ] else ...[
+              const SizedBox(height: 12),
+              _downloadMovieCard(),
               const SizedBox(height: 13),
               _serverSection(
                 _servers,
@@ -2247,10 +2292,10 @@ class _DetailPageState extends State<DetailPage> {
                 widget.item.title,
                 loading: _serversLoading,
               ),
-              const SizedBox(height: 12),
-              _downloadMovieCard(),
             ],
-            if (widget.item.isSeries && episodes.isNotEmpty) ...[
+            if (widget.item.isSeries &&
+                !_isEpisodeCard &&
+                episodes.isNotEmpty) ...[
               const SizedBox(height: 12),
               _downloadEpisodeCard(episodes.last, season),
             ],
@@ -3153,6 +3198,8 @@ class _EpisodePageState extends State<EpisodePage> {
             },
           ),
           const SizedBox(height: 18),
+          _downloadCard(),
+          const SizedBox(height: 14),
           if (_servers.isEmpty && _loading)
             const Padding(
               padding: EdgeInsets.all(25),
@@ -3186,8 +3233,6 @@ class _EpisodePageState extends State<EpisodePage> {
                     .toList(),
               ),
             ),
-          const SizedBox(height: 14),
-          _downloadCard(),
           const SizedBox(height: 16),
           _SectionCard(
             title: 'حلقات هذا الجزء / الموسم',
