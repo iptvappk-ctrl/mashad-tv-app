@@ -2,11 +2,13 @@ package com.madar.player
 
 import android.annotation.SuppressLint
 import android.content.pm.ActivityInfo
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Toast
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -46,6 +48,14 @@ import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.MediaInfo
+import com.google.android.gms.cast.MediaLoadRequestData
+import com.google.android.gms.cast.MediaMetadata
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.SessionManagerListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -75,6 +85,7 @@ class PlayerActivity : ComponentActivity() {
     private val currentStreamHeaders = mutableStateOf<Map<String, String>>(emptyMap())
     private val currentFallbackUrl = mutableStateOf("")
     private val currentFallbackReferer = mutableStateOf("")
+    private val currentIsLive = mutableStateOf(false)
     private val currentBackupSources = androidx.compose.runtime.mutableStateListOf<PlaybackSource>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -106,6 +117,7 @@ class PlayerActivity : ComponentActivity() {
                 val streamHeaders = currentStreamHeaders.value
                 val fallbackUrl = currentFallbackUrl.value
                 val fallbackReferer = currentFallbackReferer.value
+                val isLive = currentIsLive.value
 
                 if (isSupportedStream(url)) {
                     PlayerScreen(
@@ -116,6 +128,7 @@ class PlayerActivity : ComponentActivity() {
                         streamHeaders = streamHeaders,
                         fallbackUrl = fallbackUrl,
                         fallbackReferer = fallbackReferer,
+                        isLive = isLive,
                         backupSources = currentBackupSources,
                         onSwitchStream = { next, nextUa, nextRef, nextHeaders ->
                             currentStreamUrl.value = next
@@ -164,6 +177,7 @@ class PlayerActivity : ComponentActivity() {
         }.getOrDefault(emptyMap())
         val fallbackUrl = intent.getStringExtra(EXTRA_FALLBACK_URL).orEmpty()
         val fallbackReferer = intent.getStringExtra(EXTRA_FALLBACK_REFERER).orEmpty()
+        val isLive = intent.getBooleanExtra(EXTRA_IS_LIVE, false)
 
         val backupUrls = intent.getStringArrayListExtra("com.madar.player.extra.BACKUP_URLS")
             ?: intent?.getStringArrayListExtra("backup_stream_urls")
@@ -207,6 +221,8 @@ class PlayerActivity : ComponentActivity() {
             currentStreamHeaders.value = streamHeaders
             currentFallbackUrl.value = fallbackUrl
             currentFallbackReferer.value = fallbackReferer
+            currentIsLive.value = isLive || (isHlsStream(url) &&
+                (title.contains("مباشر") || title.contains("مباراة") || title.contains("beIN", true)))
             currentBackupSources.clear()
             currentBackupSources.addAll(
                 backupSources.filter { it.url.isNotBlank() && it.url != url }.distinctBy { it.url }
@@ -223,6 +239,7 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_FALLBACK_URL = "com.madar.player.extra.FALLBACK_URL"
         const val EXTRA_FALLBACK_REFERER = "com.madar.player.extra.FALLBACK_REFERER"
         const val EXTRA_BACKUP_SOURCES = "com.madar.player.extra.BACKUP_SOURCES"
+        const val EXTRA_IS_LIVE = "com.madar.player.extra.IS_LIVE"
     }
 }
 
@@ -395,6 +412,7 @@ private fun PlayerScreen(
     streamHeaders: Map<String, String>,
     fallbackUrl: String,
     fallbackReferer: String,
+    isLive: Boolean,
     backupSources: androidx.compose.runtime.snapshots.SnapshotStateList<PlaybackSource>,
     onSwitchStream: (String, String, String, Map<String, String>) -> Unit,
     onClose: () -> Unit
@@ -444,31 +462,42 @@ private fun PlayerScreen(
     var qualityMenuExpanded by remember { mutableStateOf(false) }
     var currentTrackInfo by remember(streamUrl) { mutableStateOf("جارٍ فحص مسارات المصدر") }
     var adaptiveTracksAvailable by remember(streamUrl) { mutableStateOf<Boolean?>(null) }
+    var availableQualities by remember(streamUrl) { mutableStateOf<List<String>>(emptyList()) }
     var downloadedBytes by remember(streamUrl) { mutableLongStateOf(0L) }
     val qualityChoices = listOf("تلقائي", "توفير البيانات", "480p", "720p", "1080p", "أعلى جودة")
 
     var showControls by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(showControls, lastInteractionTime) {
-        if (showControls) {
-            kotlinx.coroutines.delay(4000)
+    LaunchedEffect(showControls, lastInteractionTime, qualityMenuExpanded) {
+        if (showControls && !qualityMenuExpanded) {
+            kotlinx.coroutines.delay(5000)
             showControls = false
         }
+    }
+
+    LaunchedEffect(trackSelector, selectedQuality) {
+        applyQuality(trackSelector, selectedQuality)
     }
 
     val player = remember(streamUrl, streamHeaders, useWebViewFallback, exoRetryKey) {
         if (useWebViewFallback) return@remember null
 
+        val sourceOrigin = streamHeaders.entries
+            .firstOrNull { it.key.equals("Origin", ignoreCase = true) }
+            ?.value
+            ?.trim()
         val headers = streamHeaders
             .filterKeys { key -> !key.equals("User-Agent", true) && !key.equals("Referer", true) && !key.equals("Origin", true) }
             .toMutableMap()
             .apply {
                 put("User-Agent", cleanUa)
-                if (cleanRef.isNotBlank()) {
-                    put("Referer", cleanRef)
-                    originForHeader(cleanRef).takeIf(String::isNotBlank)?.let { put("Origin", it) }
-                }
+                if (cleanRef.isNotBlank()) put("Referer", cleanRef)
+                // Preserve the provider's explicit origin; some live streams reject a
+                // request when Origin is guessed from a different Referer host.
+                val origin = sourceOrigin?.takeIf(String::isNotBlank)
+                    ?: originForHeader(cleanRef).takeIf(String::isNotBlank)
+                if (origin != null) put("Origin", origin)
             }
         val dataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(cleanUa)
@@ -575,6 +604,7 @@ private fun PlayerScreen(
                     .toList()
 
                 adaptiveTracksAvailable = heights.size > 1
+                availableQualities = heights.map { "${it}p" }
 
                 val resText = when {
                     selectedFormat == null -> "تلقائي"
@@ -587,7 +617,8 @@ private fun PlayerScreen(
                     else -> " · ${selectedFormat.bitrate / 1000} kbps"
                 }
                 val streamType = if (isHlsStream(streamUrl)) "HLS" else "MP4"
-                currentTrackInfo = "$streamType · $resText$bitrateText"
+                val trackCount = if (heights.size > 1) " · ${heights.size} جودات" else " · جودة واحدة"
+                currentTrackInfo = "$streamType · $resText$bitrateText$trackCount"
             }
         }
         player.addListener(tracksListener)
@@ -774,8 +805,8 @@ private fun PlayerScreen(
                     Text("←", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 }
 
-                // Right side: Quality Picker
-                if (!useWebViewFallback) {
+                // Right side: visible quality control and Google Cast action.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         Surface(
                             onClick = {
@@ -786,7 +817,7 @@ private fun PlayerScreen(
                             shape = RoundedCornerShape(14.dp),
                         ) {
                             Text(
-                                text = "الجودة · " + selectedQuality,
+                                text = if (useWebViewFallback) "الجودة · المصدر" else "الجودة · $selectedQuality",
                                 color = Color.White,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -796,20 +827,49 @@ private fun PlayerScreen(
                             expanded = qualityMenuExpanded,
                             onDismissRequest = { qualityMenuExpanded = false },
                         ) {
-                            qualityChoices.forEach { quality ->
+                            if (useWebViewFallback || adaptiveTracksAvailable == false) {
                                 DropdownMenuItem(
-                                    text = { Text(quality) },
-                                    onClick = {
-                                        applyQuality(trackSelector, quality)
-                                        selectedQuality = quality
-                                        preferences.edit().putString("quality", quality).apply()
-                                        qualityMenuExpanded = false
-                                        lastInteractionTime = System.currentTimeMillis()
+                                    text = {
+                                        Text(
+                                            if (useWebViewFallback)
+                                                "هذا السيرفر يعرض صفحة ويب؛ الجودة يحددها الموقع. اختر سيرفر فيديو مباشر للتحكم."
+                                            else
+                                                "${currentTrackInfo}. هذا المصدر لا يوفّر جودات بديلة لتغييرها."
+                                        )
                                     },
+                                    enabled = false,
+                                    onClick = {},
                                 )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text("المسارات المتاحة: ${availableQualities.joinToString("، ").ifBlank { "جارٍ الفحص" }}") },
+                                    enabled = false,
+                                    onClick = {},
+                                )
+                                qualityChoices.forEach { quality ->
+                                    DropdownMenuItem(
+                                        text = { Text(quality) },
+                                        onClick = {
+                                            applyQuality(trackSelector, quality)
+                                            selectedQuality = quality
+                                            preferences.edit().putString("quality", quality).apply()
+                                            qualityMenuExpanded = false
+                                            lastInteractionTime = System.currentTimeMillis()
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
+
+                    CastRouteButton(
+                        streamUrl = streamUrl,
+                        title = title,
+                        isLive = isLive,
+                        canCast = isDirectStream,
+                        player = player,
+                        needsSourceHeaders = referer.isNotBlank() || streamHeaders.isNotEmpty(),
+                    )
                 }
             }
         }
@@ -843,6 +903,160 @@ private fun PlayerScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun CastRouteButton(
+    streamUrl: String,
+    title: String,
+    isLive: Boolean,
+    canCast: Boolean,
+    player: ExoPlayer?,
+    needsSourceHeaders: Boolean,
+) {
+    val context = LocalContext.current
+    var castUiUnavailable by remember(streamUrl) { mutableStateOf(false) }
+    val castContext = remember(context) {
+        runCatching { CastContext.getSharedInstance(context.applicationContext) }.getOrNull()
+    }
+    val sessionManager = castContext?.sessionManager
+    val loadToReceiver: (CastSession) -> Unit = remember(streamUrl, title, isLive, canCast, player, needsSourceHeaders) {
+        { session ->
+            val remote = session.remoteMediaClient
+            if (!canCast) {
+                Toast.makeText(context, "هذا السيرفر صفحة موقع، اختر رابط فيديو مباشر لإرساله للتلفزيون.", Toast.LENGTH_LONG).show()
+            } else if (remote == null) {
+                Toast.makeText(context, "اتصل التلفزيون، لكن مشغل الوسائط غير جاهز.", Toast.LENGTH_LONG).show()
+            } else {
+                if (needsSourceHeaders) {
+                    Toast.makeText(
+                        context,
+                        "قد لا يعمل هذا السيرفر على التلفزيون لأنه يحتاج بيانات دخول خاصة بالمصدر.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+                val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                    putString(MediaMetadata.KEY_TITLE, title)
+                }
+                val mediaInfo = MediaInfo.Builder(streamUrl)
+                    .setContentType(castContentType(streamUrl, isLive))
+                    .setStreamType(if (isLive) MediaInfo.STREAM_TYPE_LIVE else MediaInfo.STREAM_TYPE_BUFFERED)
+                    .setMetadata(metadata)
+                    .build()
+                val request = MediaLoadRequestData.Builder()
+                    .setMediaInfo(mediaInfo)
+                    .setAutoplay(true)
+                    .build()
+                runCatching {
+                    remote.load(request).setResultCallback { result ->
+                        if (result.status.isSuccess) {
+                            player?.pause()
+                            Toast.makeText(context, "بدأ التشغيل على الشاشة؛ تختار الشاشة الجودة تلقائيًا.", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(context, "تعذر تشغيل هذا الرابط على الشاشة. جرّب سيرفرًا مباشرًا آخر.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }.onFailure {
+                    Toast.makeText(context, "تعذر إرسال الرابط إلى الشاشة؛ يستمر تشغيل الهاتف.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    val listener = remember(loadToReceiver) {
+        object : SessionManagerListener<CastSession> {
+            override fun onSessionStarting(session: CastSession) = Unit
+            override fun onSessionStarted(session: CastSession, sessionId: String) = loadToReceiver(session)
+            override fun onSessionStartFailed(session: CastSession, error: Int) {
+                Toast.makeText(context, "تعذر الاتصال بجهاز البث.", Toast.LENGTH_LONG).show()
+            }
+            override fun onSessionEnding(session: CastSession) = Unit
+            override fun onSessionEnded(session: CastSession, error: Int) = Unit
+            override fun onSessionSuspended(session: CastSession, reason: Int) = Unit
+            override fun onSessionResuming(session: CastSession, sessionId: String) = Unit
+            override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) = Unit
+            override fun onSessionResumeFailed(session: CastSession, error: Int) {
+                Toast.makeText(context, "تعذر استعادة الاتصال بجهاز البث.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    DisposableEffect(sessionManager, listener) {
+        var listenerAdded = false
+        runCatching {
+            sessionManager?.addSessionManagerListener(listener, CastSession::class.java)
+            listenerAdded = sessionManager != null
+            sessionManager?.currentCastSession?.takeIf { it.isConnected }?.let(loadToReceiver)
+        }.onFailure {
+            castUiUnavailable = true
+        }
+        onDispose {
+            if (listenerAdded) {
+                runCatching { sessionManager?.removeSessionManagerListener(listener, CastSession::class.java) }
+            }
+        }
+    }
+
+    Surface(
+        color = Color(0xD9272C3D),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.size(44.dp),
+    ) {
+        if (castContext == null || !canCast || castUiUnavailable) {
+            Box(
+                modifier = Modifier.fillMaxSize().clickable {
+                    val message = if (!canCast) {
+                        "هذا السيرفر صفحة موقع، اختر رابط فيديو مباشر لإرساله للتلفزيون."
+                    } else if (castUiUnavailable) {
+                        "تعذر تهيئة الإرسال للتلفزيون على هذا الجهاز. يستمر تشغيل الفيديو على الهاتف."
+                    } else {
+                        "ميزة الإرسال تحتاج جهازًا يدعم Google Cast وخدمات Google Play."
+                    }
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("📺", fontSize = 20.sp)
+            }
+        } else {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { viewContext ->
+                    val buttonResult = runCatching {
+                        MediaRouteButton(viewContext).apply {
+                            setBackgroundColor(AndroidColor.TRANSPARENT)
+                            minimumWidth = 44
+                            minimumHeight = 44
+                        }
+                    }
+                    val button = buttonResult.getOrElse {
+                        castUiUnavailable = true
+                        View(viewContext)
+                    }
+                    if (button is MediaRouteButton) {
+                        runCatching {
+                            CastButtonFactory.setUpMediaRouteButton(viewContext, button)
+                        }.onFailure {
+                            castUiUnavailable = true
+                        }
+                    }
+                    button
+                },
+            )
+        }
+    }
+}
+
+private fun castContentType(url: String, isLive: Boolean): String {
+    val path = url.substringBefore('?').substringBefore('#').lowercase(Locale.ROOT)
+    return when {
+        path.endsWith(".m3u8") || path.contains("/hls/") || path.contains("/live/") || (isLive && !path.endsWith(".mp4") && !path.endsWith(".mpd")) -> "application/x-mpegURL"
+        path.endsWith(".mpd") -> "application/dash+xml"
+        path.endsWith(".mp4") || path.endsWith(".m4v") -> "video/mp4"
+        path.endsWith(".webm") -> "video/webm"
+        path.endsWith(".ts") -> "video/mp2t"
+        else -> "video/*"
     }
 }
 

@@ -24,7 +24,7 @@ class MainActivity : FlutterActivity() {
                         getSharedPreferences("madar_flutter_cache", MODE_PRIVATE).edit().putString(key, value).apply()
                         result.success(null)
                     }
-                    "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), result)
+                    "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), call.argument("backupSourcesJson"), call.argument<Boolean>("live") ?: false, result)
                     "player.store" -> openPlayerStore(result)
                     "download.start" -> startDownload(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), result)
                     else -> if (!mediaBridge.handle(call, result)) result.notImplemented()
@@ -52,7 +52,7 @@ class MainActivity : FlutterActivity() {
 
     private fun openPlayer(
         url: String?, title: String?, userAgent: String?, referer: String?,
-        headers: Map<String, String>?, result: MethodChannel.Result,
+        headers: Map<String, String>?, backupSourcesJson: String?, isLive: Boolean, result: MethodChannel.Result,
     ) {
         val stream = url.orEmpty()
         if (!stream.startsWith("http://", true) && !stream.startsWith("https://", true)) {
@@ -69,6 +69,8 @@ class MainActivity : FlutterActivity() {
                 putExtra("com.madar.player.extra.USER_AGENT", userAgent.orEmpty())
                 putExtra("com.madar.player.extra.REFERER", referer.orEmpty())
                 putExtra("com.madar.player.extra.STREAM_HEADERS", JSONObject(headers ?: emptyMap<String, String>()).toString())
+                putExtra("com.madar.player.extra.BACKUP_SOURCES", backupSourcesJson.orEmpty())
+                putExtra("com.madar.player.extra.IS_LIVE", isLive)
                 addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
             startActivity(intent)

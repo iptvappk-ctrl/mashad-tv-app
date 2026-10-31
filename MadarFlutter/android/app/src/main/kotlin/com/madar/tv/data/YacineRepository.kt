@@ -267,18 +267,74 @@ object YacineRepository {
     // ─── Event Streams ────────────────────────────────────────────────────────────
     suspend fun getEventStreams(eventId: String): List<YacineStream> = withContext(Dispatchers.IO) {
         runCatching {
-            val json = JSONObject(decryptResponse("event/$eventId"))
-            parseStreams(json.getJSONArray("data"))
+            parseStreamPayload(decryptResponse("event/$eventId"))
         }.getOrElse { emptyList() }
+    }
+
+    /** Prefer event-specific streams, then include the event's scheduled TV channel as a
+     * working alternate. Some events publish no event stream even while their channel is live. */
+    suspend fun getMatchStreams(
+        eventId: String,
+        channelHint: String,
+        leagueHint: String,
+    ): List<YacineStream> = withContext(Dispatchers.IO) {
+        val eventStreams = runCatching { getEventStreams(eventId) }.getOrDefault(emptyList())
+        val channels = runCatching { getSportsChannels() }.getOrDefault(emptyList())
+        val hint = channelHint.trim()
+        val normalizedHint = normalizeChannelName(hint)
+        val target = channels.firstOrNull { channel ->
+            val name = normalizeChannelName(channel.name)
+            normalizedHint.isNotBlank() && name.isNotBlank() &&
+                (name.contains(normalizedHint) || normalizedHint.contains(name))
+        } ?: run {
+            val league = leagueHint.lowercase()
+            val preferredNumber = when {
+                league.contains("فرنسي") || league.contains("ligue 1") -> "4"
+                league.contains("ألماني") || league.contains("bundesliga") -> "5"
+                league.contains("إسباني") || league.contains("la liga") -> "3"
+                league.contains("إنجليزي") || league.contains("premier") -> "1"
+                else -> ""
+            }
+            channels.firstOrNull { channel ->
+                preferredNumber.isNotBlank() && channel.name.contains("beIN", true) &&
+                    channel.name.contains(preferredNumber)
+            } ?: channels.firstOrNull { it.name.contains("beIN", true) }
+                ?: channels.firstOrNull()
+        }
+        val channelStreams = target?.let { channel ->
+            runCatching { getChannelStreams(channel.id) }.getOrDefault(emptyList())
+                .map { stream -> stream.copy(name = "${channel.name} · ${stream.name}") }
+        }.orEmpty()
+        (eventStreams + channelStreams)
+            .filter { it.url.isNotBlank() }
+            .distinctBy { it.url.trim() }
     }
 
     // ─── Channel Streams ──────────────────────────────────────────────────────────
     suspend fun getChannelStreams(channelId: String): List<YacineStream> = withContext(Dispatchers.IO) {
         runCatching {
-            val json = JSONObject(decryptResponse("channel/$channelId"))
-            parseStreams(json.getJSONArray("data"))
+            parseStreamPayload(decryptResponse("channel/$channelId"))
         }.getOrElse { emptyList() }
     }
+
+    private fun parseStreamPayload(raw: String): List<YacineStream> {
+        val clean = raw.trim()
+        val rows = when {
+            clean.startsWith("[") -> JSONArray(clean)
+            clean.startsWith("{") -> {
+                val json = JSONObject(clean)
+                json.optJSONArray("data") ?: json.optJSONArray("streams") ?: JSONArray()
+            }
+            else -> JSONArray()
+        }
+        return parseStreams(rows)
+    }
+
+    private fun normalizeChannelName(value: String): String = value
+        .lowercase()
+        .replace(Regex("[\\u064B-\\u065F\\u0670\\u0640]"), "")
+        .replace(Regex("[\\u0622\\u0623\\u0625]"), "ا")
+        .replace(Regex("[^a-z0-9\\u0600-\\u06ff]"), "")
 
     private fun parseStreams(arr: JSONArray): List<YacineStream> {
         val browserUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

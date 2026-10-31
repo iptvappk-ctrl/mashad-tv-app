@@ -3,7 +3,7 @@
 ## Native Android changes
 
 - The home `Scaffold` is composed behind the intro so cache reads and network refresh begin immediately.
-- The intro appears only on the first launch and now finishes in under one second by its animation schedule.
+- The native app intro plays on each cold launch and finishes in under one second by its animation schedule.
 - A cached catalogue is drawn first. On a cold cache the full-page skeleton is dismissed after 750 ms while source requests continue in parallel and merge as they finish.
 - Catalogue polling was reduced from every eight minutes to every twenty minutes.
 - The catalogue skeleton no longer runs a continuous shimmer animation.
@@ -11,6 +11,8 @@
 - Episode previous/next actions require the exact adjacent number in the same season. A missing number disables that action instead of jumping to a different episode.
 - Season bundles are normalized and sorted before display. Unknown-season episode links are omitted when the source page identifies multiple seasons. Season cache keys were versioned to `v2` so stale mixed-season bundles are not reused.
 - Live playback forwards server headers and forms the `Origin` from the referer origin. Match and channel streams open in the companion player; if it is missing, the app shows a Play Store prompt instead of opening the video inline.
+- Match and channel playback marks the media as live for Google Cast. The companion player adds Google Cast device discovery, loading on Cast session start, and source-aware quality controls. Quality changes apply only when the source exposes alternate renditions; the Cast receiver must be able to access the stream URL directly.
+- The Flutter and native app launchers use the Zakzouka logo. Android launch splash screens use the brand mark on a light background; Flutter also draws a short animated intro while the home tabs start loading behind it.
 
 ## Flutter application
 
@@ -18,7 +20,7 @@ The independent project lives in `MadarFlutter`. Its user-facing shell mirrors t
 
 `FlutterMediaBridge.kt` connects Flutter to the same Android repositories used by MadarTV: `ArabseedRepository`, `MultiProviderRepository`, `YacineRepository`, and `FootballRepository`. Disk caches initialize in the Flutter host process. Flutter reads cached content first, renders primary-source results as they arrive, and loads provider results in the background before merging and de-duplicating them.
 
-The Flutter flow includes search, details/story/cast, related parts, numbered seasons and episodes, exact same-season previous/next navigation, playback server selection through the companion player, match and channel streams, saved favorites, and the Android download service. Bounded poster decoding and retained tab state keep navigation light. The sports tab paints an opaque app background so catalog posters cannot remain visible behind it. Loading placeholders for the catalog, matches, and channels use one lightweight moving shimmer controller per loading group. When opening an episode card, season discovery uses the canonical parent-series page, resolves the episode's actual season, preserves a manually selected season across refreshes, and only highlights the current episode in its own season.
+The Flutter flow includes search, details/story/cast, related parts, numbered seasons and episodes, exact same-season previous/next navigation, playback server selection through the companion player, match and channel streams, saved favorites, and the Android download service. Bounded poster decoding and retained tab state keep navigation light. The sports tab paints an opaque app background so catalog posters cannot remain visible behind it and adds ESPN scores/status to Yacine fixtures by normalized team names and kickoff time without blocking the live fixture list. Poster images use a persistent disk and memory cache, provider request headers, and the featured carousel displays the complete poster. Detail story, season, and server requests now complete independently; server results are cached for quick revisits. Loading placeholders for the catalog, matches, and channels use one lightweight moving shimmer controller per loading group. When opening an episode card, season discovery uses the canonical parent-series page, resolves the episode's actual season, preserves a manually selected season across refreshes, and only highlights the current episode in its own season.
 
 Flutter content and playback still depend on the third-party providers and their current responses. Code integration does not certify that every source is reachable, that a stream is valid, or that rights/access remain available.
 
@@ -39,7 +41,7 @@ cd MadarTV
 ./gradlew.bat :app:assembleDebug :madar-player:assembleDebug
 ```
 
-The Flutter parity APK uses version `1.0.4+5` and targets Android ARM64. Release builds currently use the debug signing config for manual device installation; store publication requires a protected release key. The native MadarTV app uses version `0.2.1` (version code 3) for its latest correction build.
+The Flutter parity APK uses version `1.0.9+10` and targets Android ARM64. Season extraction follows explicit season links for incomplete lists, de-duplicates episode URLs across seasons, keeps useful cached data when a provider returns an empty bundle, and invalidates the prior season cache key. Related parts are requested for movies as well as series, and the series detail has a download action for the last episode in the selected season. Match playback now includes the event stream list and the event's named sports channel stream as an alternate; bottom-tab state is held by an indexed stack with the existing fade and slide transition. Release builds currently use the debug signing config for manual device installation; store publication requires a protected release key. The companion player is version `1.1.2`; Cast initialization failures are contained so they cannot take down local video playback. The native MadarTV app uses version `0.2.2` (version code 4); its intro now displays on each cold start.
 
 ## Verification boundary
 

@@ -14,8 +14,8 @@ android {
         applicationId = "com.madar.player"
         minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 5
+        versionName = "1.1.3"
     }
 
     buildTypes {
@@ -49,4 +49,5 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.exoplayer.dash)
     implementation(libs.androidx.media3.ui)
+    implementation(libs.google.play.services.cast.framework)
 }

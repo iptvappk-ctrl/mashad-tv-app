@@ -1,0 +1,7 @@
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowSplashScreenBackground">@color/zakzouka_splash_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/zakzouka_splash_mark</item>
+        <item name="android:windowBackground">@color/zakzouka_splash_bg</item>
+    </style>
+</resources>

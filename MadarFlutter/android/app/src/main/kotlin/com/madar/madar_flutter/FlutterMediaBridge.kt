@@ -88,6 +88,16 @@ class FlutterMediaBridge(context: Context) {
             val detail = if (cached) loadCachedDetail(item) else fetchDetail(item)
             detail?.toMap()
         }
+        "media.story.fetch" -> {
+            val item = call.argument<Map<String, Any?>>("item")?.toItem()
+                ?: throw IllegalArgumentException("العنصر غير صالح")
+            val (overview, cast) = if (item.providerName == "عرب سيد") {
+                ArabseedRepository.fetchStoryFast(item.pageUrl) to emptyList()
+            } else {
+                MultiProviderRepository.fetchStoryAndCast(item.pageUrl)
+            }
+            mapOf("overview" to overview, "cast" to cast)
+        }
         "media.seasons.cached", "media.seasons.fetch" -> {
             val item = call.argument<Map<String, Any?>>("item")?.toItem()
                 ?: throw IllegalArgumentException("المسلسل غير صالح")
@@ -110,6 +120,11 @@ class FlutterMediaBridge(context: Context) {
         "live.channels.cached" -> (YacineRepository.getCachedChannels(call.argument<String>("categoryId").orEmpty()) ?: emptyList()).map { it.toMap() }
         "live.channels.fetch" -> YacineRepository.getChannels(call.argument<String>("categoryId").orEmpty(), forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
         "live.eventStreams" -> YacineRepository.getEventStreams(call.argument<String>("id").orEmpty()).map { it.toMap() }
+        "live.matchStreams" -> YacineRepository.getMatchStreams(
+            eventId = call.argument<String>("id").orEmpty(),
+            channelHint = call.argument<String>("channel").orEmpty(),
+            leagueHint = call.argument<String>("league").orEmpty(),
+        ).map { it.toMap() }
         "live.channelStreams" -> YacineRepository.getChannelStreams(call.argument<String>("id").orEmpty()).map { it.toMap() }
         "football.cached" -> (FootballRepository.loadCachedMatches() ?: emptyList()).map { it.toMap() }
         "football.fetch" -> FootballRepository.fetchUpcomingMatches(forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }

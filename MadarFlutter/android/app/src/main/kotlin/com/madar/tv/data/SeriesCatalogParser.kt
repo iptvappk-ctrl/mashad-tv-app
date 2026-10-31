@@ -1,6 +1,7 @@
 package com.madar.tv.data
 
 import org.jsoup.nodes.Element
+import org.jsoup.nodes.Document
 import java.net.URLDecoder
 
 /** Shared, conservative parsing for episode/season/part labels found in provider pages. */
@@ -9,7 +10,13 @@ internal object SeriesCatalogParser {
         """(?i)(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)[\s._#=/:-]*([0-9]{1,4})(?![0-9])""",
     )
     private val seasonNumberPattern = Regex(
-        """(?i)(?:الموسم|موسم|(?<![a-z])season|(?<![a-z])s)[\s._#=/:-]*([0-9]{1,2})(?![0-9])""",
+        """(?i)(?:الموسم|موسم|(?<![a-z])season)[\s._#=/:-]*([0-9]{1,2})(?![0-9])""",
+    )
+    private val compactSeasonEpisodePattern = Regex(
+        """(?i)(?:^|[^a-z])s[\s._#=/:-]*([0-9]{1,2})[\s._#=/:-]*e(?:p(?:isode)?|ps)?[\s._#=/:-]*[0-9]{1,4}(?![0-9])""",
+    )
+    private val standaloneSeasonTokenPattern = Regex(
+        """(?i)(?:^|/)s([0-9]{1,2})(?:/?(?:[?#].*)?)$""",
     )
     private val partNumberPattern = Regex(
         """(?i)(?:الجزء|جزء|(?<![a-z])part)[\s._#=/:-]*([0-9]{1,3})(?![0-9])""",
@@ -66,12 +73,28 @@ internal object SeriesCatalogParser {
         return null
     }
 
-    fun seasonNumber(title: String, url: String): Int? = extractLabeledNumber(
-        title = title,
-        url = url,
-        numberPattern = seasonNumberPattern,
-        ordinalPattern = seasonOrdinalPattern,
-    )
+    fun seasonNumber(title: String, url: String): Int? {
+        extractLabeledNumber(
+            title = title,
+            url = url,
+            numberPattern = seasonNumberPattern,
+            ordinalPattern = seasonOrdinalPattern,
+        )?.let { return it }
+
+        val normalizedTitle = normalizeText(title)
+        val normalizedUrl = normalizeText(url)
+        sequenceOf(normalizedTitle, normalizedUrl).forEach { value ->
+            compactSeasonEpisodePattern.find(value)?.groupValues?.getOrNull(1)
+                ?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+        }
+        // Accept a stand-alone S2 path/title token, but never treat an arbitrary "s5"
+        // fragment inside a longer slug as a season label.
+        sequenceOf(normalizedTitle, normalizedUrl).forEach { value ->
+            standaloneSeasonTokenPattern.find(value)?.groupValues?.getOrNull(1)
+                ?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+        }
+        return null
+    }
 
     /**
      * Reads a season label from the episode link or its nearby DOM container.
@@ -81,18 +104,13 @@ internal object SeriesCatalogParser {
     fun seasonNumberFromElement(element: Element, title: String, url: String): Int? {
         seasonNumber(title, url)?.let { return it }
 
-        val seasonAttributes = listOf(
-            "data-season-number", "data-season", "data-season_num",
-        )
+        val seasonAttributes = listOf("data-season-number", "data-season", "data-season_num")
+        val seasonContainerMarker = Regex("""(?i)(season|الموسم|موسم)""")
         var node: Element? = element
         var depth = 0
-        while (node != null && depth < 8) {
-            val contextValues = listOf(
-                node.id(), node.className(), node.attr("title"), node.attr("aria-label"),
-                node.attr("data-title"), node.attr("data-name"),
-            ).filter(String::isNotBlank)
-            contextValues.firstNotNullOfOrNull { seasonNumber(it, "") }?.let { return it }
-
+        while (node != null && depth < 5) {
+            val marker = "${node.id()} ${node.className()}"
+            val isSeasonContainer = seasonContainerMarker.containsMatchIn(marker)
             for (attribute in seasonAttributes) {
                 val value = node.attr(attribute).trim()
                 if (value.isNotBlank()) {
@@ -101,27 +119,42 @@ internal object SeriesCatalogParser {
                 }
             }
 
+            // Generic wrappers often contain tabs for several seasons. Do not inherit a
+            // title/label from those distant wrappers; only inspect labels on an element
+            // which is itself explicitly marked as a season container.
+            if (isSeasonContainer) {
+                listOf(node.id(), node.className(), node.attr("title"), node.attr("aria-label"))
+                    .firstNotNullOfOrNull { seasonNumber(it, "") }
+                    ?.let { return it }
+            }
+
             val childSeasonNumbers = node.children()
                 .filter { child ->
                     child.tagName() in setOf("h1", "h2", "h3", "h4", "h5", "button")
                         || child.attr("role").equals("tab", ignoreCase = true)
                 }
-                .take(4)
+                .take(6)
                 .mapNotNull { seasonNumber(it.text().take(100), "") }
                 .distinct()
-            if (childSeasonNumbers.size == 1) return childSeasonNumbers.single()
+            if (childSeasonNumbers.size == 1 && (isSeasonContainer || depth <= 2)) {
+                return childSeasonNumbers.single()
+            }
 
-            var sibling = node.previousElementSibling()
-            var siblingCount = 0
-            while (sibling != null && siblingCount < 3) {
-                val isSeasonLabel = sibling.tagName() in setOf("h1", "h2", "h3", "h4", "h5", "button")
-                    || sibling.className().contains("season", ignoreCase = true)
-                    || sibling.id().contains("season", ignoreCase = true)
-                if (isSeasonLabel) {
-                    seasonNumber(sibling.text().take(100), "")?.let { return it }
+            val nodeMarker = "${node.className()} ${node.id()}".lowercase()
+            val isEpisodeList = listOf("episode", "episodes", "eplist", "eps-list", "episodios")
+                .any(nodeMarker::contains)
+            if (isEpisodeList || isSeasonContainer) {
+                var sibling = node.previousElementSibling()
+                var siblingCount = 0
+                while (sibling != null && siblingCount < 2) {
+                    val isSeasonLabel = sibling.tagName() in setOf("h1", "h2", "h3", "h4", "h5", "button")
+                        || seasonContainerMarker.containsMatchIn("${sibling.className()} ${sibling.id()}")
+                    if (isSeasonLabel) {
+                        seasonNumber(sibling.text().take(100), "")?.let { return it }
+                    }
+                    sibling = sibling.previousElementSibling()
+                    siblingCount++
                 }
-                sibling = sibling.previousElementSibling()
-                siblingCount++
             }
 
             node = node.parent()
@@ -130,6 +163,25 @@ internal object SeriesCatalogParser {
 
         return null
     }
+
+    /** Links explicitly labelled as a season, used to fetch each season page on sources
+     * which only render the currently selected season's episode list in the page body. */
+    fun linkedSeasonPages(document: Document, currentPageUrl: String): List<Pair<Int, String>> =
+        document.select("a[href]")
+            .mapNotNull { link ->
+                val href = link.attr("abs:href").ifBlank { link.attr("href") }.trim()
+                val title = link.text().trim().ifBlank {
+                    link.attr("title").ifBlank { link.attr("aria-label") }
+                }
+                if (href.isBlank() || !href.startsWith("http", ignoreCase = true) ||
+                    normalizedUrl(href) == normalizedUrl(currentPageUrl) || isEpisode(title, href)
+                ) return@mapNotNull null
+                val number = seasonNumber(title, href) ?: return@mapNotNull null
+                number to href
+            }
+            .distinctBy { normalizedUrl(it.second) }
+            .sortedBy { it.first }
+            .take(10)
 
     fun partNumber(title: String, url: String): Int? = extractLabeledNumber(
         title = title,
@@ -160,16 +212,34 @@ internal object SeriesCatalogParser {
 
     /** Normalize provider and disk-cache data before the UI uses it. */
     fun normalizeSeasonBundle(bundle: ArabseedSeasonBundle): ArabseedSeasonBundle {
-        val normalizedSeasons = bundle.seasons
-            .groupBy { it.number }
+        val byUrl = linkedMapOf<String, Pair<Int, ArabseedEpisode>>()
+        bundle.seasons.sortedBy { it.number }.forEach { season ->
+            season.episodes.forEach { episode ->
+                if (episode.number <= 0 || !episode.pageUrl.startsWith("http", ignoreCase = true)) return@forEach
+                val explicitSeason = seasonNumber(episode.title, episode.pageUrl)
+                // A season marker in the episode URL/title is more reliable than a stale
+                // parent grouping. Otherwise keep the provider's season assignment.
+                val targetSeason = explicitSeason ?: episode.seasonNumber.takeIf { it > 0 } ?: season.number
+                val key = normalizedUrl(episode.pageUrl)
+                val previous = byUrl[key]
+                if (previous == null) {
+                    byUrl[key] = targetSeason to episode.copy(seasonNumber = targetSeason)
+                } else {
+                    val previousHasExplicitSeason = seasonNumber(previous.second.title, previous.second.pageUrl) != null
+                    if (explicitSeason != null && !previousHasExplicitSeason) {
+                        byUrl[key] = targetSeason to episode.copy(seasonNumber = targetSeason)
+                    }
+                }
+            }
+        }
+        val normalizedSeasons = byUrl.values
+            .groupBy { it.first }
             .toSortedMap()
-            .map { (seasonNumber, seasons) ->
-                val episodes = seasons.asSequence()
-                    .flatMap { it.episodes.asSequence() }
-                    .filter { it.number > 0 && it.pageUrl.startsWith("http", ignoreCase = true) }
+            .map { (seasonNumber, rows) ->
+                val episodes = rows.asSequence()
+                    .map { it.second }
                     .distinctBy { it.number }
                     .sortedBy { it.number }
-                    .map { episode -> episode.copy(seasonNumber = seasonNumber) }
                     .toList()
                 ArabseedSeason(seasonNumber, seasonTitle(seasonNumber), episodes)
             }

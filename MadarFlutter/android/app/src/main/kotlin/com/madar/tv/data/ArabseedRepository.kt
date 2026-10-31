@@ -25,6 +25,8 @@ import java.io.IOException
 import java.net.URLEncoder
 
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 
 import java.util.concurrent.TimeUnit
 
@@ -444,7 +446,7 @@ object ArabseedRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonBundleCache[pageUrl]?.let { return it }
-        val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v2:" + pageUrl) ?: return null
+        val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v3:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(cached.value)
         seasonBundleCache[pageUrl] = normalized
         seasonBundleCacheAt[pageUrl] = cached.savedAt
@@ -750,6 +752,7 @@ object ArabseedRepository {
 
     private val seasonBundleCache = ConcurrentHashMap<String, ArabseedSeasonBundle>()
     private val seasonBundleCacheAt = ConcurrentHashMap<String, Long>()
+    private val seasonPagePool = Executors.newFixedThreadPool(4)
     private const val SEASON_CACHE_TTL = 6 * 60 * 60 * 1000L
 
 
@@ -889,6 +892,55 @@ object ArabseedRepository {
                     }
                 }
 
+                // Some series pages only render the active season's episode list while
+                // the remaining seasons are linked in tabs. Fetch incomplete season pages
+                // concurrently and let the season page provide the missing group context.
+                val seasonPages = SeriesCatalogParser.linkedSeasonPages(doc, item.pageUrl)
+                val visibleCounts = rawEpisodes.mapNotNull { (title, url, seasonNumber) ->
+                    val episodeNumber = SeriesCatalogParser.episodeNumber(title, url) ?: return@mapNotNull null
+                    val resolvedSeason = SeriesCatalogParser.seasonNumber(title, url)
+                        ?: seasonNumber ?: return@mapNotNull null
+                    resolvedSeason to episodeNumber
+                }.groupingBy { it.first }.eachCount()
+                val seasonPagesToFetch = seasonPages
+                    .filter { (number, _) -> (visibleCounts[number] ?: 0) < 2 }
+                    .take(8)
+                val seasonPageFutures = seasonPagesToFetch.map { (seasonNumber, seasonUrl) ->
+                    seasonPagePool.submit(Callable {
+                        val seasonDoc = Jsoup.parse(fetchHtml(seasonUrl), BASE_URL)
+                        seasonDoc.select("footer, script, style").remove()
+                        seasonNumber to collectEpisodes(seasonDoc)
+                    })
+                }
+                val seasonPageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
+                val seasonPageAssignments = mutableSetOf<String>()
+                for (future in seasonPageFutures) {
+                    val remaining = seasonPageDeadline - System.nanoTime()
+                    if (remaining <= 0L) break
+                    val result = runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull() ?: continue
+                    val (linkedSeasonNumber, linkedEpisodes) = result
+                    for ((title, url, domSeason) in linkedEpisodes) {
+                        val episodeNumber = SeriesCatalogParser.episodeNumber(title, url) ?: continue
+                        val urlKey = SeriesCatalogParser.normalizedUrl(url)
+                        val explicitSeason = SeriesCatalogParser.seasonNumber(title, url)
+                        val resolvedSeason = explicitSeason ?: domSeason ?: linkedSeasonNumber
+                        val existingIndex = rawEpisodes.indexOfFirst {
+                            SeriesCatalogParser.normalizedUrl(it.second) == urlKey
+                        }
+                        if (existingIndex < 0) {
+                            rawEpisodes += Triple(title, url, resolvedSeason)
+                            seasonPageAssignments += urlKey
+                        } else if (urlKey !in seasonPageAssignments && explicitSeason == null) {
+                            rawEpisodes[existingIndex] = Triple(title, url, resolvedSeason)
+                            seasonPageAssignments += urlKey
+                        } else if (explicitSeason != null) {
+                            rawEpisodes[existingIndex] = Triple(title, url, explicitSeason)
+                            seasonPageAssignments += urlKey
+                        }
+                    }
+                }
+                seasonPageFutures.forEach { if (!it.isDone) it.cancel(true) }
+
                 // Keep season identity attached to each link. Only infer one shared season when
                 // the source gives no season labels at all; with multiple labelled seasons,
                 // unlabeled sidebar/recommendation links are omitted instead of mixed in.
@@ -931,6 +983,7 @@ object ArabseedRepository {
 
                 // Find related parts/seasons linked from the page (EXCLUDING any episodes)
                 val relatedParts = mutableListOf<ArabseedItem>()
+                val explicitPartSectionUrls = mutableSetOf<String>()
                 val partSelectors = listOf(
                     ".parts-list a", ".parts a",
                     "a[href*='%d8%a7%d9%84%d8%ac%d8%b2%d8%a1']", "a[href*='الجزء']",
@@ -945,10 +998,17 @@ object ArabseedRepository {
                         ) {
                             val isEpisodeLike = SeriesCatalogParser.isEpisode(txt, href)
                             val isPart = SeriesCatalogParser.hasPartMarker(txt, href)
-                            if (isPart && relatedParts.none { it.pageUrl == href }) {
+                            val isSeason = SeriesCatalogParser.seasonNumber(txt, href) != null
+                            val inExplicitPartSection = sel.startsWith(".")
+                            if (!isEpisodeLike && (isPart || isSeason || inExplicitPartSection) &&
+                                relatedParts.none { it.pageUrl == href }
+                            ) {
                                 val img = el.selectFirst("img")?.attr("abs:src")
                                     ?.ifBlank { el.selectFirst("img")?.attr("src") }
                                     ?: item.posterUrl
+                                if (inExplicitPartSection) {
+                                    explicitPartSectionUrls += SeriesCatalogParser.normalizedUrl(href)
+                                }
                                 relatedParts += ArabseedItem(
                                     id = href.trimEnd('/').substringAfterLast('/').take(80),
                                     title = txt, arabicTitle = txt,
@@ -974,8 +1034,11 @@ object ArabseedRepository {
                             val srUrl = sr.pageUrl
                             val isEpisode = SeriesCatalogParser.isEpisode(srTitle, srUrl)
                             val isPart = SeriesCatalogParser.hasPartMarker(srTitle, srUrl)
+                            val isSeason = SeriesCatalogParser.seasonNumber(srTitle, srUrl) != null
 
-                            if (isPart && !isEpisode && srUrl != item.pageUrl && srTitle.contains(cleanBaseTitle, ignoreCase = true)) {
+                            if ((isPart || isSeason) && !isEpisode && srUrl != item.pageUrl &&
+                                srTitle.contains(cleanBaseTitle, ignoreCase = true)
+                            ) {
                                 if (relatedParts.none { it.pageUrl == srUrl }) {
                                     relatedParts += sr
                                 }
@@ -987,8 +1050,10 @@ object ArabseedRepository {
                 // Final safety filter: NO EPISODES in relatedParts
                 val finalRelatedParts = relatedParts
                     .filter { part ->
-                        SeriesCatalogParser.hasPartMarker(part.title, part.pageUrl)
-                            && !SeriesCatalogParser.isEpisode(part.title, part.pageUrl)
+                        !SeriesCatalogParser.isEpisode(part.title, part.pageUrl) &&
+                            (SeriesCatalogParser.hasPartMarker(part.title, part.pageUrl) ||
+                                SeriesCatalogParser.seasonNumber(part.title, part.pageUrl) != null ||
+                                SeriesCatalogParser.normalizedUrl(part.pageUrl) in explicitPartSectionUrls)
                     }
                     .distinctBy { part ->
                         SeriesCatalogParser.partNumber(part.title, part.pageUrl)?.toString()
@@ -1007,9 +1072,11 @@ object ArabseedRepository {
 
                 ))
 
-                seasonBundleCache[item.pageUrl] = bundle
-                seasonBundleCacheAt[item.pageUrl] = System.currentTimeMillis()
-                CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v2:" + item.pageUrl, bundle)
+                if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
+                    seasonBundleCache[item.pageUrl] = bundle
+                    seasonBundleCacheAt[item.pageUrl] = System.currentTimeMillis()
+                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v3:" + item.pageUrl, bundle)
+                }
 
                 bundle
 

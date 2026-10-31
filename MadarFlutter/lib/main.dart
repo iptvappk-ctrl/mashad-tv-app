@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -94,7 +95,226 @@ class ZakzoukaFlutterApp extends StatelessWidget {
       textDirection: TextDirection.rtl,
       child: child ?? const SizedBox.shrink(),
     ),
-    home: const RootTabs(),
+    home: const _StartupIntro(child: RootTabs()),
+  );
+}
+
+class _StartupIntro extends StatefulWidget {
+  const _StartupIntro({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_StartupIntro> createState() => _StartupIntroState();
+}
+
+class _StartupIntroState extends State<_StartupIntro> {
+  Timer? _timer;
+  bool _visible = true;
+  bool _showIntro = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(milliseconds: 950), _dismissIntro);
+  }
+
+  void _dismissIntro() {
+    if (!mounted || !_showIntro || !_visible) return;
+    setState(() => _visible = false);
+  }
+
+  void _removeIntro() {
+    if (mounted && !_visible && _showIntro) {
+      setState(() => _showIntro = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    fit: StackFit.expand,
+    children: [
+      widget.child,
+      if (_showIntro)
+        Positioned.fill(
+          child: IgnorePointer(
+            ignoring: !_visible,
+            child: AnimatedOpacity(
+              opacity: _visible ? 1 : 0,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+              onEnd: _removeIntro,
+              child: _ZaqzoukaIntroScreen(onSkip: _dismissIntro),
+            ),
+          ),
+        ),
+    ],
+  );
+}
+
+class _ZaqzoukaIntroScreen extends StatelessWidget {
+  const _ZaqzoukaIntroScreen({required this.onSkip});
+
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: _paper,
+    body: DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+          colors: [_card, _paper, Color(0xFFEAD7C5)],
+        ),
+      ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            top: -95,
+            right: -75,
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _brick.withOpacity(.09),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -115,
+            left: -70,
+            child: Container(
+              width: 280,
+              height: 280,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _muted.withOpacity(.08),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Stack(
+              children: [
+                Positioned(
+                  top: 8,
+                  left: 12,
+                  child: TextButton(
+                    onPressed: onSkip,
+                    child: const Text(
+                      'تخطي',
+                      style: TextStyle(
+                        color: _muted,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: .78, end: 1),
+                          duration: const Duration(milliseconds: 760),
+                          curve: Curves.easeOutBack,
+                          builder: (context, scale, child) =>
+                              Transform.scale(scale: scale, child: child),
+                          child: Container(
+                            width: 226,
+                            height: 226,
+                            padding: const EdgeInsets.all(7),
+                            decoration: BoxDecoration(
+                              color: _card,
+                              borderRadius: BorderRadius.circular(40),
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 1.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: _ink.withOpacity(.14),
+                                  blurRadius: 36,
+                                  offset: const Offset(0, 18),
+                                ),
+                              ],
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(34),
+                              child: Image.asset(
+                                'assets/zakzouka_logo.jpg',
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.medium,
+                                semanticLabel: 'شعار زقزوقة',
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 27),
+                        const Text(
+                          'زقزوقة',
+                          style: TextStyle(
+                            color: _ink,
+                            fontSize: 30,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: .2,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'كل الحكايات في مكان واحد',
+                          style: TextStyle(
+                            color: _muted.withOpacity(.96),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        const Text(
+                          'أفلام • مسلسلات • مباريات مباشرة',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: _muted, fontSize: 13),
+                        ),
+                        const SizedBox(height: 28),
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: 1),
+                          duration: const Duration(milliseconds: 900),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, value, child) => SizedBox(
+                            width: 100,
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Container(
+                                width: 100 * value,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: _brick,
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
   );
 }
 
@@ -142,6 +362,8 @@ class NativeBridge {
     String userAgent = '',
     String referer = '',
     Map<String, String> headers = const {},
+    List<Map<String, dynamic>> backupSources = const [],
+    bool isLive = false,
   }) async {
     try {
       return await _native.invokeMethod<bool>('player.open', {
@@ -150,6 +372,8 @@ class NativeBridge {
             'userAgent': userAgent,
             'referer': referer,
             'headers': headers,
+            'backupSourcesJson': jsonEncode(backupSources),
+            'live': isLive,
           }) ??
           false;
     } catch (_) {
@@ -168,6 +392,39 @@ String _text(dynamic value) => value == null ? '' : '$value';
 List<Map<String, dynamic>> _maps(dynamic value) => value is List
     ? value.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
     : <Map<String, dynamic>>[];
+
+Map<String, dynamic> _mergeSeasonBundles(
+  Map<String, dynamic>? cached,
+  Map<String, dynamic> fresh,
+) {
+  final oldSeasons = _maps(cached?['seasons']);
+  final newSeasons = _maps(fresh['seasons']);
+  final oldByNumber = {
+    for (final season in oldSeasons) _integer(season['number']): season,
+  };
+  final merged = <int, Map<String, dynamic>>{};
+  for (final season in newSeasons) {
+    final number = _integer(season['number']);
+    final old = oldByNumber[number];
+    final newEpisodes = _maps(season['episodes']);
+    final oldEpisodes = _maps(old?['episodes']);
+    merged[number] = old != null && oldEpisodes.length > newEpisodes.length
+        ? old
+        : season;
+  }
+  for (final season in oldSeasons) {
+    merged.putIfAbsent(_integer(season['number']), () => season);
+  }
+  final freshParts = _maps(fresh['relatedParts']);
+  final oldParts = _maps(cached?['relatedParts']);
+  final parts = freshParts.isNotEmpty ? freshParts : oldParts;
+  return {
+    ...fresh,
+    'seasons': merged.values.toList()
+      ..sort((a, b) => _integer(a['number']).compareTo(_integer(b['number']))),
+    'relatedParts': parts,
+  };
+}
 
 String _cleanTitle(String value) {
   const digits = '٠١٢٣٤٥٦٧٨٩';
@@ -344,13 +601,19 @@ class _RootTabsState extends State<RootTabs> {
     final all = {..._seenItems, ..._favorites}.values.toList();
     final pages = <Widget>[
       CatalogPage(
+        key: const PageStorageKey<String>('catalog-tab'),
         favoriteUrls: _favorites.keys.toSet(),
         onOpen: _open,
         onToggle: _toggle,
         onItems: _remember,
       ),
-      _sportsBuilt ? const SportsPage() : const SizedBox.shrink(),
+      _sportsBuilt
+          ? const SportsPage(key: PageStorageKey<String>('sports-tab'))
+          : const SizedBox.shrink(
+              key: PageStorageKey<String>('sports-placeholder'),
+            ),
       FavoritesPage(
+        key: const PageStorageKey<String>('favorites-tab'),
         items: all,
         favoriteUrls: _favorites.keys.toSet(),
         onOpen: _open,
@@ -360,28 +623,23 @@ class _RootTabsState extends State<RootTabs> {
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: Stack(
+        child: IndexedStack(
+          index: _tab,
+          sizing: StackFit.expand,
           children: List.generate(
             pages.length,
-            (index) => Positioned.fill(
-              child: IgnorePointer(
-                ignoring: _tab != index,
-                child: TickerMode(
-                  enabled: _tab == index,
-                  child: AnimatedOpacity(
-                    opacity: _tab == index ? 1 : 0,
-                    duration: const Duration(milliseconds: 170),
-                    child: AnimatedSlide(
-                      offset: _tab == index
-                          ? Offset.zero
-                          : const Offset(0, .012),
-                      duration: const Duration(milliseconds: 190),
-                      curve: Curves.easeOutCubic,
-                      child: ColoredBox(
-                        color: _paper,
-                        child: SizedBox.expand(child: pages[index]),
-                      ),
-                    ),
+            (index) => TickerMode(
+              enabled: _tab == index,
+              child: AnimatedOpacity(
+                opacity: _tab == index ? 1 : 0,
+                duration: const Duration(milliseconds: 170),
+                child: AnimatedSlide(
+                  offset: _tab == index ? Offset.zero : const Offset(0, .012),
+                  duration: const Duration(milliseconds: 190),
+                  curve: Curves.easeOutCubic,
+                  child: ColoredBox(
+                    color: _paper,
+                    child: SizedBox.expand(child: pages[index]),
                   ),
                 ),
               ),
@@ -1130,40 +1388,44 @@ class _FeaturedCard extends StatelessWidget {
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) => Material(
-    color: _line,
+    color: const Color(0xFF3C2D3A),
     borderRadius: BorderRadius.circular(24),
     clipBehavior: Clip.antiAlias,
     child: InkWell(
       onTap: onTap,
-      child: SizedBox(
+      child: Container(
         height: 194,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.centerRight,
+            end: Alignment.centerLeft,
+            colors: [Color(0xFF30232E), Color(0xFF594653), Color(0xFF8A777A)],
+          ),
+        ),
         child: Stack(
-          fit: StackFit.expand,
           children: [
-            _NetworkImage(url: item.poster, fit: BoxFit.cover),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.centerRight,
-                  end: Alignment.centerLeft,
-                  colors: [
-                    Color(0xE82C1F2C),
-                    Color(0x8A2C1F2C),
-                    Color(0x12000000),
-                  ],
-                ),
+            Positioned(
+              left: 8,
+              top: 9,
+              bottom: 9,
+              width: 118,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _NetworkImage(url: item.poster, fit: BoxFit.contain),
               ),
             ),
             Positioned(
-              right: 18,
-              bottom: 17,
-              left: 18,
+              left: 137,
+              right: 17,
+              top: 16,
+              bottom: 16,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   const Text(
                     'اختيار اليوم',
+                    textAlign: TextAlign.right,
                     style: TextStyle(
                       color: Colors.white70,
                       fontSize: 12,
@@ -1175,6 +1437,7 @@ class _FeaturedCard extends StatelessWidget {
                     item.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 20,
@@ -1183,18 +1446,19 @@ class _FeaturedCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 9),
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.start,
                     children: [
+                      const Icon(
+                        Icons.play_circle_fill,
+                        size: 31,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 8),
                       _SmallBadge(label: item.isSeries ? 'مسلسل' : 'فيلم'),
                       if (item.year.isNotEmpty) ...[
                         const SizedBox(width: 6),
                         _SmallBadge(label: item.year),
                       ],
-                      const Spacer(),
-                      const Icon(
-                        Icons.play_circle_fill,
-                        size: 32,
-                        color: Colors.white,
-                      ),
                     ],
                   ),
                 ],
@@ -1317,18 +1581,41 @@ class _NetworkImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (url.isEmpty) return const _PosterSkeleton();
-    return Image.network(
-      url,
+    return CachedNetworkImage(
+      imageUrl: url,
+      httpHeaders: _posterHeaders(url),
       fit: fit,
-      cacheWidth: 420,
-      cacheHeight: 760,
+      memCacheWidth: 500,
+      memCacheHeight: 900,
+      maxWidthDiskCache: 650,
+      maxHeightDiskCache: 1100,
       filterQuality: FilterQuality.low,
-      gaplessPlayback: true,
-      frameBuilder: (context, child, frame, sync) =>
-          frame != null || sync ? child : const _PosterSkeleton(),
-      errorBuilder: (_, __, ___) => const _PosterFallback(),
+      fadeInDuration: const Duration(milliseconds: 120),
+      useOldImageOnUrlChange: true,
+      placeholder: (_, __) => const _PosterSkeleton(),
+      errorWidget: (_, __, ___) => const _PosterFallback(),
     );
   }
+}
+
+Map<String, String> _posterHeaders(String rawUrl) {
+  final uri = Uri.tryParse(rawUrl);
+  final host = uri?.host.toLowerCase() ?? '';
+  final referer = switch (host) {
+    _ when host.contains('myseed') => 'https://m.myseed.tv/',
+    _ when host.contains('arabseed') => 'https://arabseed.health/',
+    _ when host.contains('akw') => 'https://akw.cam/',
+    _ when host.contains('wecima') => 'https://myweecima.casa/',
+    _ when host.contains('fasel') => 'https://wb49584.fasel4k.site/',
+    _ when host.isNotEmpty =>
+      '${uri!.scheme.isEmpty ? 'https' : uri.scheme}://$host/',
+    _ => '',
+  };
+  return {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
+    if (referer.isNotEmpty) 'Referer': referer,
+    'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+  };
 }
 
 class _PosterFallback extends StatelessWidget {
@@ -1644,10 +1931,13 @@ class DetailPage extends StatefulWidget {
 
 class _DetailPageState extends State<DetailPage> {
   Map<String, dynamic>? _detail, _bundle;
+  List<Map<String, dynamic>> _serverRows = [];
   bool _loading = true;
+  bool _serversLoading = true;
   String? _error;
   int _seasonIndex = 0, _request = 0;
   int? _manualSeasonNumber;
+  String? _downloadingMediaUrl;
 
   @override
   void initState() {
@@ -1659,21 +1949,20 @@ class _DetailPageState extends State<DetailPage> {
     final request = ++_request;
     setState(() {
       _loading = true;
+      _serversLoading = true;
       _error = null;
     });
     final args = {'item': widget.item.toMap()};
     try {
       final cached = await Future.wait([
         NativeBridge.map('media.detail.cached', args),
-        if (widget.item.isSeries)
-          NativeBridge.map('media.seasons.cached', args)
-        else
-          Future<Map<String, dynamic>?>.value(null),
+        NativeBridge.map('media.seasons.cached', args),
       ]);
       if (!mounted || request != _request) return;
       setState(() {
         _detail = cached[0];
         _bundle = cached[1];
+        _serverRows = _maps(cached[0]?['servers']);
         _loading = false;
         if (_bundle != null) {
           _seasonIndex = _seasonIndexFor(
@@ -1684,39 +1973,93 @@ class _DetailPageState extends State<DetailPage> {
       });
     } catch (_) {}
     if (!mounted || request != _request) return;
+    final requests = <Future<void>>[
+      _refreshStory(request, args),
+      _loadServers(request),
+      _refreshSeasons(request, args),
+    ];
+    await Future.wait(requests);
+    if (mounted && request == _request) setState(() => _loading = false);
+  }
+
+  Future<void> _refreshStory(int request, Map<String, Object?> args) async {
     try {
-      final fresh = await Future.wait([
-        NativeBridge.map('media.detail.fetch', args),
-        if (widget.item.isSeries)
-          NativeBridge.map('media.seasons.fetch', args)
-        else
-          Future<Map<String, dynamic>?>.value(null),
-      ]);
-      if (!mounted || request != _request) return;
+      final story = await NativeBridge.map('media.story.fetch', args);
+      if (!mounted || request != _request || story == null) return;
       setState(() {
-        _detail = fresh[0] ?? _detail;
-        _bundle = fresh[1] ?? _bundle;
-        _loading = false;
+        _detail = {...?_detail, ...story, 'servers': _servers};
         _error = null;
-        if (_bundle != null) {
-          _seasonIndex = _seasonIndexFor(
-            _bundle!,
-            preferredNumber: _manualSeasonNumber,
-          );
-        }
       });
     } catch (error) {
-      if (mounted && request == _request)
-        setState(() {
-          _loading = false;
-          _error = '$error';
-        });
+      if (mounted && request == _request && _detail == null) {
+        setState(() => _error = '$error');
+      }
+    }
+  }
+
+  Future<void> _refreshSeasons(int request, Map<String, Object?> args) async {
+    try {
+      final bundle = await NativeBridge.map('media.seasons.fetch', args);
+      if (!mounted || request != _request || bundle == null) return;
+      final hasEpisodes = _maps(bundle['seasons'])
+          .any((season) => _maps(season['episodes']).isNotEmpty);
+      final hasParts = _maps(bundle['relatedParts']).isNotEmpty;
+      if (!hasEpisodes && !hasParts) return;
+      final mergedBundle = _mergeSeasonBundles(_bundle, bundle);
+      setState(() {
+        _bundle = mergedBundle;
+        _seasonIndex = _seasonIndexFor(
+          mergedBundle,
+          preferredNumber: _manualSeasonNumber,
+        );
+      });
+    } catch (error) {
+      if (mounted && request == _request && _bundle == null) {
+        setState(() => _error ??= '$error');
+      }
+    }
+  }
+
+  Future<void> _loadServers(int request) async {
+    final url = widget.item.pageUrl;
+    final key = 'media:servers:${widget.item.provider}:$url';
+    try {
+      final cached = await NativeBridge.readCache(key);
+      if (cached != null && mounted && request == _request) {
+        final rows = _maps(jsonDecode(cached));
+        if (rows.isNotEmpty) {
+          setState(() {
+            _serverRows = rows;
+            _serversLoading = false;
+          });
+        }
+      }
+    } catch (_) {}
+    if (!mounted || request != _request) return;
+    try {
+      final rows = await NativeBridge.list('media.servers', {
+        'url': url,
+        'provider': widget.item.provider,
+      });
+      if (!mounted || request != _request) return;
+      setState(() {
+        if (rows.isNotEmpty) _serverRows = rows;
+        _serversLoading = false;
+      });
+      if (rows.isNotEmpty) {
+        unawaited(NativeBridge.writeCache(key, jsonEncode(rows)));
+      }
+    } catch (_) {
+      if (mounted && request == _request) {
+        setState(() => _serversLoading = false);
+      }
     }
   }
 
   List<Map<String, dynamic>> get _seasons => _maps(_bundle?['seasons']);
   List<Map<String, dynamic>> get _parts => _maps(_bundle?['relatedParts']);
-  List<Map<String, dynamic>> get _servers => _maps(_detail?['servers']);
+  List<Map<String, dynamic>> get _servers =>
+      _serverRows.isNotEmpty ? _serverRows : _maps(_detail?['servers']);
 
   String get _seriesTitle =>
       widget.item.parentSeriesTitle?.trim().isNotEmpty == true
@@ -1891,40 +2234,54 @@ class _DetailPageState extends State<DetailPage> {
                   _servers,
                   widget.item.pageUrl,
                   widget.item.title,
+                  loading: _serversLoading,
                 ),
               ],
               const SizedBox(height: 13),
               _seasonsSection(season, episodes),
-              if (_parts.isNotEmpty) ...[
-                const SizedBox(height: 13),
-                _SectionCard(
-                  title: 'الأجزاء والمواسم الأخرى',
-                  icon: '🎬',
-                  child: SizedBox(
-                    height: 235,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _parts.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 10),
-                      itemBuilder: (_, index) {
-                        final part = MediaItem.fromMap(_parts[index]);
-                        return SizedBox(
-                          width: 118,
-                          child: MediaPoster(
-                            item: part,
-                            favorite: false,
-                            onTap: () => widget.onOpenItem(part),
-                            onFavorite: () {},
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ],
             ] else ...[
               const SizedBox(height: 13),
-              _serverSection(_servers, widget.item.pageUrl, widget.item.title),
+              _serverSection(
+                _servers,
+                widget.item.pageUrl,
+                widget.item.title,
+                loading: _serversLoading,
+              ),
+              const SizedBox(height: 12),
+              _downloadMovieCard(),
+            ],
+            if (widget.item.isSeries && episodes.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _downloadEpisodeCard(episodes.last, season),
+            ],
+            if (_parts.isNotEmpty) ...[
+              const SizedBox(height: 13),
+              _SectionCard(
+                title: widget.item.isSeries
+                    ? 'الأجزاء والمواسم الأخرى'
+                    : 'أجزاء وأعمال مرتبطة',
+                icon: '🎬',
+                child: SizedBox(
+                  height: 235,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _parts.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (_, index) {
+                      final part = MediaItem.fromMap(_parts[index]);
+                      return SizedBox(
+                        width: 118,
+                        child: MediaPoster(
+                          item: part,
+                          favorite: false,
+                          onTap: () => widget.onOpenItem(part),
+                          onFavorite: () {},
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
             ],
             if (_loading && _detail == null)
               const Padding(
@@ -2035,6 +2392,314 @@ class _DetailPageState extends State<DetailPage> {
     ),
   );
 
+  Widget _downloadEpisodeCard(
+    Map<String, dynamic> episode,
+    Map<String, dynamic>? season,
+  ) {
+    final url = _text(episode['pageUrl']);
+    final number = _episodeNumber(episode);
+    final seasonTitle = _text(season?['title'])
+        .ifEmpty('الموسم ${_text(season?['number'])}');
+    final loading = _downloadingMediaUrl == url;
+    return Material(
+      color: const Color(0xFF078B68),
+      borderRadius: BorderRadius.circular(17),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(17),
+        onTap: loading
+            ? null
+            : () => _startEpisodeDownload(episode, seasonTitle),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: Colors.white24,
+                child: loading
+                    ? const SizedBox(
+                        width: 19,
+                        height: 19,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.download_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      loading
+                          ? 'جاري تجهيز التحميل…'
+                          : 'تحميل مباشر إلى الهاتف',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$seasonTitle • الحلقة $number • إلى مجلد Downloads',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Text(
+                  'تحميل الآن ↓',
+                  style: TextStyle(
+                    color: Color(0xFF08785E),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _downloadMovieCard() {
+    final url = widget.item.pageUrl;
+    final loading = _downloadingMediaUrl == url;
+    return Material(
+      color: const Color(0xFF078B68),
+      borderRadius: BorderRadius.circular(17),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(17),
+        onTap: loading ? null : _startMovieDownload,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: Colors.white24,
+                child: loading
+                    ? const SizedBox(
+                        width: 19,
+                        height: 19,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.download_rounded, color: Colors.white),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      loading
+                          ? 'جاري تجهيز التحميل…'
+                          : 'تحميل الفيلم إلى الهاتف',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _servers.isEmpty && _serversLoading
+                          ? 'جاري تجهيز روابط المصدر في الخلفية'
+                          : 'حفظ في مجلد Downloads',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Text(
+                  'تحميل الآن ↓',
+                  style: TextStyle(
+                    color: Color(0xFF08785E),
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _startMovieDownload() async {
+    final pageUrl = widget.item.pageUrl;
+    if (pageUrl.isEmpty) return;
+    setState(() => _downloadingMediaUrl = pageUrl);
+    try {
+      var servers = _servers;
+      if (servers.isEmpty) {
+        final cacheKey = 'media:servers:${widget.item.provider}:$pageUrl';
+        try {
+          final cached = await NativeBridge.readCache(cacheKey);
+          if (cached != null) servers = _maps(jsonDecode(cached));
+        } catch (_) {}
+        if (servers.isEmpty) {
+          servers = await NativeBridge.list('media.servers', {
+            'url': pageUrl,
+            'provider': widget.item.provider,
+          });
+        }
+        if (servers.isNotEmpty) {
+          unawaited(NativeBridge.writeCache(cacheKey, jsonEncode(servers)));
+          if (mounted) setState(() => _serverRows = servers);
+        }
+      }
+      if (!mounted) return;
+      if (servers.isEmpty) {
+        _message(context, 'لا توجد روابط تنزيل متاحة لهذا الفيلم الآن.');
+        return;
+      }
+      final server = servers.firstWhere(
+        (row) => _text(row['directStreamUrl']).isNotEmpty,
+        orElse: () => servers.first,
+      );
+      var streamUrl = _text(server['directStreamUrl']);
+      if (streamUrl.isEmpty) {
+        final embedUrl = _text(server['embedUrl']);
+        if (embedUrl.isNotEmpty) {
+          try {
+            streamUrl = _text(
+              await _native.invokeMethod<String>('media.resolve', {
+                'url': embedUrl,
+              }),
+            );
+          } catch (_) {}
+        }
+      }
+      if (streamUrl.isEmpty) {
+        _message(context, 'المصدر لم يوفر رابط تنزيل مباشر لهذا الفيلم.');
+        return;
+      }
+      final started =
+          await _native.invokeMethod<bool>('download.start', {
+            'url': _absolute(streamUrl, pageUrl),
+            'title': widget.item.title,
+            'referer': pageUrl,
+          }) ??
+          false;
+      if (mounted) {
+        _message(
+          context,
+          started
+              ? 'بدأ تنزيل الفيلم في الخلفية إلى مجلد Downloads.'
+              : 'تعذر بدء تنزيل الفيلم على هذا الجهاز.',
+        );
+      }
+    } catch (_) {
+      if (mounted) _message(context, 'تعذر تجهيز تنزيل الفيلم الآن.');
+    } finally {
+      if (mounted && _downloadingMediaUrl == pageUrl) {
+        setState(() => _downloadingMediaUrl = null);
+      }
+    }
+  }
+
+  Future<void> _startEpisodeDownload(
+    Map<String, dynamic> episode,
+    String seasonTitle,
+  ) async {
+    final url = _text(episode['pageUrl']);
+    if (url.isEmpty) return;
+    setState(() => _downloadingMediaUrl = url);
+    try {
+      final cacheKey = 'episode:servers:$url';
+      List<Map<String, dynamic>> servers = [];
+      try {
+        final cached = await NativeBridge.readCache(cacheKey);
+        if (cached != null) servers = _maps(jsonDecode(cached));
+      } catch (_) {}
+      if (servers.isEmpty) {
+        servers = await NativeBridge.list('media.servers', {
+          'url': url,
+          'provider': widget.item.provider,
+        });
+        if (servers.isNotEmpty) {
+          unawaited(NativeBridge.writeCache(cacheKey, jsonEncode(servers)));
+        }
+      }
+      if (!mounted) return;
+      if (servers.isEmpty) {
+        _message(context, 'لا توجد روابط تنزيل متاحة لهذه الحلقة الآن.');
+        return;
+      }
+      final server = servers.firstWhere(
+        (row) => _text(row['directStreamUrl']).isNotEmpty,
+        orElse: () => servers.first,
+      );
+      var streamUrl = _text(server['directStreamUrl']);
+      if (streamUrl.isEmpty) {
+        final embed = _text(server['embedUrl']);
+        try {
+          streamUrl = _text(
+            await _native.invokeMethod<String>('media.resolve', {'url': embed}),
+          );
+        } catch (_) {}
+      }
+      if (streamUrl.isEmpty) {
+        _message(context, 'المصدر لم يوفر رابط تنزيل مباشر لهذه الحلقة.');
+        return;
+      }
+      final episodeNumber = _episodeNumber(episode);
+      final title = '$_seriesTitle · $seasonTitle · الحلقة $episodeNumber';
+      final started =
+          await _native.invokeMethod<bool>('download.start', {
+            'url': _absolute(streamUrl, url),
+            'title': title,
+            'referer': url,
+          }) ??
+          false;
+      if (mounted) {
+        _message(
+          context,
+          started
+              ? 'بدأ تنزيل الحلقة $episodeNumber في الخلفية.'
+              : 'تعذر بدء التنزيل على هذا الجهاز.',
+        );
+      }
+    } catch (_) {
+      if (mounted) _message(context, 'تعذر تجهيز تنزيل الحلقة الآن.');
+    } finally {
+      if (mounted && _downloadingMediaUrl == url) {
+        setState(() => _downloadingMediaUrl = null);
+      }
+    }
+  }
+
   void _openEpisode(
     List<Map<String, dynamic>> episodes,
     int index,
@@ -2057,13 +2722,14 @@ class _DetailPageState extends State<DetailPage> {
   Widget _serverSection(
     List<Map<String, dynamic>> servers,
     String referer,
-    String title,
-  ) => _SectionCard(
+    String title, {
+    bool loading = false,
+  }) => _SectionCard(
     title: 'اختر سيرفر المشاهدة',
     icon: '▶️',
     child: servers.isEmpty
         ? Text(
-            _loading
+            loading
                 ? 'بنحمّل سيرفرات المشاهدة في الخلفية…'
                 : 'لا توجد سيرفرات متاحة لهذا العمل الآن.',
             style: const TextStyle(color: _muted),
@@ -2373,7 +3039,7 @@ class _EpisodePageState extends State<EpisodePage> {
       });
       if (!mounted || request != _request) return;
       setState(() {
-        _servers = rows;
+        if (rows.isNotEmpty) _servers = rows;
         _loading = false;
         _error = null;
       });
@@ -2773,9 +3439,11 @@ class SportsPage extends StatefulWidget {
 class _SportsPageState extends State<SportsPage> {
   String _section = 'matches';
   List<Map<String, dynamic>> _events = [], _categories = [], _channels = [];
+  List<Map<String, dynamic>> _footballMatches = [];
   String? _categoryId;
   String? _loadingId, _error;
   bool _loading = true, _refreshing = false;
+  bool _scoreRefreshing = false;
 
   @override
   void initState() {
@@ -2788,11 +3456,13 @@ class _SportsPageState extends State<SportsPage> {
       final cached = await Future.wait([
         NativeBridge.list('live.events.cached'),
         NativeBridge.list('live.categories.cached'),
+        NativeBridge.list('football.cached'),
       ]);
       if (mounted)
         setState(() {
           _events = cached[0];
           _categories = cached[1];
+          _footballMatches = cached[2];
           _loading = false;
           _categoryId ??= _categories.isEmpty
               ? null
@@ -2805,6 +3475,7 @@ class _SportsPageState extends State<SportsPage> {
 
   Future<void> _refresh({bool force = true}) async {
     if (_refreshing) return;
+    unawaited(_refreshFootball(force));
     setState(() {
       _refreshing = true;
       _error = null;
@@ -2832,6 +3503,21 @@ class _SportsPageState extends State<SportsPage> {
         });
     } finally {
       if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  Future<void> _refreshFootball(bool force) async {
+    if (_scoreRefreshing) return;
+    _scoreRefreshing = true;
+    try {
+      final rows = await NativeBridge.list('football.fetch', {'force': force});
+      if (mounted && rows.isNotEmpty) {
+        setState(() => _footballMatches = rows);
+      }
+    } catch (_) {
+      // Score and match stream listings are independent; keep the last score cache.
+    } finally {
+      _scoreRefreshing = false;
     }
   }
 
@@ -3039,12 +3725,124 @@ class _SportsPageState extends State<SportsPage> {
     );
   }
 
+  Map<String, dynamic>? _scoreFor(Map<String, dynamic> event) {
+    final team1 = event['team1'] is Map
+        ? Map<String, dynamic>.from(event['team1'] as Map)
+        : const <String, dynamic>{};
+    final team2 = event['team2'] is Map
+        ? Map<String, dynamic>.from(event['team2'] as Map)
+        : const <String, dynamic>{};
+    final first = _text(team1['name']);
+    final second = _text(team2['name']);
+    final eventTime = _matchEpochMillis(event['startTime']);
+    Map<String, dynamic>? best;
+    var bestScore = -1;
+    for (final match in _footballMatches) {
+      final homeNames = [
+        _text(match['homeTeamArabic']),
+        _text(match['homeTeam']),
+      ].where((name) => name.isNotEmpty);
+      final awayNames = [
+        _text(match['awayTeamArabic']),
+        _text(match['awayTeam']),
+      ].where((name) => name.isNotEmpty);
+      final straight =
+          _teamNamesMatch(first, homeNames) &&
+          _teamNamesMatch(second, awayNames);
+      final reversed =
+          _teamNamesMatch(first, awayNames) &&
+          _teamNamesMatch(second, homeNames);
+      if (!straight && !reversed) continue;
+
+      final kickoff = _integer(match['kickoffEpochMs']);
+      final timeDelta = eventTime > 0 && kickoff > 0
+          ? (eventTime - kickoff).abs()
+          : 0;
+      if (timeDelta > const Duration(hours: 30).inMilliseconds) continue;
+      final score = (straight ? 4 : 2) + (kickoff > 0 ? 1 : 0);
+      if (score > bestScore ||
+          (score == bestScore &&
+              kickoff > 0 &&
+              (best == null ||
+                  timeDelta <
+                      (eventTime - _integer(best['kickoffEpochMs'])).abs()))) {
+        best = match;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  bool _teamNamesMatch(String name, Iterable<String> candidates) {
+    final normalizedName = _teamKey(name);
+    if (normalizedName.length < 4) return false;
+    for (final candidate in candidates) {
+      final normalizedCandidate = _teamKey(candidate);
+      if (normalizedCandidate.length < 4) continue;
+      if (normalizedName == normalizedCandidate) return true;
+      final smaller = normalizedName.length <= normalizedCandidate.length
+          ? normalizedName
+          : normalizedCandidate;
+      final larger = normalizedName.length > normalizedCandidate.length
+          ? normalizedName
+          : normalizedCandidate;
+      if (smaller.length >= 6 && larger.contains(smaller)) return true;
+    }
+    return false;
+  }
+
+  String _teamKey(String value) {
+    final normalized = _cleanTitle(value)
+        .replaceAll('مانشستر', 'مان')
+        .replaceAll(RegExp(r'\b(?:fc|cf|afc|sc|club)\b'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    const aliases = <String, String>{
+      'مان يونايتد': 'manchester united',
+      'مان سيتي': 'manchester city',
+      'ليفانتي': 'levante',
+      'اتلتيكو مدريد': 'atletico madrid',
+      'اتليتكو مدريد': 'atletico madrid',
+      'تشيلسي': 'chelsea',
+      'برايتون': 'brighton',
+      'ابيسويتش': 'ipswich town',
+      'ايبسويتش': 'ipswich town',
+      'هال سيتي': 'hull city',
+      'ليفربول': 'liverpool',
+      'ارسنال': 'arsenal',
+      'ريال مدريد': 'real madrid',
+      'برشلونه': 'barcelona',
+      'توتنهام': 'tottenham',
+      'نيوكاسل': 'newcastle united',
+      'وست هام': 'west ham united',
+    };
+    return aliases[normalized] ?? normalized;
+  }
+
+  int _matchEpochMillis(dynamic raw) {
+    final value = _text(raw).trim();
+    final numeric = int.tryParse(value);
+    if (numeric != null)
+      return numeric < 1000000000000 ? numeric * 1000 : numeric;
+    return DateTime.tryParse(value)?.millisecondsSinceEpoch ?? 0;
+  }
+
   Widget _eventCard(Map<String, dynamic> event) {
     final start = int.tryParse(_text(event['startTime'])) ?? 0;
     final end = int.tryParse(_text(event['endTime'])) ?? 0;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final live = start > 0 && start <= now && (end <= 0 || end >= now);
     final id = _text(event['id']);
+    final result = _scoreFor(event);
+    final resultState = _text(result?['state']);
+    final homeScore = _text(result?['homeScore']);
+    final awayScore = _text(result?['awayScore']);
+    final hasResult =
+        (resultState == 'in' || resultState == 'post') &&
+        homeScore.isNotEmpty &&
+        awayScore.isNotEmpty;
+    final resultIsLive = resultState == 'in';
+    final resultIsFinished = resultState == 'post';
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
@@ -3062,7 +3860,10 @@ class _SportsPageState extends State<SportsPage> {
                       style: const TextStyle(color: _muted, fontSize: 12),
                     ),
                   ),
-                  if (live) const _LiveBadge(),
+                  if (live || resultIsLive)
+                    const _LiveBadge()
+                  else if (resultIsFinished)
+                    const _FinishedBadge(),
                   const SizedBox(width: 8),
                   Text(
                     _text(event['channel']),
@@ -3078,20 +3879,45 @@ class _SportsPageState extends State<SportsPage> {
               Row(
                 children: [
                   Expanded(child: _team(event['team1'])),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 15),
-                    child: Text(
-                      'VS',
-                      style: TextStyle(
-                        color: _brick,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 15),
+                    child: hasResult
+                        ? Text(
+                            '$homeScore  -  $awayScore',
+                            style: TextStyle(
+                              color: resultIsLive
+                                  ? const Color(0xFF16856D)
+                                  : _brick,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 18,
+                            ),
+                          )
+                        : const Text(
+                            'VS',
+                            style: TextStyle(
+                              color: _brick,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
                   ),
                   Expanded(child: _team(event['team2'])),
                 ],
               ),
               const SizedBox(height: 8),
+              if (hasResult)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 7),
+                  child: Text(
+                    resultIsLive
+                        ? _text(result?['timeOrStatus']).ifEmpty('مباشر الآن')
+                        : 'انتهت المباراة',
+                    style: TextStyle(
+                      color: resultIsLive ? const Color(0xFF16856D) : _muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
               if (_loadingId == id)
                 const SizedBox(
                   width: 18,
@@ -3123,9 +3949,19 @@ class _SportsPageState extends State<SportsPage> {
       _error = null;
     });
     try {
+      final match = event
+          ? _events.firstWhere(
+              (row) => _text(row['id']) == id,
+              orElse: () => const <String, dynamic>{},
+            )
+          : const <String, dynamic>{};
       final streams = await NativeBridge.list(
-        event ? 'live.eventStreams' : 'live.channelStreams',
-        {'id': id},
+        event ? 'live.matchStreams' : 'live.channelStreams',
+        {
+          'id': id,
+          if (event) 'channel': _text(match['channel']),
+          if (event) 'league': _text(match['champions']),
+        },
       );
       if (!mounted) return;
       if (streams.isEmpty) {
@@ -3165,6 +4001,29 @@ class _SportsPageState extends State<SportsPage> {
                             ),
                           )
                         : <String, String>{};
+                    final backupSources = streams
+                        .where(
+                          (candidate) =>
+                              _text(candidate['url']).trim().isNotEmpty &&
+                              _text(candidate['url']).trim() !=
+                                  _text(stream['url']).trim(),
+                        )
+                        .map((candidate) {
+                          final candidateHeaders = candidate['headers'] is Map
+                              ? Map<String, String>.from(
+                                  (candidate['headers'] as Map).map(
+                                    (key, value) => MapEntry('$key', '$value'),
+                                  ),
+                                )
+                              : <String, String>{};
+                          return <String, dynamic>{
+                            'url': _text(candidate['url']).trim(),
+                            'userAgent': _text(candidate['userAgent']),
+                            'referer': _text(candidate['referer']),
+                            'headers': candidateHeaders,
+                          };
+                        })
+                        .toList(growable: false);
                     await _launchPlayer(
                       context,
                       _text(stream['url']),
@@ -3172,6 +4031,8 @@ class _SportsPageState extends State<SportsPage> {
                       userAgent: _text(stream['userAgent']),
                       referer: _text(stream['referer']),
                       headers: headers,
+                      backupSources: backupSources,
+                      isLive: true,
                     );
                   },
                 ),
@@ -3208,6 +4069,28 @@ class _LiveBadge extends StatelessWidget {
   );
 }
 
+class _FinishedBadge extends StatelessWidget {
+  const _FinishedBadge();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+    decoration: BoxDecoration(
+      color: _paper,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: _line),
+    ),
+    child: const Text(
+      'انتهت',
+      style: TextStyle(
+        color: _muted,
+        fontWeight: FontWeight.bold,
+        fontSize: 11,
+      ),
+    ),
+  );
+}
+
 Future<void> _launchPlayer(
   BuildContext context,
   String url,
@@ -3215,6 +4098,8 @@ Future<void> _launchPlayer(
   String userAgent = '',
   String referer = '',
   Map<String, String> headers = const {},
+  List<Map<String, dynamic>> backupSources = const [],
+  bool isLive = false,
 }) async {
   if (url.trim().isEmpty) {
     _message(context, 'رابط التشغيل غير متاح. اختر سيرفرًا آخر.');
@@ -3233,6 +4118,8 @@ Future<void> _launchPlayer(
     userAgent: userAgent,
     referer: referer,
     headers: headers,
+    backupSources: backupSources,
+    isLive: isLive,
   );
   if (!context.mounted || opened) return;
   await showDialog<void>(

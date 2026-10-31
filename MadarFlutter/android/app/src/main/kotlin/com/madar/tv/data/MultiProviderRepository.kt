@@ -151,7 +151,7 @@ object MultiProviderRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonCache[pageUrl]?.let { return it }
-        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v2:" + pageUrl) ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v3:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
         seasonCache[pageUrl] = normalized
         seasonCacheAt[pageUrl] = snapshot.savedAt
@@ -1414,6 +1414,54 @@ object MultiProviderRepository {
                 }
             }
 
+            // A number of providers render only one selected season in the page body.
+            // Follow explicit season tabs when their visible list is missing or incomplete.
+            val seasonPages = SeriesCatalogParser.linkedSeasonPages(doc, item.pageUrl)
+            val visibleCounts = rawEpisodes.mapNotNull { (title, href, seasonNumber) ->
+                val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: return@mapNotNull null
+                val resolvedSeason = SeriesCatalogParser.seasonNumber(title, href)
+                    ?: seasonNumber ?: return@mapNotNull null
+                resolvedSeason to episodeNumber
+            }.groupingBy { it.first }.eachCount()
+            val seasonPagesToFetch = seasonPages
+                .filter { (number, _) -> (visibleCounts[number] ?: 0) < 2 }
+                .take(8)
+            val seasonPageFutures = seasonPagesToFetch.map { (seasonNumber, seasonUrl) ->
+                pool.submit(Callable {
+                    val seasonDoc = Jsoup.parse(fetchHtml(seasonUrl, baseUrl), baseUrl)
+                    seasonDoc.select("footer, script, style").remove()
+                    seasonNumber to collectEpisodes(seasonDoc)
+                })
+            }
+            val seasonPageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
+            val seasonPageAssignments = mutableSetOf<String>()
+            for (future in seasonPageFutures) {
+                val remaining = seasonPageDeadline - System.nanoTime()
+                if (remaining <= 0L) break
+                val result = runCatching { future.get(remaining, TimeUnit.NANOSECONDS) }.getOrNull() ?: continue
+                val (linkedSeasonNumber, linkedEpisodes) = result
+                for ((title, href, domSeason) in linkedEpisodes) {
+                    val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: continue
+                    val urlKey = SeriesCatalogParser.normalizedUrl(href)
+                    val explicitSeason = SeriesCatalogParser.seasonNumber(title, href)
+                    val resolvedSeason = explicitSeason ?: domSeason ?: linkedSeasonNumber
+                    val existingIndex = rawEpisodes.indexOfFirst {
+                        SeriesCatalogParser.normalizedUrl(it.second) == urlKey
+                    }
+                    if (existingIndex < 0) {
+                        rawEpisodes += Triple(title, href, resolvedSeason)
+                        seasonPageAssignments += urlKey
+                    } else if (urlKey !in seasonPageAssignments && explicitSeason == null) {
+                        rawEpisodes[existingIndex] = Triple(title, href, resolvedSeason)
+                        seasonPageAssignments += urlKey
+                    } else if (explicitSeason != null) {
+                        rawEpisodes[existingIndex] = Triple(title, href, explicitSeason)
+                        seasonPageAssignments += urlKey
+                    }
+                }
+            }
+            seasonPageFutures.forEach { if (!it.isDone) it.cancel(true) }
+
             val expectedSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
                 ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
             val parsedEpisodes = rawEpisodes.mapNotNull { (title, href, domSeasonNumber) ->
@@ -1449,6 +1497,7 @@ object MultiProviderRepository {
             }
 
             val relatedParts = linkedMapOf<String, ArabseedItem>()
+            val explicitPartSectionUrls = mutableSetOf<String>()
             val partSelectors = listOf(
                 "a[href*='part']", "a[href*='الجزء']",
                 ".parts a", ".parts-list a",
@@ -1459,11 +1508,18 @@ object MultiProviderRepository {
                     val title = node.text().trim().replace(Regex("\\s+"), " ")
                     val isEp = SeriesCatalogParser.isEpisode(title, href)
                     val labelMatches = SeriesCatalogParser.hasPartMarker(title, href)
+                    val isSeason = SeriesCatalogParser.seasonNumber(title, href) != null
+                    val inExplicitPartSection = selector.startsWith(".")
 
-                    if (!isEp && href.startsWith("http") && href != item.pageUrl && title.isNotBlank() && (labelMatches || selector.startsWith("."))) {
+                    if (!isEp && href.startsWith("http") && href != item.pageUrl && title.isNotBlank() &&
+                        (labelMatches || isSeason || inExplicitPartSection)
+                    ) {
                         val img = node.selectFirst("img")?.attr("abs:src")
                             ?.ifBlank { node.selectFirst("img")?.attr("src") }
                             ?: item.posterUrl
+                        if (inExplicitPartSection) {
+                            explicitPartSectionUrls += SeriesCatalogParser.normalizedUrl(href)
+                        }
                         relatedParts.putIfAbsent(href, item.copy(
                             id = "${item.id}_${href.hashCode()}",
                             title = title,
@@ -1479,8 +1535,10 @@ object MultiProviderRepository {
 
             val cleanParts = relatedParts.values
                 .filter { part ->
-                    SeriesCatalogParser.hasPartMarker(part.title, part.pageUrl)
-                        && !SeriesCatalogParser.isEpisode(part.title, part.pageUrl)
+                    !SeriesCatalogParser.isEpisode(part.title, part.pageUrl) &&
+                        (SeriesCatalogParser.hasPartMarker(part.title, part.pageUrl) ||
+                            SeriesCatalogParser.seasonNumber(part.title, part.pageUrl) != null ||
+                            SeriesCatalogParser.normalizedUrl(part.pageUrl) in explicitPartSectionUrls)
                 }
                 .distinctBy { part ->
                     SeriesCatalogParser.partNumber(part.title, part.pageUrl)?.toString()
@@ -1492,9 +1550,11 @@ object MultiProviderRepository {
             val bundle = SeriesCatalogParser.normalizeSeasonBundle(
                 ArabseedSeasonBundle(seasons = seasons, relatedParts = cleanParts),
             )
-            seasonCache[item.pageUrl] = bundle
-            seasonCacheAt[item.pageUrl] = System.currentTimeMillis()
-            CatalogDiskCache.saveSeasonBundle("providers:seasons:v2:" + item.pageUrl, bundle)
+            if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
+                seasonCache[item.pageUrl] = bundle
+                seasonCacheAt[item.pageUrl] = System.currentTimeMillis()
+                CatalogDiskCache.saveSeasonBundle("providers:seasons:v3:" + item.pageUrl, bundle)
+            }
             bundle
         } catch (_: Exception) {
             ArabseedSeasonBundle(emptyList())
