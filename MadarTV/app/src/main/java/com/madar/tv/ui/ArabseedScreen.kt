@@ -3111,6 +3111,8 @@ private fun ZakzoukaDetailScreen(
 
     var selectedSeason by remember(item.pageUrl) { mutableStateOf(0) }
 
+    var manuallySelectedSeasonNumber by remember(item.pageUrl) { mutableStateOf<Int?>(null) }
+
 
 
 
@@ -3253,17 +3255,22 @@ private fun ZakzoukaDetailScreen(
         } else item
 
         fun publishSeasonBundle(bundle: ArabseedSeasonBundle) {
-            seasonBundle = bundle
+            val normalizedBundle = SeriesCatalogParser.normalizeSeasonBundle(bundle)
+            val manualSeasonIndex = manuallySelectedSeasonNumber?.let { number ->
+                normalizedBundle.seasons.indexOfFirst { it.number == number }
+            } ?: -1
+            seasonBundle = normalizedBundle
             val currentPage = SeriesCatalogParser.normalizedUrl(item.pageUrl)
-            val pageSeasonIndex = bundle.seasons.indexOfFirst { season ->
+            val pageSeasonIndex = normalizedBundle.seasons.indexOfFirst { season ->
                 season.episodes.any { SeriesCatalogParser.normalizedUrl(it.pageUrl) == currentPage }
             }
             val seasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
                 ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
             val titleSeasonIndex = seasonNumber?.let { number ->
-                bundle.seasons.indexOfFirst { it.number == number }
+                normalizedBundle.seasons.indexOfFirst { it.number == number }
             } ?: -1
             selectedSeason = when {
+                manualSeasonIndex >= 0 -> manualSeasonIndex
                 pageSeasonIndex >= 0 -> pageSeasonIndex
                 titleSeasonIndex >= 0 -> titleSeasonIndex
                 else -> 0
@@ -4699,7 +4706,10 @@ private fun ZakzoukaDetailScreen(
 
 
 
-                                                .clickable { selectedSeason = idx }
+                                                .clickable {
+                                                    selectedSeason = idx
+                                                    manuallySelectedSeasonNumber = seasons[idx].number
+                                                }
 
 
 

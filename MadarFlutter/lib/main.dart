@@ -377,7 +377,10 @@ class _RootTabsState extends State<RootTabs> {
                           : const Offset(0, .012),
                       duration: const Duration(milliseconds: 190),
                       curve: Curves.easeOutCubic,
-                      child: pages[index],
+                      child: ColoredBox(
+                        color: _paper,
+                        child: SizedBox.expand(child: pages[index]),
+                      ),
                     ),
                   ),
                 ),
@@ -901,9 +904,25 @@ class _CatalogPageState extends State<CatalogPage> {
 
     final showFeatured =
         _tabId == 'home' && _search.text.trim().isEmpty && _items.isNotEmpty;
+    final featuredItems = showFeatured
+        ? _items.take(5).toList()
+        : <MediaItem>[];
     final gridItems = showFeatured
-        ? _items.skip(1).toList(growable: false)
+        ? _items.skip(featuredItems.length).toList(growable: false)
         : _items;
+    final categoryTitle = _search.text.trim().isNotEmpty
+        ? 'نتائج البحث'
+        : _text(
+            _subcategories
+                .where((row) => _text(row['id']) == _categoryId)
+                .firstOrNull?['title'],
+          ).ifEmpty(
+            _text(
+              _tabs
+                  .where((row) => _text(row['id']) == _tabId)
+                  .firstOrNull?['title'],
+            ),
+          );
     return CustomScrollView(
       controller: _scroll,
       physics: const AlwaysScrollableScrollPhysics(),
@@ -911,13 +930,61 @@ class _CatalogPageState extends State<CatalogPage> {
         if (showFeatured)
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 5, 16, 14),
-              child: _FeaturedCard(
-                item: _items.first,
-                onTap: () => widget.onOpen(_items.first),
+              padding: const EdgeInsets.fromLTRB(16, 5, 16, 11),
+              child: _FeaturedCarousel(
+                items: featuredItems,
+                onOpen: widget.onOpen,
               ),
             ),
           ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(17, 4, 17, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        categoryTitle.isEmpty ? 'اكتشف المحتوى' : categoryTitle,
+                        style: const TextStyle(
+                          color: _ink,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'اختيارات مرتبة من مكتبة زقزوقة',
+                        style: TextStyle(color: _muted, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _card,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _line),
+                  ),
+                  child: Text(
+                    '${_items.length} عمل',
+                    style: const TextStyle(
+                      color: _muted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(14, 4, 14, 22),
           sliver: SliverGrid.builder(
@@ -980,6 +1047,80 @@ class _LogoMark extends StatelessWidget {
       errorBuilder: (_, __, ___) =>
           const Icon(Icons.movie, color: Colors.white, size: 20),
     ),
+  );
+}
+
+class _FeaturedCarousel extends StatefulWidget {
+  const _FeaturedCarousel({required this.items, required this.onOpen});
+  final List<MediaItem> items;
+  final ValueChanged<MediaItem> onOpen;
+  @override
+  State<_FeaturedCarousel> createState() => _FeaturedCarouselState();
+}
+
+class _FeaturedCarouselState extends State<_FeaturedCarousel> {
+  late final PageController _controller = PageController(viewportFraction: .94);
+  int _current = 0;
+
+  @override
+  void didUpdateWidget(covariant _FeaturedCarousel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final changedItems =
+        oldWidget.items.length != widget.items.length ||
+        (oldWidget.items.isNotEmpty &&
+            widget.items.isNotEmpty &&
+            oldWidget.items.first.pageUrl != widget.items.first.pageUrl);
+    if (!changedItems) return;
+    _current = 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _controller.hasClients) _controller.jumpToPage(0);
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      SizedBox(
+        height: 204,
+        child: PageView.builder(
+          controller: _controller,
+          itemCount: widget.items.length,
+          onPageChanged: (index) => setState(() => _current = index),
+          itemBuilder: (_, index) => Padding(
+            padding: const EdgeInsetsDirectional.only(start: 2, end: 8),
+            child: _FeaturedCard(
+              item: widget.items[index],
+              onTap: () => widget.onOpen(widget.items[index]),
+            ),
+          ),
+        ),
+      ),
+      if (widget.items.length > 1) ...[
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(widget.items.length, (index) {
+            final active = index == _current;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: active ? 18 : 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: active ? _brick : _line,
+                borderRadius: BorderRadius.circular(8),
+              ),
+            );
+          }),
+        ),
+      ],
+    ],
   );
 }
 
@@ -1208,38 +1349,225 @@ class _PosterSkeleton extends StatelessWidget {
       color: const Color(0xFFEADBCB),
       borderRadius: BorderRadius.circular(15),
     ),
-    child: const _PosterFallback(),
   );
 }
 
 class _CatalogSkeleton extends StatelessWidget {
   const _CatalogSkeleton();
   @override
-  Widget build(BuildContext context) => ListView(
-    physics: const AlwaysScrollableScrollPhysics(),
-    padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+  Widget build(BuildContext context) => _ShimmerLoading(
+    child: ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+      children: [
+        Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: _SkeletonBlock(width: 142, height: 9),
+        ),
+        const SizedBox(height: 12),
+        const _SkeletonBlock(height: 190, radius: 24),
+        const SizedBox(height: 18),
+        Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: _SkeletonBlock(width: 124, height: 9),
+        ),
+        const SizedBox(height: 12),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: 6,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 14,
+            childAspectRatio: .50,
+          ),
+          itemBuilder: (_, __) => const _CatalogPosterSkeleton(),
+        ),
+      ],
+    ),
+  );
+}
+
+class _CatalogPosterSkeleton extends StatelessWidget {
+  const _CatalogPosterSkeleton();
+
+  @override
+  Widget build(BuildContext context) => Column(
     children: [
-      Container(
-        height: 190,
-        decoration: BoxDecoration(
-          color: const Color(0xFFEADBCB),
-          borderRadius: BorderRadius.circular(24),
+      const Expanded(child: _SkeletonBlock(radius: 15)),
+      const SizedBox(height: 7),
+      const _SkeletonBlock(width: double.infinity, height: 8, radius: 5),
+      const SizedBox(height: 5),
+      Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: _SkeletonBlock(
+          width: MediaQuery.sizeOf(context).width * .16,
+          height: 7,
+          radius: 5,
         ),
-      ),
-      const SizedBox(height: 18),
-      GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: 9,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 14,
-          childAspectRatio: .50,
-        ),
-        itemBuilder: (_, __) => const _PosterSkeleton(),
       ),
     ],
+  );
+}
+
+class _SportsMatchSkeleton extends StatelessWidget {
+  const _SportsMatchSkeleton();
+
+  @override
+  Widget build(BuildContext context) => _ShimmerLoading(
+    child: ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(14),
+      itemCount: 3,
+      itemBuilder: (_, __) => Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _line),
+        ),
+        child: Column(
+          children: [
+            const Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: _SkeletonBlock(width: 112, height: 8),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Expanded(child: _SkeletonTeam()),
+                const _SkeletonBlock(width: 64, height: 31, radius: 9),
+                const Expanded(child: _SkeletonTeam()),
+              ],
+            ),
+            const SizedBox(height: 14),
+            const _SkeletonBlock(width: double.infinity, height: 8, radius: 5),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _SkeletonTeam extends StatelessWidget {
+  const _SkeletonTeam();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      const _SkeletonBlock(width: 42, height: 42, radius: 50),
+      const SizedBox(height: 7),
+      _SkeletonBlock(width: MediaQuery.sizeOf(context).width * .14, height: 8),
+    ],
+  );
+}
+
+class _SportsChannelSkeleton extends StatelessWidget {
+  const _SportsChannelSkeleton();
+
+  @override
+  Widget build(BuildContext context) => _ShimmerLoading(
+    child: ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(14),
+      itemCount: 5,
+      separatorBuilder: (_, __) => const SizedBox(height: 9),
+      itemBuilder: (_, __) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _line),
+        ),
+        child: Row(
+          children: [
+            const _SkeletonBlock(width: 42, height: 42, radius: 50),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const _SkeletonBlock(width: 112, height: 9),
+                  const SizedBox(height: 8),
+                  _SkeletonBlock(
+                    width: MediaQuery.sizeOf(context).width * .34,
+                    height: 7,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            const _SkeletonBlock(width: 22, height: 22, radius: 50),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _SkeletonBlock extends StatelessWidget {
+  const _SkeletonBlock({this.width, this.height, this.radius = 9});
+
+  final double? width;
+  final double? height;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      color: const Color(0xFFEADBCB),
+      borderRadius: BorderRadius.circular(radius),
+    ),
+  );
+}
+
+class _ShimmerLoading extends StatefulWidget {
+  const _ShimmerLoading({required this.child});
+  final Widget child;
+
+  @override
+  State<_ShimmerLoading> createState() => _ShimmerLoadingState();
+}
+
+class _ShimmerLoadingState extends State<_ShimmerLoading>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1450),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _controller,
+    child: widget.child,
+    builder: (context, child) => ShaderMask(
+      blendMode: BlendMode.srcATop,
+      shaderCallback: (bounds) {
+        final shift = -1.8 + _controller.value * 3.6;
+        return LinearGradient(
+          begin: Alignment(shift, -.24),
+          end: Alignment(shift + .82, .24),
+          colors: const [
+            Color(0xFFEADBCB),
+            Color(0xFFF8F1E8),
+            Color(0xFFD7C0BE),
+            Color(0xFFEADBCB),
+          ],
+          stops: const [0, .40, .58, 1],
+        ).createShader(bounds);
+      },
+      child: child,
+    ),
   );
 }
 
@@ -1319,6 +1647,7 @@ class _DetailPageState extends State<DetailPage> {
   bool _loading = true;
   String? _error;
   int _seasonIndex = 0, _request = 0;
+  int? _manualSeasonNumber;
 
   @override
   void initState() {
@@ -1346,7 +1675,12 @@ class _DetailPageState extends State<DetailPage> {
         _detail = cached[0];
         _bundle = cached[1];
         _loading = false;
-        _seasonIndex = 0;
+        if (_bundle != null) {
+          _seasonIndex = _seasonIndexFor(
+            _bundle!,
+            preferredNumber: _manualSeasonNumber,
+          );
+        }
       });
     } catch (_) {}
     if (!mounted || request != _request) return;
@@ -1364,7 +1698,12 @@ class _DetailPageState extends State<DetailPage> {
         _bundle = fresh[1] ?? _bundle;
         _loading = false;
         _error = null;
-        _seasonIndex = 0;
+        if (_bundle != null) {
+          _seasonIndex = _seasonIndexFor(
+            _bundle!,
+            preferredNumber: _manualSeasonNumber,
+          );
+        }
       });
     } catch (error) {
       if (mounted && request == _request)
@@ -1378,6 +1717,89 @@ class _DetailPageState extends State<DetailPage> {
   List<Map<String, dynamic>> get _seasons => _maps(_bundle?['seasons']);
   List<Map<String, dynamic>> get _parts => _maps(_bundle?['relatedParts']);
   List<Map<String, dynamic>> get _servers => _maps(_detail?['servers']);
+
+  String get _seriesTitle =>
+      widget.item.parentSeriesTitle?.trim().isNotEmpty == true
+      ? widget.item.parentSeriesTitle!.trim()
+      : widget.item.title;
+
+  bool get _isEpisodeCard =>
+      widget.item.parentSeriesPageUrl?.trim().isNotEmpty == true;
+
+  int _seasonIndexFor(Map<String, dynamic> bundle, {int? preferredNumber}) {
+    final seasons = _maps(bundle['seasons']);
+    if (seasons.isEmpty) return 0;
+    if (preferredNumber != null) {
+      final preferred = seasons.indexWhere(
+        (season) => _integer(season['number']) == preferredNumber,
+      );
+      if (preferred >= 0) return preferred;
+    }
+    final currentUrl = _normalizedMediaUrl(widget.item.pageUrl);
+    for (var index = 0; index < seasons.length; index++) {
+      final containsCurrentEpisode = _maps(seasons[index]['episodes']).any(
+        (episode) =>
+            _normalizedMediaUrl(_text(episode['pageUrl'])) == currentUrl,
+      );
+      if (containsCurrentEpisode) return index;
+    }
+    final wantedNumber = _seasonNumberFrom(
+      '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
+    );
+    if (wantedNumber != null) {
+      final matching = seasons.indexWhere(
+        (season) => _integer(season['number']) == wantedNumber,
+      );
+      if (matching >= 0) return matching;
+    }
+    return 0;
+  }
+
+  int? _currentEpisodeIndex(List<Map<String, dynamic>> episodes) {
+    final currentUrl = _normalizedMediaUrl(widget.item.pageUrl);
+    final exact = episodes.indexWhere(
+      (episode) => _normalizedMediaUrl(_text(episode['pageUrl'])) == currentUrl,
+    );
+    if (exact >= 0) return exact;
+    if (!_isEpisodeCard) return null;
+    final itemSeasonNumber =
+        _maps(_bundle?['seasons'])
+            .where(
+              (season) => _maps(season['episodes']).any(
+                (episode) =>
+                    _normalizedMediaUrl(_text(episode['pageUrl'])) ==
+                    currentUrl,
+              ),
+            )
+            .map((season) => _integer(season['number']))
+            .where((number) => number > 0)
+            .firstOrNull ??
+        _seasonNumberFrom(
+          '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
+        );
+    final selectedSeasonNumber = _seasons.isEmpty
+        ? null
+        : _integer(
+            _seasons[_seasonIndex.clamp(0, _seasons.length - 1)]['number'],
+          );
+    final sameKnownSeason =
+        itemSeasonNumber != null &&
+        selectedSeasonNumber != null &&
+        itemSeasonNumber == selectedSeasonNumber;
+    final onlySeasonCanBeInferred =
+        itemSeasonNumber == null && _seasons.length == 1;
+    if (!sameKnownSeason && !onlySeasonCanBeInferred) {
+      return null;
+    }
+    final number = _episodeNumberFrom(
+      '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
+    );
+    if (number == null) return null;
+    final index = episodes.indexWhere(
+      (episode) => _episodeNumber(episode) == number,
+    );
+    return index >= 0 ? index : null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1395,11 +1817,7 @@ class _DetailPageState extends State<DetailPage> {
       ..sort((a, b) => _episodeNumber(a).compareTo(_episodeNumber(b)));
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.item.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(_seriesTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
             onPressed: _loading ? null : _load,
@@ -1467,6 +1885,14 @@ class _DetailPageState extends State<DetailPage> {
               ),
             ],
             if (widget.item.isSeries) ...[
+              if (_isEpisodeCard) ...[
+                const SizedBox(height: 13),
+                _serverSection(
+                  _servers,
+                  widget.item.pageUrl,
+                  widget.item.title,
+                ),
+              ],
               const SizedBox(height: 13),
               _seasonsSection(season, episodes),
               if (_parts.isNotEmpty) ...[
@@ -1563,7 +1989,10 @@ class _DetailPageState extends State<DetailPage> {
                   side: BorderSide(
                     color: index == _seasonIndex ? _brick : _line,
                   ),
-                  onSelected: (_) => setState(() => _seasonIndex = index),
+                  onSelected: (_) => setState(() {
+                    _seasonIndex = index;
+                    _manualSeasonNumber = _integer(season['number']);
+                  }),
                 );
               },
             ),
@@ -1584,15 +2013,20 @@ class _DetailPageState extends State<DetailPage> {
             children: List.generate(episodes.length, (index) {
               final episode = episodes[index];
               final n = _episodeNumber(episode);
+              final isCurrent = _currentEpisodeIndex(episodes) == index;
               return ActionChip(
-                avatar: const Icon(
+                avatar: Icon(
                   Icons.play_arrow_rounded,
                   size: 16,
-                  color: _brick,
+                  color: isCurrent ? Colors.white : _brick,
                 ),
                 label: Text('الحلقة ${n > 0 ? n : index + 1}'),
-                backgroundColor: _paper,
-                side: const BorderSide(color: _line),
+                backgroundColor: isCurrent ? _brick : _paper,
+                labelStyle: TextStyle(
+                  color: isCurrent ? Colors.white : _ink,
+                  fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w500,
+                ),
+                side: BorderSide(color: isCurrent ? _brick : _line),
                 onPressed: () => _openEpisode(episodes, index, selected),
               );
             }),
@@ -1609,7 +2043,7 @@ class _DetailPageState extends State<DetailPage> {
     Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => EpisodePage(
-          seriesTitle: widget.item.title,
+          seriesTitle: _seriesTitle,
           provider: widget.item.provider,
           seasonTitle: _text(season?['title'])
               .ifEmpty('الموسم ${_text(season?['number'])}'),
@@ -1657,7 +2091,7 @@ class _DetailPageState extends State<DetailPage> {
         _message(context, 'لا توجد حلقات جاهزة للتشغيل بعد.');
         return;
       }
-      _openEpisode(episodes, 0, season);
+      _openEpisode(episodes, _currentEpisodeIndex(episodes) ?? 0, season);
       return;
     }
     if (_servers.isEmpty) {
@@ -1714,7 +2148,9 @@ class _DetailHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                item.title,
+                item.parentSeriesTitle?.trim().isNotEmpty == true
+                    ? item.parentSeriesTitle!.trim()
+                    : item.title,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -1724,6 +2160,16 @@ class _DetailHeader extends StatelessWidget {
                   height: 1.3,
                 ),
               ),
+              if (item.parentSeriesTitle?.trim().isNotEmpty == true &&
+                  item.title != item.parentSeriesTitle) ...[
+                const SizedBox(height: 4),
+                Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _muted, fontSize: 12),
+                ),
+              ],
               const SizedBox(height: 10),
               Text(
                 [
@@ -2244,6 +2690,80 @@ int _episodeNumber(Map<String, dynamic> row) {
       0;
 }
 
+int _integer(dynamic value) =>
+    value is int ? value : int.tryParse(_text(value)) ?? 0;
+
+String _normalizedMediaUrl(String value) => (() {
+  var decoded = value;
+  try {
+    decoded = Uri.decodeFull(value);
+  } catch (_) {}
+  return decoded.trim().replaceAll(RegExp(r'/+$'), '').toLowerCase();
+})();
+
+int? _seasonNumberFrom(String value) {
+  const digits = '٠١٢٣٤٥٦٧٨٩';
+  var text = value
+      .toLowerCase()
+      .replaceAll(RegExp('[أإآ]'), 'ا')
+      .replaceAll('ة', 'ه');
+  for (var i = 0; i < digits.length; i++) {
+    text = text.replaceAll(digits[i], '$i');
+  }
+  final ordinalNumbers = <String, int>{
+    'الاول': 1,
+    'الاولى': 1,
+    'الثاني': 2,
+    'الثانيه': 2,
+    'الثانية': 2,
+    'الثالث': 3,
+    'الثالثه': 3,
+    'الثالثة': 3,
+    'الرابع': 4,
+    'الرابعه': 4,
+    'الرابعة': 4,
+    'الخامس': 5,
+    'الخامسه': 5,
+    'الخامسة': 5,
+    'السادس': 6,
+    'السادسه': 6,
+    'السادسة': 6,
+    'السابع': 7,
+    'السابعة': 7,
+    'الثامن': 8,
+    'الثامنه': 8,
+    'الثامنة': 8,
+    'التاسع': 9,
+    'التاسعه': 9,
+    'التاسعة': 9,
+    'العاشر': 10,
+    'العاشره': 10,
+    'العاشرة': 10,
+  };
+  final ordinal = RegExp(
+    r'(?:الموسم|موسم|season)\s*(الاولى?|الثانيه?|الثاني|الثالثه?|الثالث|الرابعه?|الرابع|الخامسه?|الخامس|السادسه?|السادس|السابعة|السابع|الثامنه?|الثامن|التاسعه?|التاسع|العاشره?|العاشر)',
+  ).firstMatch(text);
+  if (ordinal != null) return ordinalNumbers[ordinal.group(1)];
+  final numeric = RegExp(
+    r'(?:الموسم|موسم|season|(?<![a-z])s)[\s._#=/:-]*(\d{1,2})(?!\d)',
+  ).firstMatch(text);
+  final number = int.tryParse(numeric?.group(1) ?? '');
+  return number != null && number > 0 ? number : null;
+}
+
+int? _episodeNumberFrom(String value) {
+  const digits = '٠١٢٣٤٥٦٧٨٩';
+  var text = value.toLowerCase();
+  for (var i = 0; i < digits.length; i++) {
+    text = text.replaceAll(digits[i], '$i');
+  }
+  final match = RegExp(
+    r'(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)[\s._#=/:-]*(\d{1,4})(?!\d)',
+  ).firstMatch(text);
+  final number = int.tryParse(match?.group(1) ?? '');
+  return number != null && number > 0 ? number : null;
+}
+
 class SportsPage extends StatefulWidget {
   const SportsPage({super.key});
   @override
@@ -2417,7 +2937,7 @@ class _SportsPageState extends State<SportsPage> {
   );
 
   Widget _eventsList() {
-    if (_events.isEmpty && _loading) return const _CatalogSkeleton();
+    if (_events.isEmpty && _loading) return const _SportsMatchSkeleton();
     if (_events.isEmpty) return _empty(_error ?? 'لا توجد مباريات متاحة الآن.');
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -2428,8 +2948,7 @@ class _SportsPageState extends State<SportsPage> {
   }
 
   Widget _channelsList() {
-    if (_channels.isEmpty && _loading)
-      return const Center(child: CircularProgressIndicator(color: _brick));
+    if (_channels.isEmpty && _loading) return const _SportsChannelSkeleton();
     if (_channels.isEmpty)
       return _empty(_error ?? 'اختر فئة القنوات أو اسحب للتحديث.');
     return ListView.separated(

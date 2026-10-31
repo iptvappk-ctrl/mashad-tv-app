@@ -12,6 +12,7 @@ import com.madar.tv.data.ArabseedType
 import com.madar.tv.data.CatalogDiskCache
 import com.madar.tv.data.FootballRepository
 import com.madar.tv.data.MultiProviderRepository
+import com.madar.tv.data.SeriesCatalogParser
 import com.madar.tv.data.YacineCategory
 import com.madar.tv.data.YacineChannel
 import com.madar.tv.data.YacineEvent
@@ -90,7 +91,8 @@ class FlutterMediaBridge(context: Context) {
         "media.seasons.cached", "media.seasons.fetch" -> {
             val item = call.argument<Map<String, Any?>>("item")?.toItem()
                 ?: throw IllegalArgumentException("المسلسل غير صالح")
-            val bundle = if (method.endsWith("cached")) loadCachedSeasons(item) else fetchSeasons(item)
+            val seriesItem = item.asParentSeries()
+            val bundle = if (method.endsWith("cached")) loadCachedSeasons(seriesItem) else fetchSeasons(seriesItem)
             bundle?.toMap()
         }
         "media.servers" -> {
@@ -192,21 +194,37 @@ private fun Map<String, Any?>.toItem(): ArabseedItem = ArabseedItem(
     latestEpisodeLabel = this["latestEpisodeLabel"].stringValue(),
 )
 
+/** Episode cards carry the canonical series URL. Season discovery must use that page. */
+private fun ArabseedItem.asParentSeries(): ArabseedItem {
+    val parentUrl = parentSeriesPageUrl?.takeIf(String::isNotBlank) ?: return this
+    val parentTitle = parentSeriesTitle?.takeIf(String::isNotBlank) ?: title
+    return copy(
+        title = parentTitle,
+        arabicTitle = parentTitle,
+        pageUrl = parentUrl,
+        parentSeriesTitle = null,
+        parentSeriesPageUrl = null,
+    )
+}
+
 private fun ArabseedDetail.toMap(): Map<String, Any?> = mapOf(
     "item" to item.toMap(), "servers" to servers.map { it.toMap() },
     "stream" to preResolvedStream.orEmpty(), "cast" to cast,
     "overview" to item.overview,
 )
 
-private fun ArabseedSeasonBundle.toMap(): Map<String, Any?> = mapOf(
-    "seasons" to seasons.map { season -> mapOf(
+private fun ArabseedSeasonBundle.toMap(): Map<String, Any?> {
+    val normalized = SeriesCatalogParser.normalizeSeasonBundle(this)
+    return mapOf(
+    "seasons" to normalized.seasons.map { season -> mapOf(
         "number" to season.number, "title" to season.title,
         "episodes" to season.episodes.sortedWith(compareBy<ArabseedEpisode> { it.seasonNumber }.thenBy { it.number }).map { episode ->
             mapOf("number" to episode.number, "title" to episode.title, "pageUrl" to episode.pageUrl, "seasonNumber" to episode.seasonNumber)
         },
     ) },
-    "relatedParts" to relatedParts.map { it.toMap() },
+    "relatedParts" to normalized.relatedParts.map { it.toMap() },
 )
+}
 
 private fun ArabseedServer.toMap(): Map<String, Any?> = mapOf(
     "name" to name, "embedUrl" to embedUrl, "directStreamUrl" to directStreamUrl.orEmpty(),

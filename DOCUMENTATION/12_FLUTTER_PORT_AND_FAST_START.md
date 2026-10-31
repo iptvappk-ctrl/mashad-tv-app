@@ -18,7 +18,7 @@ The independent project lives in `MadarFlutter`. Its user-facing shell mirrors t
 
 `FlutterMediaBridge.kt` connects Flutter to the same Android repositories used by MadarTV: `ArabseedRepository`, `MultiProviderRepository`, `YacineRepository`, and `FootballRepository`. Disk caches initialize in the Flutter host process. Flutter reads cached content first, renders primary-source results as they arrive, and loads provider results in the background before merging and de-duplicating them.
 
-The Flutter flow includes search, details/story/cast, related parts, numbered seasons and episodes, exact same-season previous/next navigation, playback server selection through the companion player, match and channel streams, saved favorites, and the Android download service. Bounded poster decoding and retained tab state keep navigation light.
+The Flutter flow includes search, details/story/cast, related parts, numbered seasons and episodes, exact same-season previous/next navigation, playback server selection through the companion player, match and channel streams, saved favorites, and the Android download service. Bounded poster decoding and retained tab state keep navigation light. The sports tab paints an opaque app background so catalog posters cannot remain visible behind it. Loading placeholders for the catalog, matches, and channels use one lightweight moving shimmer controller per loading group. When opening an episode card, season discovery uses the canonical parent-series page, resolves the episode's actual season, preserves a manually selected season across refreshes, and only highlights the current episode in its own season.
 
 Flutter content and playback still depend on the third-party providers and their current responses. Code integration does not certify that every source is reachable, that a stream is valid, or that rights/access remain available.
 
@@ -39,7 +39,7 @@ cd MadarTV
 ./gradlew.bat :app:assembleDebug :madar-player:assembleDebug
 ```
 
-The Flutter parity APK uses version `1.0.2+3` and targets Android ARM64. Release builds currently use the debug signing config for manual device installation; store publication requires a protected release key.
+The Flutter parity APK uses version `1.0.4+5` and targets Android ARM64. Release builds currently use the debug signing config for manual device installation; store publication requires a protected release key. The native MadarTV app uses version `0.2.1` (version code 3) for its latest correction build.
 
 ## Verification boundary
 
