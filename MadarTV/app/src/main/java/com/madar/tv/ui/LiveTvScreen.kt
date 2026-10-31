@@ -1,5 +1,8 @@
-package com.madar.tv.ui
+﻿package com.madar.tv.ui
 
+import androidx.activity.compose.BackHandler
+import com.madar.tv.util.PlayerLauncher
+import com.madar.tv.util.PlayerSource
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,7 +41,7 @@ import com.madar.tv.data.YacineChannel
 import com.madar.tv.data.YacineEvent
 import com.madar.tv.data.YacineRepository
 import com.madar.tv.data.YacineStream
-import com.madar.tv.ui.theme.MashadColors
+import com.madar.tv.ui.theme.ZakzoukaColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,11 +61,55 @@ fun LiveTvScreen(
     var activeStream by remember { mutableStateOf<YacineStream?>(null) }
     var streamTitle by remember { mutableStateOf("") }
     var isFullscreen by remember { mutableStateOf(false) }
+    var playerInstallPrompt by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Robust Back Navigation: prevents app exit when watching or on channels tab
+    BackHandler(enabled = isFullscreen || activeStream != null || selectedTab != 0) {
+        when {
+            isFullscreen -> {
+                isFullscreen = false
+                resetScreenOrientation(context)
+            }
+            activeStream != null -> {
+                activeStream = null
+                isFullscreen = false
+            }
+            selectedTab != 0 -> selectedTab = 0
+        }
+    }
 
     // Notify parent when player is active (fullscreen)
     LaunchedEffect(isFullscreen) {
         onPlayerStateChange(isFullscreen)
+    }
+
+    if (playerInstallPrompt) {
+        AlertDialog(
+            onDismissRequest = { playerInstallPrompt = false },
+            title = { Text("مشغل زقزوقة مطلوب") },
+            text = { Text("ثبّت مشغل زقزوقة لفتح البث المباشر عليه.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    playerInstallPrompt = false
+                    val market = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse("market://details?id=com.madar.player"),
+                    )
+                    runCatching { context.startActivity(market) }.onFailure {
+                        runCatching {
+                            context.startActivity(android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://play.google.com/store/apps/details?id=com.madar.player"),
+                            ))
+                        }
+                    }
+                }) { Text("تحميل المشغل") }
+            },
+            dismissButton = {
+                TextButton(onClick = { playerInstallPrompt = false }) { Text("إغلاق") }
+            },
+        )
     }
 
     if (isFullscreen && activeStream != null) {
@@ -86,14 +133,14 @@ fun LiveTvScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MashadColors.Background)
+            .background(ZakzoukaColors.Background)
     ) {
         // ── Top Header ──────────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .background(MashadColors.Surface)
+                .background(ZakzoukaColors.Surface)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
@@ -106,11 +153,11 @@ fun LiveTvScreen(
                     modifier = Modifier
                         .size(10.dp)
                         .clip(CircleShape)
-                        .background(MashadColors.LiveGreen)
+                        .background(ZakzoukaColors.LiveGreen)
                 )
                 Text(
-                    text = "مشهد TV • بثات ومباريات الكورة",
-                    color = MashadColors.GoldLight,
+                    text = "زقزوقة TV • بثات ومباريات الكورة",
+                    color = ZakzoukaColors.GoldLight,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -137,18 +184,18 @@ fun LiveTvScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(MashadColors.Surface)
+                .background(ZakzoukaColors.Surface)
                 .padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             tabs.forEachIndexed { index, label ->
                 val selected = selectedTab == index
                 val bgColor by animateColorAsState(
-                    targetValue = if (selected) MashadColors.Gold else Color.Transparent,
+                    targetValue = if (selected) ZakzoukaColors.Gold else Color.Transparent,
                     label = "tab_bg"
                 )
                 val textColor by animateColorAsState(
-                    targetValue = if (selected) Color.White else MashadColors.TextMuted,
+                    targetValue = if (selected) Color.White else ZakzoukaColors.TextMuted,
                     label = "tab_text"
                 )
                 Box(
@@ -170,17 +217,38 @@ fun LiveTvScreen(
             }
         }
 
+        val playInternal = { stream: YacineStream, title: String ->
+            activeStream = stream
+            streamTitle = title
+            isFullscreen = true
+            setScreenOrientation(context, true)
+        }
+
         // ── Tab Content ──────────────────────────────────────────────────────────
         when (selectedTab) {
-            0 -> MatchesTab(onStreamSelected = { stream, title ->
-                activeStream = stream
-                streamTitle = title
-                isFullscreen = false
+            0 -> MatchesTab(onStreamSelected = { stream, title, backups ->
+                PlayerLauncher.launchPlayer(
+                    context = context,
+                    streamUrl = stream.url,
+                    title = title,
+                    userAgent = stream.userAgent,
+                    referer = stream.referer,
+                    headers = stream.headers,
+                    backupSources = backups.map { PlayerSource(it.url, it.userAgent, it.referer, it.headers) },
+                    onNotInstalled = { playerInstallPrompt = true },
+                )
             })
-            1 -> ChannelsTab(onStreamSelected = { stream, title ->
-                activeStream = stream
-                streamTitle = title
-                isFullscreen = false
+            1 -> ChannelsTab(onStreamSelected = { stream, title, backups ->
+                PlayerLauncher.launchPlayer(
+                    context = context,
+                    streamUrl = stream.url,
+                    title = title,
+                    userAgent = stream.userAgent,
+                    referer = stream.referer,
+                    headers = stream.headers,
+                    backupSources = backups.map { PlayerSource(it.url, it.userAgent, it.referer, it.headers) },
+                    onNotInstalled = { playerInstallPrompt = true },
+                )
             })
         }
     }
@@ -208,9 +276,9 @@ fun YacinePlayerSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(title, color = MashadColors.TextWhite, fontSize = 13.sp,
+            Text(title, color = ZakzoukaColors.TextWhite, fontSize = 13.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            Text("✕", color = MashadColors.TextMuted, fontSize = 18.sp,
+            Text("✕", color = ZakzoukaColors.TextMuted, fontSize = 18.sp,
                 modifier = Modifier.clickable { onClose() }.padding(8.dp))
         }
         // Player
@@ -240,12 +308,12 @@ fun StreamQualityDialog(
             modifier = Modifier
                 .fillMaxWidth(0.85f)
                 .clip(RoundedCornerShape(16.dp))
-                .background(MashadColors.SurfaceCard)
+                .background(ZakzoukaColors.SurfaceCard)
                 .padding(20.dp)
         ) {
             Text(
                 "اختر جودة البث",
-                color = MashadColors.Gold,
+                color = ZakzoukaColors.Gold,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.fillMaxWidth(),
@@ -257,7 +325,7 @@ fun StreamQualityDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(MashadColors.Surface)
+                        .background(ZakzoukaColors.Surface)
                         .clickable {
                             onSelect(stream)
                             onDismiss()
@@ -268,7 +336,7 @@ fun StreamQualityDialog(
                 ) {
                     Text(
                         text = stream.name,
-                        color = MashadColors.TextWhite,
+                        color = ZakzoukaColors.TextWhite,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -290,14 +358,23 @@ fun MatchBroadcastDialog(
     onChannelSelect: (YacineChannel) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val isLive = match.state == "in"
+    val kickoffMs = match.kickoffEpochMs
+    val timeFormatted = if (kickoffMs != null) {
+        java.text.SimpleDateFormat("h:mm a", java.util.Locale.forLanguageTag("ar")).apply {
+            timeZone = java.util.TimeZone.getDefault()
+        }.format(java.util.Date(kickoffMs)).replace("AM", "ص").replace("PM", "م")
+    } else match.timeOrStatus
+
     val suggestedName = remember(match.leagueName) {
+        val l = match.leagueName.lowercase()
         when {
-            match.leagueName.contains("إنجليزي", true) || match.leagueName.contains("Premier", true) -> "beIN SPORTS 1"
-            match.leagueName.contains("إسباني", true) || match.leagueName.contains("La Liga", true) -> "beIN SPORTS 1"
-            match.leagueName.contains("أبطال", true) || match.leagueName.contains("Champions", true) -> "beIN SPORTS 1"
-            match.leagueName.contains("إيطالي", true) || match.leagueName.contains("Serie A", true) -> "beIN SPORTS 4"
-            match.leagueName.contains("ألماني", true) || match.leagueName.contains("Bundesliga", true) -> "beIN SPORTS 5"
-            match.leagueName.contains("فرنسي", true) || match.leagueName.contains("Ligue 1", true) -> "beIN SPORTS 4"
+            l.contains("فرنسي") || l.contains("ligue 1") -> "beIN SPORTS 4"
+            l.contains("ألماني") || l.contains("bundesliga") -> "beIN SPORTS 5"
+            l.contains("إسباني") || l.contains("la liga") -> "beIN SPORTS 3"
+            l.contains("إنجليزي") || l.contains("premier") -> "beIN SPORTS 1"
+            l.contains("أبطال") || l.contains("champions") -> "beIN SPORTS 1"
+            l.contains("إيطالي") || l.contains("serie a") -> "beIN SPORTS 4"
             else -> "beIN SPORTS 1"
         }
     }
@@ -315,8 +392,8 @@ fun MatchBroadcastDialog(
                 .fillMaxWidth(0.92f)
                 .fillMaxHeight(0.82f)
                 .clip(RoundedCornerShape(16.dp))
-                .background(MashadColors.SurfaceCard)
-                .border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(16.dp))
+                .background(ZakzoukaColors.SurfaceCard)
+                .border(1.dp, ZakzoukaColors.GoldBorder, RoundedCornerShape(16.dp))
                 .padding(16.dp)
         ) {
             // Header: Title + Close
@@ -330,7 +407,7 @@ fun MatchBroadcastDialog(
                         Text("🏆", fontSize = 12.sp)
                         Text(
                             match.leagueName.ifBlank { "مباراة اليوم" },
-                            color = MashadColors.GoldLight,
+                            color = ZakzoukaColors.GoldLight,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -338,7 +415,7 @@ fun MatchBroadcastDialog(
                     Spacer(Modifier.height(2.dp))
                     Text(
                         "${match.homeTeamArabic.ifBlank { match.homeTeam }} vs ${match.awayTeamArabic.ifBlank { match.awayTeam }}",
-                        color = MashadColors.TextWhite,
+                        color = ZakzoukaColors.TextWhite,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -349,15 +426,40 @@ fun MatchBroadcastDialog(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(MashadColors.Surface)
+                        .background(ZakzoukaColors.Surface)
                         .clickable { onDismiss() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("✕", color = MashadColors.TextMuted, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("✕", color = ZakzoukaColors.TextMuted, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
+
+            // Match Time & State Banner
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isLive) ZakzoukaColors.LiveGreen.copy(alpha = 0.12f) else ZakzoukaColors.Surface)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    if (isLive) "🔴 جارية الآن" else "⏰ موعد المباراة: اليوم $timeFormatted",
+                    color = if (isLive) ZakzoukaColors.LiveGreen else ZakzoukaColors.Gold,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    if (isLive) "بث مباشر" else "لم تبدأ بعد",
+                    color = ZakzoukaColors.TextMuted,
+                    fontSize = 11.sp
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
 
             // Suggested Channel Quick-Play Button
             if (suggestedChannel != null) {
@@ -365,7 +467,7 @@ fun MatchBroadcastDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(MashadColors.Gold)
+                        .background(ZakzoukaColors.Gold)
                         .clickable { onChannelSelect(suggestedChannel) }
                         .padding(vertical = 12.dp, horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -373,7 +475,7 @@ fun MatchBroadcastDialog(
                 ) {
                     Column {
                         Text(
-                            "▶ تشغيل القناة المقترحة للمباراة",
+                            if (isLive) "▶ تشغيل البث المباشر الآن" else "▶ تشغيل بث القناة الناقلة الآن",
                             color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
@@ -391,7 +493,7 @@ fun MatchBroadcastDialog(
                             .background(Color.White.copy(alpha = 0.16f))
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        Text("مباشر 🔴", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(if (isLive) "مباشر 🔴" else "قادمة ⏰", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -400,7 +502,7 @@ fun MatchBroadcastDialog(
 
             Text(
                 "أو اختر القناة الناقلة من قنوات البث:",
-                color = MashadColors.TextMuted,
+                color = ZakzoukaColors.TextMuted,
                 fontSize = 12.sp
             )
 
@@ -408,7 +510,7 @@ fun MatchBroadcastDialog(
 
             if (loadingChannels && channels.isEmpty()) {
                 Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MashadColors.Gold, modifier = Modifier.size(32.dp))
+                    CircularProgressIndicator(color = ZakzoukaColors.Gold, modifier = Modifier.size(32.dp))
                 }
             } else {
                 LazyColumn(
@@ -421,10 +523,10 @@ fun MatchBroadcastDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSuggested) MashadColors.SurfaceHighlight else MashadColors.Surface)
+                                .background(if (isSuggested) ZakzoukaColors.SurfaceHighlight else ZakzoukaColors.Surface)
                                 .border(
                                     1.dp,
-                                    if (isSuggested) MashadColors.Gold.copy(alpha = 0.6f) else MashadColors.GoldBorder.copy(alpha = 0.2f),
+                                    if (isSuggested) ZakzoukaColors.Gold.copy(alpha = 0.6f) else ZakzoukaColors.GoldBorder.copy(alpha = 0.2f),
                                     RoundedCornerShape(10.dp)
                                 )
                                 .clickable { onChannelSelect(channel) }
@@ -437,13 +539,13 @@ fun MatchBroadcastDialog(
                                 Column {
                                     Text(
                                         channel.name,
-                                        color = MashadColors.TextWhite,
+                                        color = ZakzoukaColors.TextWhite,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
                                         "بث مباشر بجودة عالية",
-                                        color = MashadColors.TextMuted,
+                                        color = ZakzoukaColors.TextMuted,
                                         fontSize = 10.sp
                                     )
                                 }
@@ -451,13 +553,13 @@ fun MatchBroadcastDialog(
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(MashadColors.Gold.copy(alpha = 0.12f))
+                                    .background(ZakzoukaColors.Gold.copy(alpha = 0.12f))
                                     .padding(horizontal = 10.dp, vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text("مشاهدة", color = MashadColors.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Text("▶", color = MashadColors.Gold, fontSize = 9.sp)
+                                Text("مشاهدة", color = ZakzoukaColors.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("▶", color = ZakzoukaColors.Gold, fontSize = 9.sp)
                             }
                         }
                     }
@@ -494,7 +596,8 @@ private fun findMatchingYacineEvent(match: FootballMatch, events: List<YacineEve
 // ─── Matches Tab ─────────────────────────────────────────────────────────────────
 
 @Composable
-fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
+fun MatchesTab(onStreamSelected: (YacineStream, String, List<YacineStream>) -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var events by remember { mutableStateOf<List<YacineEvent>>(emptyList()) }
     var loadingEvents by remember { mutableStateOf(true) }
@@ -512,26 +615,49 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
     var pendingStreams by remember { mutableStateOf<List<YacineStream>?>(null) }
     var pendingTitle by remember { mutableStateOf("") }
 
+    // Dialog state: user picks the broadcasting channel for a match
+    var broadcastDialogMatch by remember { mutableStateOf<FootballMatch?>(null) }
+    var broadcastDialogChannels by remember { mutableStateOf<List<YacineChannel>>(emptyList()) }
+
     LaunchedEffect(Unit) {
-        loadingSportsChannels = true
-        sportsChannels = runCatching { YacineRepository.getSportsChannels() }.getOrElse { emptyList() }
+        val cachedSportsChannels = withContext(Dispatchers.IO) {
+            val categories = YacineRepository.getCachedCategories().orEmpty()
+            val category = categories.firstOrNull { it.name.contains("beIN SPORTS", ignoreCase = true) }
+                ?: categories.firstOrNull { it.name.contains("SPORTS", ignoreCase = true) }
+                ?: categories.firstOrNull()
+            category?.let { YacineRepository.getCachedChannels(it.id) }
+        }
+        if (!cachedSportsChannels.isNullOrEmpty()) {
+            sportsChannels = cachedSportsChannels
+            loadingSportsChannels = false
+        } else loadingSportsChannels = true
+        val refreshed = runCatching { YacineRepository.getSportsChannels(forceRefresh = true) }.getOrElse { emptyList() }
+        if (refreshed.isNotEmpty()) sportsChannels = refreshed
         loadingSportsChannels = false
     }
 
     LaunchedEffect(yacineReloadKey) {
-        loadingEvents = true
+        val cachedEvents = withContext(Dispatchers.IO) { YacineRepository.getCachedEvents() }
+        if (!cachedEvents.isNullOrEmpty()) {
+            events = cachedEvents
+            loadingEvents = false
+        } else loadingEvents = true
         eventError = false
-        events = try { YacineRepository.getEvents() }
-                 catch (e: Exception) { eventError = true; emptyList() }
+        events = try { YacineRepository.getEvents(forceRefresh = true).ifEmpty { cachedEvents.orEmpty() } }
+                 catch (_: Exception) { eventError = cachedEvents.isNullOrEmpty(); cachedEvents.orEmpty() }
         loadingEvents = false
     }
 
     LaunchedEffect(footballReloadKey) {
-        footballLoading = true
+        val cachedMatches = withContext(Dispatchers.IO) { FootballRepository.loadCachedMatches() }
+        if (!cachedMatches.isNullOrEmpty()) {
+            footballMatches = cachedMatches
+            footballLoading = false
+        } else footballLoading = true
         footballMatches = try {
-            FootballRepository.fetchUpcomingMatches(forceRefresh = footballReloadKey > 0)
+            FootballRepository.fetchUpcomingMatches(forceRefresh = true).ifEmpty { cachedMatches.orEmpty() }
         } catch (_: Exception) {
-            emptyList()
+            cachedMatches.orEmpty()
         }
         footballLoading = false
     }
@@ -544,21 +670,65 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
         }
     }
 
-    // Quality picker
-    if (pendingStreams != null) {
-        if (pendingStreams!!.size == 1) {
-            onStreamSelected(pendingStreams!!.first(), pendingTitle)
+    // Instant auto-play: pick best quality stream immediately (NO quality dialog)
+    LaunchedEffect(pendingStreams) {
+        val ps = pendingStreams
+        if (!ps.isNullOrEmpty()) {
+            val best = ps.firstOrNull { it.name.contains("1080", ignoreCase = true) || it.name.contains("FHD", ignoreCase = true) }
+                ?: ps.firstOrNull { it.name.contains("720", ignoreCase = true) || it.name.contains("HD", ignoreCase = true) }
+                ?: ps.first()
+            val backups = ps.filter { it.url != best.url }
+            onStreamSelected(best, pendingTitle, backups)
             pendingStreams = null
-        } else {
-            StreamQualityDialog(
-                streams = pendingStreams!!,
-                onSelect = { onStreamSelected(it, pendingTitle) },
-                onDismiss = { pendingStreams = null }
-            )
         }
     }
 
+    // Channel picker dialog — opens when no live Yacine event is found for the match
+    val dlgMatch = broadcastDialogMatch
+    if (dlgMatch != null) {
+        MatchBroadcastDialog(
+            match = dlgMatch,
+            channels = broadcastDialogChannels,
+            loadingChannels = loadingStreams,
+            onChannelSelect = { channel ->
+                broadcastDialogMatch = null
+                val title = "${dlgMatch.homeTeamArabic.ifBlank { dlgMatch.homeTeam }} vs ${dlgMatch.awayTeamArabic.ifBlank { dlgMatch.awayTeam }} • ${channel.name}"
+                val isLive = dlgMatch.state == "in"
+                val kickoffMs = dlgMatch.kickoffEpochMs
+                val timeFormatted = if (kickoffMs != null) {
+                    java.text.SimpleDateFormat("h:mm a", java.util.Locale.forLanguageTag("ar")).apply {
+                        timeZone = java.util.TimeZone.getDefault()
+                    }.format(java.util.Date(kickoffMs)).replace("AM", "ص").replace("PM", "م")
+                } else dlgMatch.timeOrStatus
 
+                if (!isLive) {
+                    android.widget.Toast.makeText(
+                        context,
+                        "المباراة تبدأ الساعة $timeFormatted — جاري تشغيل بث ${channel.name} 📺",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+                scope.launch {
+                    loadingStreams = true
+                    val streams = runCatching {
+                        YacineRepository.getChannelStreams(channel.id)
+                    }.getOrElse { emptyList() }
+                    loadingStreams = false
+                    if (streams.isNotEmpty()) {
+                        pendingTitle = title
+                        pendingStreams = streams
+                    } else {
+                        android.widget.Toast.makeText(
+                            context,
+                            "لم يبدأ البث بعد على هذه القناة 📺",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            },
+            onDismiss = { broadcastDialogMatch = null }
+        )
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -574,56 +744,78 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
                     onRefresh = { footballReloadKey++ },
                     onMatchClick = { match ->
                         scope.launch {
+                            val isLive = match.state == "in"
+                            val isFinished = match.state == "post" || (match.kickoffEpochMs != null && match.kickoffEpochMs <= System.currentTimeMillis() - (130 * 60 * 1000L))
+
+                            if (isFinished) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "المباراة انتهت بنتيجة ${match.homeScore.ifBlank { "0" }} - ${match.awayScore.ifBlank { "0"}} ✅",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                                return@launch
+                            }
+
+                            val chs = if (sportsChannels.isNotEmpty()) sportsChannels else runCatching {
+                                YacineRepository.getSportsChannels()
+                            }.getOrElse { emptyList() }
+
+                            // If match has NOT started yet, show details dialog so user clearly knows match kickoff time
+                            if (!isLive) {
+                                broadcastDialogChannels = chs
+                                broadcastDialogMatch = match
+                                return@launch
+                            }
+
+                            val title = "${match.homeTeamArabic.ifBlank { match.homeTeam }} vs ${match.awayTeamArabic.ifBlank { match.awayTeam }}"
+                            com.madar.tv.core.ZakzoukaTelemetry.trackLiveMatchView(title, match.leagueName)
+
                             loadingStreams = true
-                            com.madar.tv.core.MashadTelemetry.trackLiveMatchView(
-                                "${match.homeTeamArabic.ifBlank { match.homeTeam }} vs ${match.awayTeamArabic.ifBlank { match.awayTeam }}",
-                                match.leagueName
-                            )
-                            var streams: List<YacineStream> = emptyList()
-                            var streamTitle = "${match.homeTeamArabic.ifBlank { match.homeTeam }} vs ${match.awayTeamArabic.ifBlank { match.awayTeam }}"
-
-                            // 1. Try matching Yacine live event first
                             val matched = findMatchingYacineEvent(match, events)
+                            val chHint = matched?.channel.orEmpty()
+
+                            val targetChannel = (if (chHint.isNotBlank()) chs.firstOrNull { it.name.contains(chHint, true) || chHint.contains(it.name, true) } else null)
+                                ?: run {
+                                    val league = match.leagueName.lowercase()
+                                    when {
+                                        league.contains("فرنسي") || league.contains("ligue 1") -> chs.firstOrNull { it.name.contains("beIN", true) && it.name.contains("4") }
+                                        league.contains("ألماني") || league.contains("bundesliga") -> chs.firstOrNull { it.name.contains("beIN", true) && it.name.contains("5") }
+                                        league.contains("إسباني") || league.contains("la liga") -> chs.firstOrNull { it.name.contains("beIN", true) && it.name.contains("3") }
+                                        league.contains("إنجليزي") || league.contains("premier") -> chs.firstOrNull { it.name.contains("beIN", true) && (it.name.contains("1") || it.name.contains("2")) }
+                                        else -> null
+                                    }
+                                }
+                                ?: chs.firstOrNull { it.name.contains("beIN", ignoreCase = true) && (it.name.contains("1") || it.name.contains("Premium")) }
+                                ?: chs.firstOrNull { it.name.contains("beIN", ignoreCase = true) }
+                                ?: chs.firstOrNull()
+
+                            val allStreams = mutableListOf<YacineStream>()
+
+                            // Channel streams have guaranteed fresh 200 OK tokens
+                            if (targetChannel != null) {
+                                val chStreams = runCatching { YacineRepository.getChannelStreams(targetChannel.id) }.getOrElse { emptyList() }
+                                allStreams.addAll(chStreams)
+                            }
                             if (matched != null) {
-                                streams = runCatching {
-                                    YacineRepository.getEventStreams(matched.id)
-                                }.getOrElse { emptyList() }
+                                val evStreams = runCatching { YacineRepository.getEventStreams(matched.id) }.getOrElse { emptyList() }
+                                allStreams.addAll(evStreams)
                             }
-
-                            // 2. If no event streams, resolve the suggested beIN SPORTS / sports channel immediately
-                            if (streams.isEmpty()) {
-                                val chs = if (sportsChannels.isNotEmpty()) sportsChannels else runCatching {
-                                    YacineRepository.getSportsChannels()
-                                }.getOrElse { emptyList() }
-                                val suggestedName = when {
-                                    match.leagueName.contains("إنجليزي", true) || match.leagueName.contains("Premier", true) -> "beIN SPORTS 1"
-                                    match.leagueName.contains("إسباني", true) || match.leagueName.contains("La Liga", true) -> "beIN SPORTS 1"
-                                    match.leagueName.contains("أبطال", true) || match.leagueName.contains("Champions", true) -> "beIN SPORTS 1"
-                                    match.leagueName.contains("إيطالي", true) || match.leagueName.contains("Serie A", true) -> "beIN SPORTS 4"
-                                    match.leagueName.contains("ألماني", true) || match.leagueName.contains("Bundesliga", true) -> "beIN SPORTS 5"
-                                    match.leagueName.contains("فرنسي", true) || match.leagueName.contains("Ligue 1", true) -> "beIN SPORTS 4"
-                                    else -> "beIN SPORTS 1"
-                                }
-                                val targetChannel = chs.firstOrNull { it.name.contains(suggestedName, ignoreCase = true) }
-                                    ?: chs.firstOrNull { it.name.contains("beIN SPORTS 1", ignoreCase = true) }
-                                    ?: chs.firstOrNull()
-
-                                if (targetChannel != null) {
-                                    streams = runCatching {
-                                        YacineRepository.getChannelStreams(targetChannel.id)
-                                    }.getOrElse { emptyList() }
-                                    streamTitle += " • ${targetChannel.name}"
-                                }
-                            }
-
                             loadingStreams = false
 
-                            if (streams.isNotEmpty()) {
-                                val bestStream = streams.firstOrNull {
-                                    it.name.contains("720") || it.name.contains("HD", ignoreCase = true)
-                                } ?: streams.first()
-                                onStreamSelected(bestStream, streamTitle)
+                            val validStreams = allStreams.filter { it.url.isNotBlank() && !it.url.contains("rex.new-redirect.online") }.distinctBy { it.url }
+                            if (validStreams.isNotEmpty()) {
+                                val best = validStreams.firstOrNull { it.name.contains("1080", ignoreCase = true) || it.name.contains("FHD", ignoreCase = true) }
+                                    ?: validStreams.firstOrNull { it.name.contains("720", ignoreCase = true) || it.name.contains("HD", ignoreCase = true) }
+                                    ?: validStreams.first()
+                                val backups = validStreams.filter { it.url != best.url }
+                                val label = targetChannel?.name?.let { " · $it" } ?: ""
+                                onStreamSelected(best, "$title$label", backups)
+                                return@launch
                             }
+
+                            // Fallback dialog if channel auto-select failed
+                            broadcastDialogChannels = chs
+                            broadcastDialogMatch = match
                         }
                     }
                 )
@@ -641,12 +833,12 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
                         modifier = Modifier
                             .size(10.dp)
                             .clip(CircleShape)
-                            .background(MashadColors.LiveGreen)
+                            .background(ZakzoukaColors.LiveGreen)
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         "سيرفرات البث المباشر للقنوات والمباريات",
-                        color = MashadColors.GoldLight,
+                        color = ZakzoukaColors.GoldLight,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -657,7 +849,7 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
             when {
                 loadingEvents -> {
                     item {
-                        MashadMatchSkeleton(Modifier.fillMaxWidth().height(120.dp))
+                        ZakzoukaMatchSkeleton(Modifier.fillMaxWidth().height(120.dp))
                     }
                 }
                 eventError -> {
@@ -666,11 +858,11 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
                             Modifier.fillMaxWidth().padding(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text("تعذر جلب قنوات البث المباشر حاليًا", color = MashadColors.TextMuted, fontSize = 13.sp)
+                            Text("تعذر جلب قنوات البث المباشر حاليًا", color = ZakzoukaColors.TextMuted, fontSize = 13.sp)
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 "إعادة المحاولة 🔄",
-                                color = MashadColors.Gold,
+                                color = ZakzoukaColors.Gold,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .clickable { yacineReloadKey++ }
@@ -687,7 +879,7 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
                         ) {
                             Text(
                                 "لا توجد مباريات منقولة بالبث المباشر حاليًا ⚽\nتابع نتائج ومواعيد المباريات والدوريات أعلاه",
-                                color = MashadColors.TextMuted,
+                                color = ZakzoukaColors.TextMuted,
                                 fontSize = 13.sp,
                                 textAlign = TextAlign.Center
                             )
@@ -698,7 +890,7 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
                     items(events) { event ->
                         Box(Modifier.padding(horizontal = 12.dp)) {
                             MatchCard(event = event, onClick = {
-                                com.madar.tv.core.MashadTelemetry.trackLiveMatchView("${event.team1.name} vs ${event.team2.name}", event.champions)
+                                com.madar.tv.core.ZakzoukaTelemetry.trackLiveMatchView("${event.team1.name} vs ${event.team2.name}", event.champions)
                                 scope.launch {
                                     loadingStreams = true
                                     val streams = runCatching {
@@ -706,10 +898,12 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
                                     }.getOrElse { emptyList() }
                                     loadingStreams = false
                                     if (streams.isNotEmpty()) {
-                                        val best = streams.firstOrNull {
+                                        val valid = streams.filter { it.url.isNotBlank() && !it.url.contains("rex.new-redirect.online") }
+                                        val best = valid.firstOrNull {
                                             it.name.contains("720") || it.name.contains("HD", ignoreCase = true)
-                                        } ?: streams.first()
-                                        onStreamSelected(best, "${event.team1.name} vs ${event.team2.name}")
+                                        } ?: valid.firstOrNull() ?: streams.first()
+                                        val backups = valid.filter { it.url != best.url }
+                                        onStreamSelected(best, "${event.team1.name} vs ${event.team2.name}", backups)
                                     }
                                 }
                             })
@@ -724,7 +918,7 @@ fun MatchesTab(onStreamSelected: (YacineStream, String) -> Unit) {
                 modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = MashadColors.Gold)
+                CircularProgressIndicator(color = ZakzoukaColors.Gold)
             }
         }
     }
@@ -743,7 +937,7 @@ fun MatchCard(event: YacineEvent, onClick: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MashadColors.SurfaceCard),
+        colors = CardDefaults.cardColors(containerColor = ZakzoukaColors.SurfaceCard),
         shape = RoundedCornerShape(14.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
@@ -756,7 +950,7 @@ fun MatchCard(event: YacineEvent, onClick: () -> Unit) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = event.champions,
-                        color = MashadColors.Gold,
+                        color = ZakzoukaColors.Gold,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -764,7 +958,7 @@ fun MatchCard(event: YacineEvent, onClick: () -> Unit) {
                     )
                     Text(
                         text = event.channel,
-                        color = MashadColors.TextMuted,
+                        color = ZakzoukaColors.TextMuted,
                         fontSize = 11.sp,
                         maxLines = 1
                     )
@@ -773,8 +967,8 @@ fun MatchCard(event: YacineEvent, onClick: () -> Unit) {
                     LiveBadge()
                 } else {
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(timeStr, color = MashadColors.TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Text(dateStr, color = MashadColors.TextMuted, fontSize = 11.sp)
+                        Text(timeStr, color = ZakzoukaColors.TextWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text(dateStr, color = ZakzoukaColors.TextMuted, fontSize = 11.sp)
                     }
                 }
             }
@@ -793,7 +987,7 @@ fun MatchCard(event: YacineEvent, onClick: () -> Unit) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "VS",
-                        color = MashadColors.TextMuted,
+                        color = ZakzoukaColors.TextMuted,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Black
                     )
@@ -807,7 +1001,7 @@ fun MatchCard(event: YacineEvent, onClick: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = "🎙 ${event.commentary}",
-                    color = MashadColors.TextMuted,
+                    color = ZakzoukaColors.TextMuted,
                     fontSize = 11.sp,
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center
@@ -829,13 +1023,13 @@ fun TeamDisplay(team1Name: String, teamLogo: String) {
             modifier = Modifier
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(MashadColors.Surface),
+                .background(ZakzoukaColors.Surface),
             contentScale = ContentScale.Fit
         )
         Spacer(Modifier.height(6.dp))
         Text(
             text = team1Name,
-            color = MashadColors.TextWhite,
+            color = ZakzoukaColors.TextWhite,
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
@@ -850,8 +1044,8 @@ fun LiveBadge() {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(MashadColors.Red.copy(alpha = 0.15f))
-            .border(1.dp, MashadColors.Red.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+            .background(ZakzoukaColors.Red.copy(alpha = 0.15f))
+            .border(1.dp, ZakzoukaColors.Red.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -860,16 +1054,16 @@ fun LiveBadge() {
             modifier = Modifier
                 .size(6.dp)
                 .clip(CircleShape)
-                .background(MashadColors.Red)
+                .background(ZakzoukaColors.Red)
         )
-        Text("مباشر", color = MashadColors.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text("مباشر", color = ZakzoukaColors.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 // ─── Channels Tab ────────────────────────────────────────────────────────────────
 
 @Composable
-fun ChannelsTab(onStreamSelected: (YacineStream, String) -> Unit) {
+fun ChannelsTab(onStreamSelected: (YacineStream, String, List<YacineStream>) -> Unit) {
     val scope = rememberCoroutineScope()
     var categories by remember { mutableStateOf<List<YacineCategory>>(emptyList()) }
     var selectedCat by remember { mutableStateOf<YacineCategory?>(null) }
@@ -880,34 +1074,45 @@ fun ChannelsTab(onStreamSelected: (YacineStream, String) -> Unit) {
     var pendingStreams by remember { mutableStateOf<List<YacineStream>?>(null) }
     var pendingTitle by remember { mutableStateOf("") }
 
-    // Load categories
+    // Restore saved channels/categories first and refresh them without blocking the screen.
     LaunchedEffect(Unit) {
-        categories = runCatching { YacineRepository.getCategories() }.getOrElse { emptyList() }
-        loadingCats = false
-        if (categories.isNotEmpty()) {
-            selectedCat = categories.first()
+        val cachedCategories = withContext(Dispatchers.IO) { YacineRepository.getCachedCategories() }
+        if (!cachedCategories.isNullOrEmpty()) {
+            categories = cachedCategories
+            selectedCat = selectedCat ?: cachedCategories.firstOrNull()
+            loadingCats = false
+        } else loadingCats = true
+        val freshCategories = runCatching { YacineRepository.getCategories(forceRefresh = true) }.getOrElse { emptyList() }
+        if (freshCategories.isNotEmpty()) {
+            categories = freshCategories
+            selectedCat = selectedCat?.let { selected -> freshCategories.firstOrNull { it.id == selected.id } }
+                ?: freshCategories.firstOrNull()
         }
+        loadingCats = false
     }
 
-    // Load channels when category changes
     LaunchedEffect(selectedCat) {
         val cat = selectedCat ?: return@LaunchedEffect
-        loadingChannels = true
-        channels = runCatching { YacineRepository.getChannels(cat.id) }.getOrElse { emptyList() }
+        val cachedChannels = withContext(Dispatchers.IO) { YacineRepository.getCachedChannels(cat.id) }
+        if (!cachedChannels.isNullOrEmpty()) {
+            channels = cachedChannels
+            loadingChannels = false
+        } else loadingChannels = true
+        val freshChannels = runCatching { YacineRepository.getChannels(cat.id, forceRefresh = true) }.getOrElse { emptyList() }
+        if (freshChannels.isNotEmpty() || cachedChannels.isNullOrEmpty()) channels = freshChannels
         loadingChannels = false
     }
 
-    // Quality picker
-    if (pendingStreams != null) {
-        if (pendingStreams!!.size == 1) {
-            onStreamSelected(pendingStreams!!.first(), pendingTitle)
+    // Instant auto-play: pick best quality stream immediately
+    LaunchedEffect(pendingStreams) {
+        val ps = pendingStreams
+        if (!ps.isNullOrEmpty()) {
+            val best = ps.firstOrNull { it.name.contains("1080", ignoreCase = true) || it.name.contains("FHD", ignoreCase = true) }
+                ?: ps.firstOrNull { it.name.contains("720", ignoreCase = true) || it.name.contains("HD", ignoreCase = true) }
+                ?: ps.first()
+            val backups = ps.filter { it.url != best.url }
+            onStreamSelected(best, pendingTitle, backups)
             pendingStreams = null
-        } else {
-            StreamQualityDialog(
-                streams = pendingStreams!!,
-                onSelect = { onStreamSelected(it, pendingTitle) },
-                onDismiss = { pendingStreams = null }
-            )
         }
     }
 
@@ -915,14 +1120,14 @@ fun ChannelsTab(onStreamSelected: (YacineStream, String) -> Unit) {
         // Category chips
         if (loadingCats) {
             Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = MashadColors.Gold, modifier = Modifier.size(24.dp))
+                CircularProgressIndicator(color = ZakzoukaColors.Gold, modifier = Modifier.size(24.dp))
             }
         } else {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .background(MashadColors.Surface)
+                    .background(ZakzoukaColors.Surface)
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -940,7 +1145,7 @@ fun ChannelsTab(onStreamSelected: (YacineStream, String) -> Unit) {
         // Channels grid
         Box(modifier = Modifier.fillMaxSize()) {
             when {
-                loadingChannels -> MashadChannelSkeleton(Modifier.fillMaxSize())
+                loadingChannels -> ZakzoukaChannelSkeleton(Modifier.fillMaxSize())
                 channels.isEmpty() && !loadingChannels -> EmptySection("لا توجد قنوات")
                 else -> LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
@@ -951,7 +1156,7 @@ fun ChannelsTab(onStreamSelected: (YacineStream, String) -> Unit) {
                 ) {
                     items(channels, key = { it.id }) { channel ->
                         ChannelCard(channel = channel, onClick = {
-                            com.madar.tv.core.MashadTelemetry.trackContentView(channel.name, "LIVE_CHANNEL", selectedCat?.name ?: "قنوات رياضية", "")
+                            com.madar.tv.core.ZakzoukaTelemetry.trackContentView(channel.name, "LIVE_CHANNEL", selectedCat?.name ?: "قنوات رياضية", "")
                             scope.launch {
                                 loadingStreams = true
                                 val streams = runCatching {
@@ -972,7 +1177,7 @@ fun ChannelsTab(onStreamSelected: (YacineStream, String) -> Unit) {
                     modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = MashadColors.Gold)
+                    CircularProgressIndicator(color = ZakzoukaColors.Gold)
                 }
             }
         }
@@ -982,11 +1187,11 @@ fun ChannelsTab(onStreamSelected: (YacineStream, String) -> Unit) {
 @Composable
 fun CategoryChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val bg by animateColorAsState(
-        targetValue = if (selected) MashadColors.Gold else MashadColors.SurfaceCard,
+        targetValue = if (selected) ZakzoukaColors.Gold else ZakzoukaColors.SurfaceCard,
         label = "chip_bg"
     )
     val textColor by animateColorAsState(
-        targetValue = if (selected) Color.White else MashadColors.TextMuted,
+        targetValue = if (selected) Color.White else ZakzoukaColors.TextMuted,
         label = "chip_text"
     )
     Box(
@@ -1015,7 +1220,7 @@ fun ChannelCard(channel: YacineChannel, onClick: () -> Unit) {
             .aspectRatio(1.4f)
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MashadColors.SurfaceCard),
+        colors = CardDefaults.cardColors(containerColor = ZakzoukaColors.SurfaceCard),
         shape = RoundedCornerShape(12.dp)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -1030,13 +1235,13 @@ fun ChannelCard(channel: YacineChannel, onClick: () -> Unit) {
                     modifier = Modifier
                         .size(52.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MashadColors.Surface),
+                        .background(ZakzoukaColors.Surface),
                     contentScale = ContentScale.Fit
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = channel.name,
-                    color = MashadColors.TextWhite,
+                    color = ZakzoukaColors.TextWhite,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
@@ -1051,10 +1256,10 @@ fun ChannelCard(channel: YacineChannel, onClick: () -> Unit) {
                     .padding(6.dp)
                     .size(22.dp)
                     .clip(CircleShape)
-                    .background(MashadColors.Gold.copy(alpha = 0.15f)),
+                    .background(ZakzoukaColors.Gold.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text("▶", color = MashadColors.Gold, fontSize = 10.sp)
+                Text("▶", color = ZakzoukaColors.Gold, fontSize = 10.sp)
             }
         }
     }
@@ -1065,7 +1270,7 @@ fun ChannelCard(channel: YacineChannel, onClick: () -> Unit) {
 @Composable
 fun EmptySection(message: String) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(message, color = MashadColors.TextMuted, fontSize = 15.sp)
+        Text(message, color = ZakzoukaColors.TextMuted, fontSize = 15.sp)
     }
 }
 
@@ -1076,11 +1281,11 @@ fun RetrySection(onRetry: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("حدث خطأ في تحميل البيانات", color = MashadColors.TextMuted, fontSize = 14.sp)
+        Text("حدث خطأ في تحميل البيانات", color = ZakzoukaColors.TextMuted, fontSize = 14.sp)
         Spacer(Modifier.height(12.dp))
         Button(
             onClick = onRetry,
-            colors = ButtonDefaults.buttonColors(containerColor = MashadColors.Gold)
+            colors = ButtonDefaults.buttonColors(containerColor = ZakzoukaColors.Gold)
         ) {
             Text("إعادة المحاولة", color = Color.White)
         }

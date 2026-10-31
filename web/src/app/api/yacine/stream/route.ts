@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
         userAgent: s.userAgent,
         referer: s.referer,
         urlType: s.urlType,
+        headers: s.headers,
       };
     });
 

@@ -2,7 +2,7 @@ import * as cheerio from "cheerio";
 import { BaseProvider, UnifiedMediaDetail, UnifiedMediaItem, UnifiedServer } from "./types";
 import { extractMediaMetadata } from "./metadata";
 
-const BASE_URL = "https://myweecima.beauty";
+const BASE_URL = "https://myweecima.casa";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 

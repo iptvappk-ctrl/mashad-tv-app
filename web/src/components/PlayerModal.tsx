@@ -17,9 +17,14 @@ import {
   RotateCw,
   PictureInPicture,
   Layers,
-  HelpCircle,
   Gauge,
+  Download,
+  Zap,
+  ChevronLeft,
+  ChevronRight,
   Tv,
+  Check,
+  Sparkles,
 } from "lucide-react";
 
 export interface StreamSource {
@@ -36,7 +41,13 @@ interface PlayerModalProps {
   activeStreamIndex?: number;
   onClose: () => void;
   onSwitchStream?: (index: number) => void;
+  onNextEpisode?: () => void;
+  onPrevEpisode?: () => void;
+  hasNextEpisode?: boolean;
+  hasPrevEpisode?: boolean;
 }
+
+type AspectRatioMode = "contain" | "cover" | "fill";
 
 export default function PlayerModal({
   title,
@@ -46,6 +57,10 @@ export default function PlayerModal({
   activeStreamIndex = 0,
   onClose,
   onSwitchStream,
+  onNextEpisode,
+  onPrevEpisode,
+  hasNextEpisode = false,
+  hasPrevEpisode = false,
 }: PlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -67,18 +82,23 @@ export default function PlayerModal({
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number>(0);
 
+  // Smart Data Saver Mode (720p cap @ ~1 Mbps, buffer cap, saving ~60% quota)
+  const [dataSaver, setDataSaver] = useState(true);
+  const [aspectMode, setAspectMode] = useState<AspectRatioMode>("contain");
+
   // Quality settings
   const [qualities, setQualities] = useState<{ id: number; height: number; name: string }[]>([]);
   const [currentQuality, setCurrentQuality] = useState(-1); // -1 = Auto
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
-  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showAspectMenu, setShowAspectMenu] = useState(false);
 
   const [showControls, setShowControls] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isBuffering, setIsBuffering] = useState(true);
   const [isAutoplayMuted, setIsAutoplayMuted] = useState(false);
   const [useIframeFallback, setUseIframeFallback] = useState(false);
+  const [downloadingVideo, setDownloadingVideo] = useState(false);
 
   const currentStream = streams[currentIndex] || streams[0];
 
@@ -110,6 +130,31 @@ export default function PlayerModal({
       !currentStream.url.includes("pl.dood")
   );
 
+  // Apply Smart Data Saver constraints to HLS instance
+  const applyDataSaverPolicy = (hls: Hls, enabled: boolean) => {
+    if (!hls || !hls.levels || hls.levels.length === 0) return;
+    if (enabled) {
+      // Find highest level with height <= 720 (High Definition with low data footprint)
+      let targetIndex = -1;
+      let maxH = 0;
+      hls.levels.forEach((lvl, idx) => {
+        if (lvl.height && lvl.height <= 720 && lvl.height > maxH) {
+          maxH = lvl.height;
+          targetIndex = idx;
+        }
+      });
+      if (targetIndex !== -1) {
+        hls.autoLevelCapping = targetIndex;
+      }
+      hls.config.maxBufferLength = 6;
+      hls.config.maxMaxBufferLength = 10;
+    } else {
+      hls.autoLevelCapping = -1; // Uncapped
+      hls.config.maxBufferLength = 20;
+      hls.config.maxMaxBufferLength = 40;
+    }
+  };
+
   // Initialize and attach HLS stream
   useEffect(() => {
     const video = videoRef.current;
@@ -129,11 +174,11 @@ export default function PlayerModal({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
-        startFragPrefetch: true, // Download next segment in parallel
-        liveSyncDurationCount: 1, // Start live stream immediately after FIRST chunk
+        startFragPrefetch: true,
+        liveSyncDurationCount: 1,
         liveMaxLatencyDurationCount: 3,
-        maxBufferLength: 8, // Instant response, no memory lag
-        maxMaxBufferLength: 16,
+        maxBufferLength: dataSaver ? 6 : 15,
+        maxMaxBufferLength: dataSaver ? 10 : 30,
         maxBufferSize: 12 * 1024 * 1024,
         manifestLoadingTimeOut: 4500,
         manifestLoadingMaxRetry: 2,
@@ -161,6 +206,8 @@ export default function PlayerModal({
           name: lvl.height ? `${lvl.height}p` : `جودة ${index + 1}`,
         }));
         setQualities(parsedQualities);
+
+        applyDataSaverPolicy(hls, dataSaver);
 
         video.play().catch(() => {
           video.muted = true;
@@ -202,7 +249,7 @@ export default function PlayerModal({
               break;
             default:
               hls.destroy();
-              setErrorMsg("تعذر تحميل البث من هذا السيرفر. يرجى تجربة سيرفر آخر.");
+              setErrorMsg("تعذر تحميل البث من هذا السيرفر. يمكنك تجربة سيرفر بديل.");
               break;
           }
         }
@@ -242,6 +289,7 @@ export default function PlayerModal({
         setShowControls(false);
         setShowQualityMenu(false);
         setShowSpeedMenu(false);
+        setShowAspectMenu(false);
       }
     }, 4000);
   };
@@ -253,7 +301,6 @@ export default function PlayerModal({
     };
   }, [isPlaying]);
 
-  // Video Event Handlers
   const handlePlayPause = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -327,13 +374,6 @@ export default function PlayerModal({
     video.currentTime = Math.max(0, Math.min(duration, video.currentTime + seconds));
   };
 
-  const syncToLive = () => {
-    if (hlsRef.current && isStreamLive) {
-      const video = videoRef.current;
-      if (video) video.currentTime = video.duration - 0.5;
-    }
-  };
-
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const video = videoRef.current;
     if (!video) return;
@@ -377,6 +417,34 @@ export default function PlayerModal({
         await video.requestPictureInPicture();
       }
     } catch {}
+  };
+
+  const toggleDataSaver = () => {
+    const next = !dataSaver;
+    setDataSaver(next);
+    if (hlsRef.current) {
+      applyDataSaverPolicy(hlsRef.current, next);
+    }
+  };
+
+  const handleDownloadCurrentVideo = () => {
+    if (!currentStream?.url) return;
+    setDownloadingVideo(true);
+    try {
+      const safeTitle = `${title.replace(/[\/\\?%*:|"<>]/g, "_")}.mp4`;
+      const link = document.createElement("a");
+      link.href = currentStream.url;
+      link.setAttribute("download", safeTitle);
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noopener noreferrer");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e) {
+      console.error("Download error:", e);
+    } finally {
+      setTimeout(() => setDownloadingVideo(false), 2000);
+    }
   };
 
   const changeSpeed = (rate: number) => {
@@ -428,8 +496,6 @@ export default function PlayerModal({
           videoRef.current.volume = next;
           setVolume(next);
         }
-      } else if (e.key === "?") {
-        setShowHelpModal((prev) => !prev);
       }
     };
 
@@ -448,15 +514,22 @@ export default function PlayerModal({
     return `${m < 10 ? "0" : ""}${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
+  const videoAspectClass =
+    aspectMode === "cover"
+      ? "object-cover"
+      : aspectMode === "fill"
+      ? "object-fill w-full h-full"
+      : "object-contain";
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/98 flex items-center justify-center backdrop-blur-2xl animate-fadeIn">
+    <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center backdrop-blur-2xl animate-fadeIn p-0 sm:p-4">
       <div
         ref={containerRef}
         onMouseMove={resetHideTimer}
         onClick={resetHideTimer}
-        className="relative w-full h-full max-w-[95vw] max-h-[94vh] bg-black rounded-3xl overflow-hidden shadow-2xl flex flex-col justify-center select-none border border-mashad-border/60"
+        className="relative w-full h-full max-w-[100vw] sm:max-w-[96vw] max-h-[100vh] sm:max-h-[94vh] bg-[#090A0E] sm:rounded-3xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.9)] flex flex-col justify-center select-none border border-amber-500/25"
       >
-        {/* Video Element or Embed Iframe Fallback */}
+        {/* Video Player or Embed Fallback */}
         {isEmbed || useIframeFallback ? (
           <iframe
             src={
@@ -464,7 +537,7 @@ export default function PlayerModal({
                 ? currentStream.url
                 : `/api/proxy/embed?url=${encodeURIComponent(currentStream.url)}`
             }
-            className="w-full h-full border-0 rounded-3xl"
+            className="w-full h-full border-0 sm:rounded-3xl"
             allowFullScreen
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
           />
@@ -486,11 +559,31 @@ export default function PlayerModal({
             onError={() => trackPlaybackError(isStreamLive)}
             onTimeUpdate={handleTimeUpdate}
             onClick={handlePlayPause}
-            className="w-full h-full object-contain cursor-pointer"
+            className={`w-full h-full cursor-pointer transition-all duration-300 ${videoAspectClass}`}
           />
         )}
 
-        {/* Unmute prompt for blocked browser autoplay */}
+        {/* Dynamic Zakzouka TV Watermark */}
+        <div className="absolute top-20 right-6 z-20 pointer-events-none select-none hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-2xl bg-[#090A0E]/85 border border-amber-500/30 shadow-2xl backdrop-blur-md">
+          <div className="w-7 h-7 rounded-lg overflow-hidden border border-amber-500/40 p-0.5 bg-black flex-shrink-0">
+            <img src="/logo.jpg" alt="زقزوقة" className="w-full h-full object-cover rounded" onError={(e) => { (e.target as HTMLImageElement).src = "/logo.png"; }} />
+          </div>
+          <span className="text-xs font-black bg-gradient-to-r from-amber-200 to-amber-400 bg-clip-text text-transparent">
+            زقزوقة بلاير
+          </span>
+        </div>
+
+        {/* Data Saver Mode Active Pill Badge */}
+        {dataSaver && (
+          <div className="absolute top-20 left-6 z-20 pointer-events-none select-none flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 shadow-lg backdrop-blur-md">
+            <Zap size={13} className="text-emerald-400 fill-emerald-400 animate-pulse" />
+            <span className="text-[11px] font-black text-emerald-300">
+              توفير النت الفائق (توفير 60% من الباقة)
+            </span>
+          </div>
+        )}
+
+        {/* Unmute Autoplay Prompt */}
         {isAutoplayMuted && isPlaying && (
           <button
             onClick={(e) => {
@@ -501,89 +594,57 @@ export default function PlayerModal({
                 setIsAutoplayMuted(false);
               }
             }}
-            className="absolute top-20 right-6 z-30 flex items-center gap-2 px-4 py-2 rounded-2xl bg-[#2563EB] text-white text-xs font-black shadow-2xl hover:scale-105 transition-all animate-bounce border border-white/20"
+            className="absolute top-28 right-6 z-30 flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-600 text-slate-950 text-xs font-black shadow-2xl hover:scale-105 transition animate-bounce border border-amber-300/40"
           >
             <Volume2 size={16} />
             <span>انقر لتشغيل الصوت 🔊</span>
           </button>
         )}
 
-        {/* Mashad TV Dynamic Watermark (Masks Yacine & external stream logos) */}
-        {isStreamLive && (
-          <div className="absolute bottom-16 left-6 z-20 pointer-events-none select-none flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-[#0A0E17]/95 border border-mashad-gold/80 shadow-2xl backdrop-blur-md">
-            <div className="w-8 h-8 rounded-lg overflow-hidden border border-mashad-gold/60 p-0.5 bg-black flex-shrink-0">
-              <img
-                src="/logo.jpg"
-                alt="مشهد TV"
-                className="w-full h-full object-cover rounded"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = "/logo.png";
-                }}
-              />
-            </div>
-            <div className="flex flex-col text-right">
-              <span className="text-xs font-black text-mashad-gold tracking-wide">مَـشْـهَـدْ TV</span>
-              <span className="text-[9px] font-semibold text-gray-200">بث مباشر رسمي</span>
-            </div>
-          </div>
-        )}
-
         {/* Buffering Indicator */}
         {isBuffering && !errorMsg && (
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-4">
             <div className="relative">
-              <div className="w-20 h-20 rounded-3xl overflow-hidden border-2 border-mashad-gold shadow-gold p-1 bg-black">
+              <div className="w-20 h-20 rounded-3xl overflow-hidden border-2 border-amber-400 shadow-[0_0_25px_rgba(212,175,55,0.4)] p-1 bg-black">
                 <img
                   src="/logo.jpg"
-                  alt="مَشْهَد TV"
+                  alt="زقزوقة TV"
                   className="w-full h-full object-cover rounded-2xl"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = "/logo.png";
-                  }}
+                  onError={(e) => { (e.target as HTMLImageElement).src = "/logo.png"; }}
                 />
               </div>
-              <div className="absolute -inset-2.5 border-4 border-t-mashad-gold border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin shadow-gold" />
+              <div className="absolute -inset-2.5 border-4 border-t-amber-400 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin" />
             </div>
-            <span className="text-xs font-black text-mashad-gold tracking-widest uppercase">
-              جاري تشغيل البث المباشر...
+            <span className="text-xs font-black text-amber-300 tracking-widest uppercase">
+              جاري تجهيز البث السريع...
             </span>
           </div>
         )}
 
-        {/* Fatal Error Screen */}
+        {/* Error Screen */}
         {errorMsg && (
           <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center p-6 text-center z-30">
-            <div className="w-16 h-16 rounded-full bg-red-500/20 text-red-500 border border-red-500/40 flex items-center justify-center mb-4 text-2xl font-bold shadow-live">
+            <div className="w-16 h-16 rounded-full bg-red-500/20 text-red-500 border border-red-500/40 flex items-center justify-center mb-4 text-2xl font-bold">
               !
             </div>
             <h3 className="text-xl font-black text-white mb-2">{errorMsg}</h3>
-            <p className="text-xs text-gray-400 mb-4">يمكنك تجربة المشغل المباشر أو اختيار سيرفر بديل</p>
-
+            <p className="text-xs text-slate-400 mb-4">يمكنك تجربة المشغل المباشر أو اختيار سيرفر بديل</p>
             <div className="flex items-center gap-3 mb-6">
               <button
-                onClick={() => {
-                  setErrorMsg(null);
-                  setUseIframeFallback(true);
-                }}
-                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black font-black text-xs shadow-gold hover:scale-105 transition"
+                onClick={() => { setErrorMsg(null); setUseIframeFallback(true); }}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-slate-950 font-black text-xs shadow-lg transition hover:scale-105"
               >
-                ▶ الانتقال للمشغل المباشر المدمج
+                ▶ الانتقال للمشغل المباشر
               </button>
             </div>
-
             {streams.length > 1 && (
-              <div className="flex gap-2.5 flex-wrap justify-center max-w-lg">
+              <div className="flex gap-2 flex-wrap justify-center max-w-lg">
                 {streams.map((s, idx) => (
                   <button
                     key={idx}
-                    onClick={() => {
-                      setCurrentIndex(idx);
-                      onSwitchStream?.(idx);
-                    }}
-                    className={`px-5 py-2.5 rounded-xl text-xs font-black transition-all ${
-                      idx === currentIndex
-                        ? "bg-mashad-gold text-black shadow-gold scale-105"
-                        : "bg-mashad-card text-gray-200 hover:bg-mashad-elevated border border-mashad-border"
+                    onClick={() => { setCurrentIndex(idx); onSwitchStream?.(idx); }}
+                    className={`px-4 py-2 rounded-xl text-xs font-black transition ${
+                      idx === currentIndex ? "bg-amber-400 text-slate-950 font-black shadow-lg" : "bg-[#161726] text-slate-200 border border-white/10"
                     }`}
                   >
                     {s.name}
@@ -594,68 +655,72 @@ export default function PlayerModal({
           </div>
         )}
 
-        {/* ── Top HUD Header ────────────────────────────────────────── */}
+        {/* Top HUD Header */}
         <div
-          className={`absolute top-0 inset-x-0 p-6 bg-gradient-to-b from-black/95 via-black/50 to-transparent flex items-center justify-between z-20 transition-opacity duration-300 ${
+          className={`absolute top-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-b from-black/95 via-black/60 to-transparent flex items-center justify-between z-20 transition-opacity duration-300 ${
             showControls ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
         >
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             <button
               onClick={onClose}
-              className="w-11 h-11 rounded-2xl bg-black/60 hover:bg-white/20 flex items-center justify-center text-white transition border border-white/10 backdrop-blur-md"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-black/60 hover:bg-white/20 flex items-center justify-center text-white transition border border-white/10 backdrop-blur-md"
               title="إغلاق المشغل (Esc)"
             >
               <X size={20} />
             </button>
             <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className="text-base sm:text-lg font-black text-white line-clamp-1">{title}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm sm:text-base font-black text-white line-clamp-1">{title}</h2>
                 {isStreamLive && (
-                  <button
-                    onClick={syncToLive}
-                    className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-red-600/30 border border-red-500 text-red-400 text-xs font-black hover:bg-red-600 hover:text-white transition"
-                    title="الرجوع للبث الحي"
-                  >
-                    <span className="w-2 h-2 rounded-full bg-red-500 live-badge-glow" />
-                    مباشر الآن
-                  </button>
+                  <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-600/30 border border-red-500 text-red-400 text-[10px] font-black">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                    مباشر
+                  </span>
                 )}
               </div>
-              {subtitle && <p className="text-xs text-mashad-gold font-bold mt-0.5">{subtitle}</p>}
+              {subtitle && <p className="text-xs text-amber-300 font-bold mt-0.5">{subtitle}</p>}
             </div>
           </div>
 
-          {/* Streaming Server Switcher Chips */}
-          {streams.length > 1 && (
-            <div className="flex items-center gap-2 overflow-x-auto max-w-[45%] no-scrollbar">
-              {streams.map((s, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    setCurrentIndex(idx);
-                    onSwitchStream?.(idx);
-                  }}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black whitespace-nowrap transition-all ${
-                    idx === currentIndex
-                      ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black shadow-gold scale-105"
-                      : "bg-black/60 text-gray-300 hover:bg-black/90 border border-white/10 backdrop-blur-md"
-                  }`}
-                >
-                  {s.name}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Quick Header Actions: Data Saver & Direct Download */}
+          <div className="flex items-center gap-2">
+            {/* Smart Data Saver Toggle */}
+            <button
+              type="button"
+              onClick={toggleDataSaver}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition border shadow-sm ${
+                dataSaver
+                  ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-300 shadow-emerald-500/20"
+                  : "border-white/10 bg-black/60 text-slate-300 hover:text-white"
+              }`}
+              title="تفعيل/تعطيل وضع توفير النت الفائق"
+            >
+              <Zap size={14} className={dataSaver ? "fill-emerald-400 text-emerald-400" : ""} />
+              <span className="hidden sm:inline">توفير النت</span>
+            </button>
+
+            {/* Direct Download in Player */}
+            <button
+              type="button"
+              onClick={handleDownloadCurrentVideo}
+              disabled={downloadingVideo}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/20 to-amber-500/10 text-xs font-black text-amber-300 hover:border-amber-400 hover:text-white transition shadow-sm"
+              title="تحميل مباشر للفيديو"
+            >
+              <Download size={14} className="stroke-[2.5]" />
+              <span className="hidden sm:inline">تحميل</span>
+            </button>
+          </div>
         </div>
 
-        {/* ── Bottom HUD Controls Bar ───────────────────────────────── */}
+        {/* Bottom HUD Controls Bar */}
         <div
-          className={`absolute bottom-0 inset-x-0 p-6 bg-gradient-to-t from-black/98 via-black/60 to-transparent z-20 transition-opacity duration-300 flex flex-col gap-3.5 ${
+          className={`absolute bottom-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-t from-black/98 via-black/70 to-transparent z-20 transition-opacity duration-300 flex flex-col gap-3 ${
             showControls ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
         >
-          {/* Professional Full-Width Scrubber Timeline (for movies & series) */}
+          {/* Progress Timeline */}
           {!isStreamLive && (
             <div className="flex flex-col gap-1 w-full select-none">
               <div
@@ -664,45 +729,38 @@ export default function PlayerModal({
                 onMouseMove={handleProgressBarHover}
                 onMouseLeave={() => setHoverTime(null)}
                 onClick={handleProgressBarClick}
-                className="relative w-full flex items-center group cursor-pointer py-3 select-none"
+                className="relative w-full flex items-center group cursor-pointer py-2 select-none"
               >
-                {/* Floating Hover Time Tooltip */}
+                {/* Floating Hover Time */}
                 {hoverTime !== null && (
                   <div
-                    className="absolute -top-8 -translate-x-1/2 px-2.5 py-1 rounded-lg bg-[#0D111A] border border-[#E5B842] text-[11px] font-mono font-black text-[#F5D061] shadow-2xl pointer-events-none z-30"
+                    className="absolute -top-8 -translate-x-1/2 px-2.5 py-1 rounded-lg bg-[#0D0E15] border border-amber-400 text-[11px] font-mono font-black text-amber-300 shadow-2xl pointer-events-none z-30"
                     style={{ left: `${hoverPosition}%` }}
                   >
                     {formatTime(hoverTime)}
                   </div>
                 )}
 
-                {/* Full-width Base Track (High contrast, always clearly visible) */}
-                <div className="w-full h-3 sm:h-3.5 bg-[#1F293D] rounded-full overflow-hidden relative group-hover:h-4 transition-all duration-200 border border-white/10 shadow-inner">
+                {/* Base Track */}
+                <div className="w-full h-2.5 sm:h-3 bg-[#1A1C2E] rounded-full overflow-hidden relative group-hover:h-3.5 transition-all duration-200 border border-white/10 shadow-inner">
                   {/* Buffer Bar */}
                   <div
-                    className="absolute left-0 top-0 bottom-0 bg-white/30 rounded-full transition-all duration-150"
-                    style={{
-                      width: `${Math.min(100, Math.max(0, (buffered / (duration || 1)) * 100))}%`,
-                    }}
+                    className="absolute left-0 top-0 bottom-0 bg-white/25 rounded-full transition-all duration-150"
+                    style={{ width: `${Math.min(100, Math.max(0, (buffered / (duration || 1)) * 100))}%` }}
                   />
-                  {/* Active Progress Bar (Mashhad Royal Gold glowing gradient) */}
+                  {/* Active Progress Bar in Luxury Royal Gold */}
                   <div
-                    className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-[#B88E28] via-[#E5B842] to-[#F5D061] rounded-full shadow-[0_0_15px_rgba(229,184,66,0.95)]"
-                    style={{
-                      width: `${Math.min(100, Math.max(0, (currentTime / (duration || 1)) * 100))}%`,
-                    }}
+                    className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-300 rounded-full shadow-[0_0_15px_rgba(212,175,55,0.9)]"
+                    style={{ width: `${Math.min(100, Math.max(0, (currentTime / (duration || 1)) * 100))}%` }}
                   />
                 </div>
 
-                {/* Scrubber Thumb Circle (Glowing gold thumb) */}
+                {/* Scrubber Thumb */}
                 <div
-                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-[#F5D061] border-2 border-white shadow-[0_0_16px_rgba(229,184,66,1)] group-hover:scale-125 transition-transform pointer-events-none z-20"
-                  style={{
-                    left: `${Math.min(100, Math.max(0, (currentTime / (duration || 1)) * 100))}%`,
-                  }}
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-amber-400 border-2 border-white shadow-[0_0_15px_rgba(212,175,55,1)] group-hover:scale-125 transition-transform pointer-events-none z-20"
+                  style={{ left: `${Math.min(100, Math.max(0, (currentTime / (duration || 1)) * 100))}%` }}
                 />
 
-                {/* Full-width Drag Input */}
                 <input
                   type="range"
                   min={0}
@@ -719,43 +777,66 @@ export default function PlayerModal({
           {/* Controls Buttons Row */}
           <div className="flex items-center justify-between">
             {/* Left Controls */}
-            <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex items-center gap-2.5 sm:gap-3.5">
+              {/* Play / Pause Button in Gold Gradient */}
               <button
                 onClick={handlePlayPause}
-                className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-mashad-gold to-mashad-goldLight text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-gold"
+                className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-amber-400 to-amber-600 text-slate-950 font-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(212,175,55,0.4)]"
                 title={isPlaying ? "إيقاف مؤقت (Space)" : "تشغيل (Space)"}
               >
-                {isPlaying ? <Pause size={22} /> : <Play size={22} className="ml-0.5" />}
+                {isPlaying ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current ml-0.5" />}
               </button>
 
-              {/* Seek 10s Backward/Forward */}
+              {/* Prev Episode Button */}
+              {hasPrevEpisode && onPrevEpisode && (
+                <button
+                  type="button"
+                  onClick={onPrevEpisode}
+                  className="px-3 py-2 rounded-xl border border-amber-500/30 bg-[#141524] hover:bg-amber-500/20 text-xs font-black text-amber-300 transition flex items-center gap-1"
+                  title="الحلقة السابقة"
+                >
+                  <ChevronRight size={14} />
+                  <span className="hidden md:inline">الحلقة السابقة</span>
+                </button>
+              )}
+
+              {/* Next Episode Button */}
+              {hasNextEpisode && onNextEpisode && (
+                <button
+                  type="button"
+                  onClick={onNextEpisode}
+                  className="px-3 py-2 rounded-xl border border-amber-500/30 bg-[#141524] hover:bg-amber-500/20 text-xs font-black text-amber-300 transition flex items-center gap-1"
+                  title="الحلقة التالية"
+                >
+                  <span className="hidden md:inline">الحلقة التالية</span>
+                  <ChevronLeft size={14} />
+                </button>
+              )}
+
+              {/* Seek 10s */}
               {!isStreamLive && (
                 <>
                   <button
                     onClick={() => jumpSeconds(-10)}
-                    className="w-9 h-9 rounded-xl bg-black/40 hover:bg-white/10 text-gray-300 hover:text-white flex items-center justify-center transition border border-white/5"
-                    title="تأخير 10 ثوانٍ (Arrow Left)"
+                    className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-black/40 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/5"
+                    title="تأخير 10 ثوانٍ"
                   >
-                    <RotateCcw size={16} />
+                    <RotateCcw size={15} />
                   </button>
                   <button
                     onClick={() => jumpSeconds(10)}
-                    className="w-9 h-9 rounded-xl bg-black/40 hover:bg-white/10 text-gray-300 hover:text-white flex items-center justify-center transition border border-white/5"
-                    title="تقديم 10 ثوانٍ (Arrow Right)"
+                    className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-black/40 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/5"
+                    title="تقديم 10 ثوانٍ"
                   >
-                    <RotateCw size={16} />
+                    <RotateCw size={15} />
                   </button>
                 </>
               )}
 
               {/* Volume Slider */}
-              <div className="flex items-center gap-2 group">
-                <button
-                  onClick={toggleMute}
-                  className="text-gray-300 hover:text-white transition p-1"
-                  title="كتم الصوت (M)"
-                >
-                  {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+              <div className="flex items-center gap-1.5 group">
+                <button onClick={toggleMute} className="text-slate-300 hover:text-white transition p-1" title="كتم الصوت (M)">
+                  {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
                 </button>
                 <input
                   type="range"
@@ -764,22 +845,71 @@ export default function PlayerModal({
                   step={0.05}
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
-                  className="w-16 sm:w-24 h-1.5 accent-mashad-gold bg-white/20 rounded-lg cursor-pointer"
+                  className="w-14 sm:w-20 h-1.5 accent-amber-400 bg-white/20 rounded-lg cursor-pointer"
                 />
               </div>
 
               {/* Timestamp Counter */}
               {!isStreamLive && (
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-black/60 border border-white/10 text-xs font-mono font-bold tracking-wider">
-                  <span className="text-[#F5D061] font-black">{formatTime(currentTime)}</span>
-                  <span className="text-gray-500">/</span>
-                  <span className="text-gray-300">{duration > 0 ? formatTime(duration) : "00:00"}</span>
+                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-black/60 border border-white/10 text-xs font-mono font-bold">
+                  <span className="text-amber-300 font-black">{formatTime(currentTime)}</span>
+                  <span className="text-slate-500">/</span>
+                  <span className="text-slate-300">{duration > 0 ? formatTime(duration) : "00:00"}</span>
                 </div>
               )}
             </div>
 
             {/* Right Controls */}
-            <div className="flex items-center gap-2.5 relative">
+            <div className="flex items-center gap-2 relative">
+              {/* Aspect Ratio Menu */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAspectMenu(!showAspectMenu);
+                    setShowQualityMenu(false);
+                    setShowSpeedMenu(false);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-bold text-slate-200 border border-white/10 transition"
+                  title="أبعاد الشاشة"
+                >
+                  <Tv size={14} className="text-amber-400" />
+                  <span className="hidden sm:inline">الأبعاد</span>
+                </button>
+
+                {showAspectMenu && (
+                  <div className="absolute bottom-full right-0 mb-2 py-1.5 w-32 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
+                    <button
+                      onClick={() => { setAspectMode("contain"); setShowAspectMenu(false); }}
+                      className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                        aspectMode === "contain" ? "text-amber-300" : "text-slate-300"
+                      }`}
+                    >
+                      <span>احتواء كامل</span>
+                      {aspectMode === "contain" && <Check size={14} />}
+                    </button>
+                    <button
+                      onClick={() => { setAspectMode("cover"); setShowAspectMenu(false); }}
+                      className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                        aspectMode === "cover" ? "text-amber-300" : "text-slate-300"
+                      }`}
+                    >
+                      <span>ملء الشاشة</span>
+                      {aspectMode === "cover" && <Check size={14} />}
+                    </button>
+                    <button
+                      onClick={() => { setAspectMode("fill"); setShowAspectMenu(false); }}
+                      className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                        aspectMode === "fill" ? "text-amber-300" : "text-slate-300"
+                      }`}
+                    >
+                      <span>تمدد كامل</span>
+                      {aspectMode === "fill" && <Check size={14} />}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {/* Playback Speed Menu */}
               {!isStreamLive && (
                 <div className="relative">
@@ -787,25 +917,26 @@ export default function PlayerModal({
                     onClick={() => {
                       setShowSpeedMenu(!showSpeedMenu);
                       setShowQualityMenu(false);
+                      setShowAspectMenu(false);
                     }}
-                    className="flex items-center gap-1 px-3 py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-black text-gray-200 border border-white/10 transition"
+                    className="flex items-center gap-1 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-black text-slate-200 border border-white/10 transition"
                   >
                     <Gauge size={14} />
                     <span>{playbackRate}x</span>
                   </button>
 
                   {showSpeedMenu && (
-                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-28 bg-mashad-card border border-mashad-border rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
+                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-28 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
                       {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => (
                         <button
                           key={rate}
                           onClick={() => changeSpeed(rate)}
                           className={`w-full px-3 py-1.5 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
-                            playbackRate === rate ? "text-mashad-gold" : "text-gray-300"
+                            playbackRate === rate ? "text-amber-300 font-black" : "text-slate-300"
                           }`}
                         >
                           <span>{rate}x</span>
-                          {playbackRate === rate && <span>✓</span>}
+                          {playbackRate === rate && <Check size={14} />}
                         </button>
                       ))}
                     </div>
@@ -820,38 +951,35 @@ export default function PlayerModal({
                     onClick={() => {
                       setShowQualityMenu(!showQualityMenu);
                       setShowSpeedMenu(false);
+                      setShowAspectMenu(false);
                     }}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-black text-gray-200 border border-white/10 transition"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-black text-slate-200 border border-white/10 transition"
                   >
-                    <Settings size={15} />
-                    <span>
-                      {currentQuality === -1
-                        ? "تلقائي"
-                        : qualities[currentQuality]?.name || "تلقائي"}
-                    </span>
+                    <Settings size={14} />
+                    <span>{currentQuality === -1 ? "تلقائي" : qualities[currentQuality]?.name || "تلقائي"}</span>
                   </button>
 
                   {showQualityMenu && (
-                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-36 bg-mashad-card border border-mashad-border rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
+                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-36 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
                       <button
                         onClick={() => setQuality(-1)}
                         className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
-                          currentQuality === -1 ? "text-mashad-gold" : "text-gray-300"
+                          currentQuality === -1 ? "text-amber-300 font-black" : "text-slate-300"
                         }`}
                       >
                         <span>تلقائي (Auto)</span>
-                        {currentQuality === -1 && <span>✓</span>}
+                        {currentQuality === -1 && <Check size={14} />}
                       </button>
                       {qualities.map((q) => (
                         <button
                           key={q.id}
                           onClick={() => setQuality(q.id)}
                           className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
-                            currentQuality === q.id ? "text-mashad-gold" : "text-gray-300"
+                            currentQuality === q.id ? "text-amber-300 font-black" : "text-slate-300"
                           }`}
                         >
                           <span>{q.name}</span>
-                          {currentQuality === q.id && <span>✓</span>}
+                          {currentQuality === q.id && <Check size={14} />}
                         </button>
                       ))}
                     </div>
@@ -862,19 +990,19 @@ export default function PlayerModal({
               {/* PiP Button */}
               <button
                 onClick={togglePiP}
-                className="w-10 h-10 rounded-xl bg-black/50 hover:bg-white/10 text-gray-300 hover:text-white flex items-center justify-center transition border border-white/10"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-black/50 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/10"
                 title="وضع صورة داخل صورة (PiP)"
               >
-                <PictureInPicture size={18} />
+                <PictureInPicture size={17} />
               </button>
 
               {/* Fullscreen Button */}
               <button
                 onClick={toggleFullscreen}
-                className="w-10 h-10 rounded-xl bg-black/50 hover:bg-white/10 text-gray-300 hover:text-white flex items-center justify-center transition border border-white/10"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-black/50 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/10"
                 title="شاشة كاملة (F)"
               >
-                {isFullscreen ? <Minimize2 size={19} /> : <Maximize2 size={19} />}
+                {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
               </button>
             </div>
           </div>

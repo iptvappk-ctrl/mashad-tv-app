@@ -6,7 +6,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.analytics.FirebaseAnalytics
 
 /** Optional, aggregate product analytics. No device IDs, stream URLs, or raw searches are sent. */
-object MashadTelemetry {
+object ZakzoukaTelemetry {
     @Volatile
     private var analytics: FirebaseAnalytics? = null
 

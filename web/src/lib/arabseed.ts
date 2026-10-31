@@ -313,38 +313,68 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
       }
     });
 
-    // Check for Seasons
+function isEpisodeUrlOrTitle(title: string, url: string): boolean {
+  try {
+    const decodedUrl = decodeURIComponent(url).toLowerCase();
+    const cleanTitle = title.toLowerCase();
+    const combined = `${cleanTitle} ${decodedUrl}`;
+    return /(?:الحلقة|حلقة|episode|ep[-_/\d]|%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9)/i.test(combined);
+  } catch {
+    return /الحلقة|حلقة|episode/i.test(title + " " + url);
+  }
+}
+
+    // Check for Seasons (strictly filtering out individual episodes)
     const seasons: ArabseedSeason[] = [];
     $("a[href*='/series/'], .Seasons--List a, .seasons-list a, .SeasonBlock a").each((_, el) => {
       const a = $(el);
       const sUrl = a.attr("href");
-      if (sUrl) {
-        seasons.push({
-          title: a.text().trim() || `الموسم ${seasons.length + 1}`,
-          pageUrl: sUrl,
-          seasonNumber: `${seasons.length + 1}`,
+      if (sUrl && sUrl.startsWith("http") && sUrl !== pageUrl) {
+        const rawTitle = a.text().trim();
+        if (isEpisodeUrlOrTitle(rawTitle, sUrl)) {
+          return;
+        }
+        if (!seasons.some((x) => x.pageUrl === sUrl)) {
+          seasons.push({
+            title: rawTitle || `الموسم ${seasons.length + 1}`,
+            pageUrl: sUrl,
+            seasonNumber: `${seasons.length + 1}`,
+          });
+        }
+      }
+    });
+
+    // Check for Episodes (Real Arabseed selectors & proper sorting)
+    const episodes: ArabseedEpisode[] = [];
+    $("a.episode__item, .episode__item a, a[href*='/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-'], a[href*='الحلقة'], .Episodes--List a, .EpisodeBlock a").each((_, el) => {
+      const a = $(el);
+      const epUrl = a.attr("href");
+      if (epUrl && epUrl.startsWith("http") && !episodes.some((e) => e.pageUrl === epUrl)) {
+        let epTitle = a.find(".title, h3, span").text().trim() || a.text().trim();
+        let epNum = `${episodes.length + 1}`;
+        try {
+          const decoded = decodeURIComponent(epUrl);
+          const match = `${epTitle} ${decoded}`.match(/(?:الحلقة|حلقة|episode|ep)[\s._#=/:-]*([0-9]{1,4})/i);
+          if (match && match[1]) {
+            epNum = match[1];
+          }
+        } catch {}
+        if (!epTitle.includes("الحلقة") && !epTitle.includes("حلقة")) {
+          epTitle = `الحلقة ${epNum}`;
+        }
+        episodes.push({
+          title: epTitle,
+          pageUrl: epUrl,
+          episodeNumber: epNum,
         });
       }
     });
 
-    // Check for Episodes (Real Arabseed selectors!)
-    const episodes: ArabseedEpisode[] = [];
-    $("a.episode__item, .episode__item a, a[href*='/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-'], .Episodes--List a, .EpisodeBlock a").each((_, el) => {
-      const a = $(el);
-      const epUrl = a.attr("href");
-      if (epUrl && !episodes.some((e) => e.pageUrl === epUrl)) {
-        let epTitle = a.find(".title, h3, span").text().trim() || a.text().trim();
-        // Extract "الحلقة X" if text contains it
-        const match = epTitle.match(/الحلقة\s*([0-9]+)/i);
-        if (match) {
-          epTitle = `الحلقة ${match[1]}`;
-        }
-        episodes.push({
-          title: epTitle || `الحلقة ${episodes.length + 1}`,
-          pageUrl: epUrl,
-          episodeNumber: `${episodes.length + 1}`,
-        });
-      }
+    // Sort episodes ascending by episode number
+    episodes.sort((a, b) => {
+      const numA = parseInt(a.episodeNumber || "0", 10) || 0;
+      const numB = parseInt(b.episodeNumber || "0", 10) || 0;
+      return numA - numB;
     });
 
     // Background pre-resolve 1st server
@@ -362,7 +392,7 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
     const detail: ArabseedDetail = {
       item: {
         id: Buffer.from(pageUrl).toString("base64url").slice(0, 16),
-        title: title || "مشهد فيديو",
+        title: title || "زقزوقة فيديو",
         poster,
         pageUrl,
         category: isSeries ? "مسلسلات" : "أفلام",

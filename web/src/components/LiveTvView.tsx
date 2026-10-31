@@ -311,13 +311,13 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
     <div className="live-tv-light space-y-8 animate-fadeIn pb-24">
       {/* ── Top Primary Navigation Tabs (3 Tabs as Requested) ── */}
       <div className="flex items-center justify-center">
-        <div className="flex items-center gap-2 bg-mashad-card/90 p-1.5 rounded-2xl border border-mashad-border/80 shadow-2xl max-w-2xl w-full backdrop-blur-xl">
+        <div className="flex items-center gap-2 bg-zakzouka-card/90 p-1.5 rounded-2xl border border-zakzouka-border/80 shadow-2xl max-w-2xl w-full backdrop-blur-xl">
           {/* Tab 1: Upcoming & Live */}
           <button
             onClick={() => setActiveTab("upcoming")}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition-all duration-300 ${
               activeTab === "upcoming"
-                ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black shadow-gold scale-[1.02]"
+                ? "bg-gradient-to-r from-zakzouka-gold to-zakzouka-goldLight text-black shadow-gold scale-[1.02]"
                 : "text-gray-300 hover:text-white hover:bg-white/5"
             }`}
           >
@@ -335,7 +335,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
             onClick={() => setActiveTab("results")}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition-all duration-300 ${
               activeTab === "results"
-                ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black shadow-gold scale-[1.02]"
+                ? "bg-gradient-to-r from-zakzouka-gold to-zakzouka-goldLight text-black shadow-gold scale-[1.02]"
                 : "text-gray-300 hover:text-white hover:bg-white/5"
             }`}
           >
@@ -353,7 +353,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
             onClick={() => setActiveTab("channels")}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-xs sm:text-sm font-black transition-all duration-300 ${
               activeTab === "channels"
-                ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black shadow-gold scale-[1.02]"
+                ? "bg-gradient-to-r from-zakzouka-gold to-zakzouka-goldLight text-black shadow-gold scale-[1.02]"
                 : "text-gray-300 hover:text-white hover:bg-white/5"
             }`}
           >
@@ -370,7 +370,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
       {activeTab === "upcoming" && (
         <div className="space-y-8">
           {/* League Filter Strip */}
-          <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-mashad-border/40">
+          <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-zakzouka-border/40">
             <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
               {LEAGUE_FILTERS.map((f) => {
                 const isSelected = selectedLeagueFilter === f.id;
@@ -380,8 +380,8 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                     onClick={() => setSelectedLeagueFilter(f.id)}
                     className={`whitespace-nowrap px-3.5 py-1.5 rounded-xl text-xs font-black transition-all duration-200 ${
                       isSelected
-                        ? "bg-mashad-gold text-black shadow-gold"
-                        : "bg-mashad-card text-gray-400 hover:text-white border border-mashad-border/60 hover:border-mashad-gold/50"
+                        ? "bg-zakzouka-gold text-black shadow-gold"
+                        : "bg-zakzouka-card text-gray-400 hover:text-white border border-zakzouka-border/60 hover:border-zakzouka-gold/50"
                     }`}
                   >
                     {f.label}
@@ -392,7 +392,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
 
             <button
               onClick={handleRefreshMatches}
-              className="flex items-center gap-1.5 text-xs text-mashad-gold hover:text-mashad-goldLight px-3 py-1.5 rounded-xl bg-mashad-card border border-mashad-border/60"
+              className="flex items-center gap-1.5 text-xs text-zakzouka-gold hover:text-zakzouka-goldLight px-3 py-1.5 rounded-xl bg-zakzouka-card border border-zakzouka-border/60"
             >
               <RefreshCw size={13} className={loadingMatches ? "animate-spin" : ""} />
               <span>تحديث المواعيد</span>
@@ -421,14 +421,14 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                   <div
                     key={ev.id}
                     onClick={() => handlePlayEvent(ev)}
-                    className="glass-card p-5 rounded-3xl border border-mashad-border/90 hover:border-mashad-gold cursor-pointer group flex flex-col justify-between transition-all duration-300 relative overflow-hidden shadow-2xl"
+                    className="glass-card p-5 rounded-3xl border border-zakzouka-border/90 hover:border-zakzouka-gold cursor-pointer group flex flex-col justify-between transition-all duration-300 relative overflow-hidden shadow-2xl"
                   >
                     <div className="flex items-center justify-between text-xs font-bold mb-3 border-b border-white/5 pb-2.5">
-                      <span className="px-3 py-1 rounded-xl bg-mashad-gold/20 text-mashad-gold border border-mashad-gold/30 font-black">
+                      <span className="px-3 py-1 rounded-xl bg-zakzouka-gold/20 text-zakzouka-gold border border-zakzouka-gold/30 font-black">
                         {ev.champions}
                       </span>
                       <span className="px-3 py-1 rounded-xl bg-black/60 text-white font-black border border-white/10 flex items-center gap-1.5">
-                        <Tv size={12} className="text-mashad-gold" />
+                        <Tv size={12} className="text-zakzouka-gold" />
                         {ev.channel}
                       </span>
                     </div>
@@ -469,13 +469,13 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
 
                     <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
                       <div className="flex items-center gap-1.5 text-xs text-gray-300">
-                        <Volume2 size={15} className="text-mashad-gold" />
+                        <Volume2 size={15} className="text-zakzouka-gold" />
                         <span>{ev.commentary ? `تعليق: ${ev.commentary}` : "تعليق عربي مباشر"}</span>
                       </div>
 
                       <button
                         disabled={resolvingStreamId === ev.id}
-                        className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black text-xs font-black shadow-gold group-hover:scale-105 active:scale-95 transition-all"
+                        className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-zakzouka-gold to-zakzouka-goldLight text-black text-xs font-black shadow-gold group-hover:scale-105 active:scale-95 transition-all"
                       >
                         {resolvingStreamId === ev.id ? (
                           <Loader2 size={16} className="animate-spin text-black" />
@@ -495,7 +495,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <Calendar size={18} className="text-mashad-gold" />
+                <Calendar size={18} className="text-zakzouka-gold" />
                 <h3 className="text-lg font-black text-white">
                   جدول المباريات القادمة (الدوريات الخمس الكبرى ودوري الأبطال)
                 </h3>
@@ -508,12 +508,12 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
             {loadingMatches ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-                  <div key={i} className="h-32 rounded-2xl skeleton-shimmer border border-mashad-border/60" />
+                  <div key={i} className="h-32 rounded-2xl skeleton-shimmer border border-zakzouka-border/60" />
                 ))}
               </div>
             ) : visibleUpcomingMatches.length === 0 ? (
-              <div className="p-8 rounded-3xl bg-mashad-card/60 border border-mashad-border text-center space-y-2">
-                <AlertCircle size={28} className="text-mashad-gold mx-auto" />
+              <div className="p-8 rounded-3xl bg-zakzouka-card/60 border border-zakzouka-border text-center space-y-2">
+                <AlertCircle size={28} className="text-zakzouka-gold mx-auto" />
                 <p className="text-sm font-bold text-gray-300">
                   لا توجد مباريات قادمة مسجلة لهذا الدوري حالياً
                 </p>
@@ -529,13 +529,13 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                     <div
                       key={m.id}
                       onClick={() => handlePlayMatchCard(m)}
-                      className={`glass-card p-4 rounded-2xl flex flex-col justify-between border cursor-pointer hover:border-mashad-gold transition-all duration-300 ${
-                        isLive ? "border-red-500/60 shadow-live bg-red-950/10" : "border-mashad-border/60"
+                      className={`glass-card p-4 rounded-2xl flex flex-col justify-between border cursor-pointer hover:border-zakzouka-gold transition-all duration-300 ${
+                        isLive ? "border-red-500/60 shadow-live bg-red-950/10" : "border-zakzouka-border/60"
                       }`}
                     >
                       {/* Top: League Name & Time Status */}
                       <div className="flex items-center justify-between text-[11px] mb-3 pb-2 border-b border-white/5">
-                        <span className="text-mashad-gold font-black truncate max-w-[140px]">
+                        <span className="text-zakzouka-gold font-black truncate max-w-[140px]">
                           {m.leagueName}
                         </span>
                         <span
@@ -569,7 +569,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                         {/* Center: Live Score or VS */}
                         <div className="px-3 flex flex-col items-center">
                           {isLive ? (
-                            <div className="text-lg font-black text-mashad-gold tracking-widest">
+                            <div className="text-lg font-black text-zakzouka-gold tracking-widest">
                               {m.homeScore} - {m.awayScore}
                             </div>
                           ) : (
@@ -599,8 +599,8 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                         <span className="text-gray-400">
                           {isLive ? "بث مباشر عبر beIN" : "متاحة للبث عند الانطلاق"}
                         </span>
-                        <span className="text-mashad-gold font-bold flex items-center gap-1 group-hover:translate-x-[-2px] transition-transform">
-                          <Play size={12} className="fill-mashad-gold" />
+                        <span className="text-zakzouka-gold font-bold flex items-center gap-1 group-hover:translate-x-[-2px] transition-transform">
+                          <Play size={12} className="fill-zakzouka-gold" />
                           <span>{isLive ? "شاهد الآن" : "البث المباشر"}</span>
                         </span>
                       </div>
@@ -617,7 +617,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
       {activeTab === "results" && (
         <div className="space-y-6">
           {/* League Filter Strip */}
-          <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-mashad-border/40">
+          <div className="flex items-center justify-between flex-wrap gap-3 pb-2 border-b border-zakzouka-border/40">
             <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
               {LEAGUE_FILTERS.map((f) => {
                 const isSelected = selectedLeagueFilter === f.id;
@@ -627,8 +627,8 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                     onClick={() => setSelectedLeagueFilter(f.id)}
                     className={`whitespace-nowrap px-3.5 py-1.5 rounded-xl text-xs font-black transition-all duration-200 ${
                       isSelected
-                        ? "bg-mashad-gold text-black shadow-gold"
-                        : "bg-mashad-card text-gray-400 hover:text-white border border-mashad-border/60 hover:border-mashad-gold/50"
+                        ? "bg-zakzouka-gold text-black shadow-gold"
+                        : "bg-zakzouka-card text-gray-400 hover:text-white border border-zakzouka-border/60 hover:border-zakzouka-gold/50"
                     }`}
                   >
                     {f.label}
@@ -645,12 +645,12 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
           {loadingMatches ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
               {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="h-28 rounded-2xl skeleton-shimmer border border-mashad-border/60" />
+                <div key={i} className="h-28 rounded-2xl skeleton-shimmer border border-zakzouka-border/60" />
               ))}
             </div>
           ) : visibleFinishedMatches.length === 0 ? (
-            <div className="p-10 rounded-3xl bg-mashad-card/60 border border-mashad-border text-center space-y-2">
-              <CheckCircle2 size={32} className="text-mashad-gold mx-auto" />
+            <div className="p-10 rounded-3xl bg-zakzouka-card/60 border border-zakzouka-border text-center space-y-2">
+              <CheckCircle2 size={32} className="text-zakzouka-gold mx-auto" />
               <p className="text-sm font-bold text-gray-300">
                 لا توجد نتائج مسجلة لهذا الدوري في هذه الفترة
               </p>
@@ -660,11 +660,11 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
               {visibleFinishedMatches.map((m) => (
                 <div
                   key={m.id}
-                  className="glass-card p-4 rounded-2xl flex flex-col justify-between border border-mashad-border/60 hover:border-mashad-gold/60 transition-all duration-300"
+                  className="glass-card p-4 rounded-2xl flex flex-col justify-between border border-zakzouka-border/60 hover:border-zakzouka-gold/60 transition-all duration-300"
                 >
                   {/* Top Bar: League Name & "Finished" Badge */}
                   <div className="flex items-center justify-between text-[11px] mb-2.5 pb-2 border-b border-white/5">
-                    <span className="text-mashad-gold font-black truncate max-w-[150px]">
+                    <span className="text-zakzouka-gold font-black truncate max-w-[150px]">
                       {m.leagueName}
                     </span>
                     <span className="px-2 py-0.5 rounded-lg bg-white/5 text-gray-400 text-[10px] font-bold border border-white/10">
@@ -690,7 +690,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
 
                     {/* Final Score */}
                     <div className="px-3 flex flex-col items-center">
-                      <div className="px-3 py-1 rounded-xl bg-black/60 border border-mashad-gold/30 text-mashad-gold font-black text-base sm:text-lg tracking-wider">
+                      <div className="px-3 py-1 rounded-xl bg-black/60 border border-zakzouka-gold/30 text-zakzouka-gold font-black text-base sm:text-lg tracking-wider">
                         {m.homeScore} - {m.awayScore}
                       </div>
                       <span className="text-[10px] text-gray-400 mt-1 font-semibold">نتيجة نهائية</span>
@@ -723,7 +723,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
           {/* Category Chips Bar */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <Layers size={18} className="text-mashad-gold" />
+              <Layers size={18} className="text-zakzouka-gold" />
               <h3 className="text-lg font-black text-white">اختر باقة القنوات</h3>
             </div>
 
@@ -743,11 +743,11 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                       onClick={() => setSelectedCategory(cat.id)}
                       className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border ${
                         isSelected
-                          ? "bg-gradient-to-r from-mashad-gold to-mashad-goldLight text-black border-transparent shadow-gold font-black scale-105"
-                          : "bg-mashad-card text-gray-300 border-mashad-border/80 hover:border-mashad-gold/60 hover:text-white"
+                          ? "bg-gradient-to-r from-zakzouka-gold to-zakzouka-goldLight text-black border-transparent shadow-gold font-black scale-105"
+                          : "bg-zakzouka-card text-gray-300 border-zakzouka-border/80 hover:border-zakzouka-gold/60 hover:text-white"
                       }`}
                     >
-                      <Tv size={14} className={isSelected ? "text-black" : "text-mashad-gold"} />
+                      <Tv size={14} className={isSelected ? "text-black" : "text-zakzouka-gold"} />
                       <span>{cat.name}</span>
                     </button>
                   );
@@ -771,7 +771,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                 ))}
               </div>
             ) : filteredChannels.length === 0 ? (
-              <div className="py-16 text-center text-gray-400 rounded-3xl bg-mashad-card/40 border border-mashad-border">
+              <div className="py-16 text-center text-gray-400 rounded-3xl bg-zakzouka-card/40 border border-zakzouka-border">
                 <p className="text-sm font-bold">لا توجد قنوات مطابقة لبحثك</p>
               </div>
             ) : (
@@ -780,7 +780,7 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                   <div
                     key={channel.id}
                     onClick={() => handlePlayChannel(channel)}
-                    className="glass-card group p-3 rounded-2xl border border-mashad-border/80 hover:border-mashad-gold cursor-pointer transition-all duration-300 flex flex-col items-center justify-between aspect-[4/3] relative overflow-hidden shadow-lg hover:shadow-gold hover:scale-[1.03]"
+                    className="glass-card group p-3 rounded-2xl border border-zakzouka-border/80 hover:border-zakzouka-gold cursor-pointer transition-all duration-300 flex flex-col items-center justify-between aspect-[4/3] relative overflow-hidden shadow-lg hover:shadow-gold hover:scale-[1.03]"
                   >
                     {/* Live Pulse Dot */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/60 border border-white/10 text-[9px] text-red-400 font-bold">
@@ -800,20 +800,20 @@ export default function LiveTvView({ searchQuery, onPlayStream }: LiveTvViewProp
                           }}
                         />
                       ) : (
-                        <Tv size={32} className="text-mashad-muted group-hover:text-mashad-gold transition-colors" />
+                        <Tv size={32} className="text-zakzouka-muted group-hover:text-zakzouka-gold transition-colors" />
                       )}
                     </div>
 
                     {/* Channel Name */}
                     <div className="w-full text-center border-t border-white/5 pt-1.5">
-                      <p className="text-xs font-bold text-white truncate group-hover:text-mashad-gold transition-colors">
+                      <p className="text-xs font-bold text-white truncate group-hover:text-zakzouka-gold transition-colors">
                         {channel.name}
                       </p>
                     </div>
 
                     {/* Hover Play Button Overlay */}
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-mashad-gold to-mashad-goldLight text-black flex items-center justify-center shadow-gold scale-75 group-hover:scale-100 transition-transform">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-zakzouka-gold to-zakzouka-goldLight text-black flex items-center justify-center shadow-gold scale-75 group-hover:scale-100 transition-transform">
                         {resolvingStreamId === channel.id ? (
                           <Loader2 size={18} className="animate-spin text-black" />
                         ) : (

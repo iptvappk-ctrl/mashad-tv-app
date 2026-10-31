@@ -14,7 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import com.madar.tv.R
 
-object MashadColors {
+object ZakzoukaColors {
     // Warm cinematic light palette: sandstone canvas, coral action color, plum titles.
     val Background = Color(0xFFF0E5D7)
     val Surface = Color(0xFFF6EEE3)
@@ -42,23 +42,23 @@ object MashadColors {
     val Danger = Red
 }
 
-typealias MadarColors = MashadColors
+typealias MadarColors = ZakzoukaColors
 
-private val MashadPalette = lightColorScheme(
-    primary = MashadColors.Gold,
+private val ZakzoukaPalette = lightColorScheme(
+    primary = ZakzoukaColors.Gold,
     onPrimary = Color.White,
-    secondary = MashadColors.GoldLight,
+    secondary = ZakzoukaColors.GoldLight,
     onSecondary = Color.White,
-    tertiary = MashadColors.LiveGreen,
+    tertiary = ZakzoukaColors.LiveGreen,
     onTertiary = Color.White,
-    background = MashadColors.Background,
-    onBackground = MashadColors.TextWhite,
-    surface = MashadColors.Surface,
-    onSurface = MashadColors.TextWhite,
-    surfaceVariant = MashadColors.SurfaceHighlight,
-    onSurfaceVariant = MashadColors.TextMuted,
-    outline = MashadColors.Border,
-    error = MashadColors.Red,
+    background = ZakzoukaColors.Background,
+    onBackground = ZakzoukaColors.TextWhite,
+    surface = ZakzoukaColors.Surface,
+    onSurface = ZakzoukaColors.TextWhite,
+    surfaceVariant = ZakzoukaColors.SurfaceHighlight,
+    onSurfaceVariant = ZakzoukaColors.TextMuted,
+    outline = ZakzoukaColors.Border,
+    error = ZakzoukaColors.Red,
 )
 
 val CairoFontFamily = FontFamily(
@@ -68,7 +68,7 @@ val CairoFontFamily = FontFamily(
     Font(R.font.cairo, FontWeight.ExtraBold),
 )
 
-val MashadTypography = Typography(
+val ZakzoukaTypography = Typography(
     displayLarge = TextStyle(fontFamily = CairoFontFamily),
     displayMedium = TextStyle(fontFamily = CairoFontFamily),
     displaySmall = TextStyle(fontFamily = CairoFontFamily),
@@ -89,6 +89,6 @@ val MashadTypography = Typography(
 @Composable
 fun MadarTheme(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        MaterialTheme(colorScheme = MashadPalette, typography = MashadTypography, content = content)
+        MaterialTheme(colorScheme = ZakzoukaPalette, typography = ZakzoukaTypography, content = content)
     }
 }

@@ -46,18 +46,22 @@ class ContentSyncWorker(
         val newItems = freshItems.filter { it.pageUrl !in seenUrls }
 
         if (newItems.isNotEmpty()) {
-            if (newItems.size == 1) {
-                NotificationHelper.notifyNewContent(
-                    context,
-                    newItems.first().title,
-                    buildString {
-                        append("فيلم جديد")
-                        newItems.first().year.takeIf { it.isNotBlank() }?.let { append(" · $it") }
-                    },
+            if (newItems.size <= 2) {
+                for (item in newItems) {
+                    val yearStr = item.year.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+                    NotificationHelper.notifyNewContent(
+                        context = context,
+                        title = item.title,
+                        body = "فيلم جديد متاح الآن للمشاهدة على زقزوقة$yearStr",
+                        isMovie = true
+                    )
+                }
+            } else {
+                NotificationHelper.notifyNewBatch(
+                    context = context,
+                    titles = newItems.map { it.title },
                     isMovie = true
                 )
-            } else {
-                NotificationHelper.notifyNewBatch(context, newItems.size, "فيلم")
             }
         }
 
@@ -110,15 +114,21 @@ class ContentSyncWorker(
         // Notify about other new series (not followed)
         val otherNew = newItems - followedNew.toSet()
         if (otherNew.isNotEmpty()) {
-            if (otherNew.size == 1) {
-                NotificationHelper.notifyNewContent(
-                    context,
-                    otherNew.first().title,
-                    "مسلسل/حلقة جديدة أُضيفت",
+            if (otherNew.size <= 2) {
+                for (item in otherNew) {
+                    NotificationHelper.notifyNewContent(
+                        context = context,
+                        title = item.title,
+                        body = "مسلسل/حلقة جديدة متاحة الآن للمشاهدة على زقزوقة",
+                        isMovie = false
+                    )
+                }
+            } else {
+                NotificationHelper.notifyNewBatch(
+                    context = context,
+                    titles = otherNew.map { it.title },
                     isMovie = false
                 )
-            } else {
-                NotificationHelper.notifyNewBatch(context, otherNew.size, "مسلسل")
             }
         }
 

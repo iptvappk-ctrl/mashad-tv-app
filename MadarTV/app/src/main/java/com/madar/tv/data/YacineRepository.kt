@@ -53,6 +53,53 @@ object YacineRepository {
     private var cachedEvents: List<YacineEvent> = emptyList()
     private var lastEventsFetch = 0L
     private const val EVENTS_CACHE_TTL = 45 * 1000L // 45 seconds
+    private const val EVENTS_DISK_STALE_MS = 6L * 60 * 60 * 1000
+
+    fun getCachedCategories(): List<YacineCategory>? {
+        if (cachedCategories.isNotEmpty()) return cachedCategories
+        val rows = CatalogDiskCache.loadJson("yacine:categories")?.value?.optJSONArray("items") ?: return null
+        val cached = buildList {
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+                add(YacineCategory(row.optString("id"), row.optString("name"), row.optString("logo"), row.optInt("childCount")))
+            }
+        }
+        if (cached.isNotEmpty()) cachedCategories = cached
+        return cached.takeIf { it.isNotEmpty() }
+    }
+
+    fun getCachedChannels(categoryId: String): List<YacineChannel>? {
+        cachedChannels[categoryId]?.let { return it.second }
+        val rows = CatalogDiskCache.loadJson("yacine:channels:$categoryId")?.value?.optJSONArray("items") ?: return null
+        val cached = buildList {
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+                add(YacineChannel(row.optString("id"), row.optString("name"), row.optString("logo"), row.optInt("isHide"), row.optInt("priority")))
+            }
+        }
+        if (cached.isNotEmpty()) cachedChannels[categoryId] = System.currentTimeMillis() to cached
+        return cached.takeIf { it.isNotEmpty() }
+    }
+
+    fun getCachedEvents(): List<YacineEvent>? {
+        if (cachedEvents.isNotEmpty()) return cachedEvents
+        val rows = CatalogDiskCache.loadJson("yacine:events", EVENTS_DISK_STALE_MS)?.value?.optJSONArray("items") ?: return null
+        val cached = buildList {
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+                val team1 = row.optJSONObject("team1") ?: JSONObject()
+                val team2 = row.optJSONObject("team2") ?: JSONObject()
+                add(YacineEvent(
+                    row.optString("id"), row.optString("champions"), row.optString("channel"),
+                    row.optLong("startTime"), row.optLong("endTime"), row.optString("commentary"),
+                    YacineTeam(team1.optString("id"), team1.optString("name"), team1.optString("logo")),
+                    YacineTeam(team2.optString("id"), team2.optString("name"), team2.optString("logo")),
+                ))
+            }
+        }
+        if (cached.isNotEmpty()) cachedEvents = cached
+        return cached.takeIf { it.isNotEmpty() }
+    }
 
     // ─── Decryption ─────────────────────────────────────────────────────────────
     private fun decrypt(body: String, tHeader: String): String {
@@ -105,6 +152,10 @@ object YacineRepository {
             if (list.isNotEmpty()) {
                 cachedCategories = list
                 lastCategoriesFetch = now
+                val rows = JSONArray().apply {
+                    list.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("logo", it.logo).put("childCount", it.childCount)) }
+                }
+                CatalogDiskCache.saveJson("yacine:categories", JSONObject().put("items", rows))
             }
             list
         }.getOrElse { cachedCategories }
@@ -137,6 +188,10 @@ object YacineRepository {
             }.filter { it.isHide == 0 }
             if (list.isNotEmpty()) {
                 cachedChannels[categoryId] = Pair(now, list)
+                val rows = JSONArray().apply {
+                    list.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("logo", it.logo).put("isHide", it.isHide).put("priority", it.priority)) }
+                }
+                CatalogDiskCache.saveJson("yacine:channels:$categoryId", JSONObject().put("items", rows))
             }
             list
         }.getOrElse { cachedChannels[categoryId]?.second ?: emptyList() }
@@ -182,19 +237,29 @@ object YacineRepository {
             )
             cachedEvents = sorted
             lastEventsFetch = now
+            val rows = JSONArray().apply {
+                sorted.forEach { event ->
+                    fun team(team: YacineTeam) = JSONObject().put("id", team.id).put("name", team.name).put("logo", team.logo)
+                    put(JSONObject()
+                        .put("id", event.id).put("champions", event.champions).put("channel", event.channel)
+                        .put("startTime", event.startTime).put("endTime", event.endTime).put("commentary", event.commentary)
+                        .put("team1", team(event.team1)).put("team2", team(event.team2)))
+                }
+            }
+            CatalogDiskCache.saveJson("yacine:events", JSONObject().put("items", rows))
             sorted
         }.getOrElse { cachedEvents }
     }
 
     // ─── Sports Channels Helper (beIN SPORTS / Alkass) ───────────────────────────
-    suspend fun getSportsChannels(): List<YacineChannel> = withContext(Dispatchers.IO) {
+    suspend fun getSportsChannels(forceRefresh: Boolean = false): List<YacineChannel> = withContext(Dispatchers.IO) {
         runCatching {
-            val cats = getCategories()
+            val cats = getCategories(forceRefresh)
             val sportsCat = cats.firstOrNull { it.name.contains("beIN SPORTS", ignoreCase = true) }
                 ?: cats.firstOrNull { it.name.contains("SPORTS", ignoreCase = true) }
                 ?: cats.firstOrNull()
             if (sportsCat != null) {
-                getChannels(sportsCat.id)
+                getChannels(sportsCat.id, forceRefresh)
             } else emptyList()
         }.getOrElse { emptyList() }
     }
@@ -216,18 +281,34 @@ object YacineRepository {
     }
 
     private fun parseStreams(arr: JSONArray): List<YacineStream> {
+        val browserUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         return (0 until arr.length()).map { i ->
             val obj = arr.getJSONObject(i)
             val headersObj = obj.optJSONObject("headers")
-            val ua = headersObj?.optString("User-Agent", "")
-                ?: obj.optString("user_agent", UA)
+            val rawUa = headersObj?.optString("User-Agent", "").orEmpty()
+                .ifBlank { obj.optString("user_agent", "") }
+                .ifBlank { browserUa }
+            val ua = if (rawUa.startsWith("okhttp", ignoreCase = true)) browserUa else rawUa
+            val referer = obj.optString("referer", "").ifBlank { "https://yacinelive.com/" }
+            val playbackHeaderNames = setOf("user-agent", "referer", "origin", "accept", "accept-language")
+            val requestHeaders = buildMap {
+                headersObj?.keys()?.forEach { key ->
+                    val value = headersObj.optString(key).trim()
+                    if (key.lowercase() in playbackHeaderNames && value.isNotBlank() && !key.contains("\r") && !key.contains("\n")
+                        && !value.contains("\r") && !value.contains("\n")
+                    ) put(key, value)
+                }
+                put("User-Agent", ua)
+                put("Referer", referer)
+            }
             YacineStream(
                 name = obj.optString("name", "HD"),
                 url = obj.optString("url", ""),
-                userAgent = ua.ifEmpty { UA },
-                referer = obj.optString("referer", ""),
-                urlType = obj.optInt("url_type", 3)
+                userAgent = ua,
+                referer = referer,
+                urlType = obj.optInt("url_type", 3),
+                headers = requestHeaders,
             )
-        }.filter { it.url.isNotEmpty() }
+        }.filter { it.url.isNotEmpty() && !it.url.contains("rex.new-redirect.online") }
     }
 }

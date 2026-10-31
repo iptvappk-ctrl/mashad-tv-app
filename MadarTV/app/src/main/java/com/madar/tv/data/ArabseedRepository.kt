@@ -1,4 +1,4 @@
-package com.madar.tv.data
+﻿package com.madar.tv.data
 
 
 
@@ -12,6 +12,8 @@ import okhttp3.CookieJar
 
 import okhttp3.HttpUrl
 
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 
 import okhttp3.Request
@@ -31,6 +33,8 @@ import java.util.regex.Pattern
 
 
 object ArabseedRepository {
+
+    private const val TAG = "ArabseedRepository"
 
 
 
@@ -268,9 +272,9 @@ object ArabseedRepository {
 
     // ── Lazily resolved secrets ───────────────────────────────────────────
 
-    private val BASE_URL:     String by lazy { X.j(_s1, _s2, _s3) }
+    private val BASE_URL:     String = "https://m.myseed.tv"
 
-    private val BASE_SLASH:   String by lazy { X.s(_s4) }
+    private val BASE_SLASH:   String = "https://m.myseed.tv/"
 
     private val GOVID_URL:    String by lazy { X.j(_g1, _g2) }
 
@@ -366,13 +370,14 @@ object ArabseedRepository {
 
     private val client = OkHttpClient.Builder()
 
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .connectionPool(connectionPool)
-
         .cookieJar(cookieJar)
 
-        .connectTimeout(8, TimeUnit.SECONDS)
+        .connectTimeout(6, TimeUnit.SECONDS)
 
-        .readTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+.callTimeout(12, TimeUnit.SECONDS)
 
         .followRedirects(true)
 
@@ -387,14 +392,64 @@ object ArabseedRepository {
     // ── Caches ────────────────────────────────────────────────────────────
 
     private val detailCache = ConcurrentHashMap<String, ArabseedDetail>()
+    private val detailCacheAt = ConcurrentHashMap<String, Long>()
+    private val prefetching = ConcurrentHashMap.newKeySet<String>()
+    private val prefetchPool = java.util.concurrent.Executors.newFixedThreadPool(2)
+    private const val DETAIL_CACHE_TTL = 30 * 60 * 1000L
 
     private val streamCache = ConcurrentHashMap<String, String>()
 
     private val listingCache = ConcurrentHashMap<String, Pair<Long, List<ArabseedItem>>>()
+    private val searchCache = ConcurrentHashMap<String, Pair<Long, List<ArabseedItem>>>()
+    private const val SEARCH_CACHE_TTL = 8 * 60 * 1000L
 
     private const val LISTING_CACHE_TTL = 3 * 60 * 1000L // 3 minutes
 
 
+
+    fun loadCachedCategory(categoryPath: String, page: Int = 1): List<ArabseedItem>? {
+        val rawClean = categoryPath.trim().trimStart('/')
+        val cleanPath = when (rawClean) {
+            "home/", "home", "" -> "main/"
+            else -> rawClean
+        }
+        val key = "$cleanPath:$page"
+        listingCache[key]?.let { cached ->
+            if (System.currentTimeMillis() - cached.first <= 14L * 24 * 60 * 60 * 1000) return cached.second
+        }
+        val cached = CatalogDiskCache.loadItems("arabseed:list:$key") ?: return null
+        listingCache[key] = cached.savedAt to cached.value
+        return cached.value
+    }
+
+    fun loadCachedSearch(query: String): List<ArabseedItem>? {
+        val key = query.trim().lowercase()
+        if (key.isBlank()) return null
+        searchCache[key]?.let { cached ->
+            if (System.currentTimeMillis() - cached.first <= 14L * 24 * 60 * 60 * 1000) return cached.second
+        }
+        val cached = CatalogDiskCache.loadItems("arabseed:search:$key") ?: return null
+        searchCache[key] = cached.savedAt to cached.value
+        return cached.value
+    }
+
+    fun loadCachedDetail(pageUrl: String): ArabseedDetail? {
+        detailCache[pageUrl]?.let { if (it.servers.isNotEmpty()) return it }
+        val cached = CatalogDiskCache.loadDetail("arabseed:detail:" + pageUrl) ?: return null
+        if (cached.value.servers.isEmpty()) return null
+        detailCache[pageUrl] = cached.value
+        detailCacheAt[pageUrl] = cached.savedAt
+        return cached.value
+    }
+
+    fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
+        seasonBundleCache[pageUrl]?.let { return it }
+        val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v2:" + pageUrl) ?: return null
+        val normalized = SeriesCatalogParser.normalizeSeasonBundle(cached.value)
+        seasonBundleCache[pageUrl] = normalized
+        seasonBundleCacheAt[pageUrl] = cached.savedAt
+        return normalized
+    }
 
     fun clearListingCache() {
 
@@ -419,14 +474,11 @@ object ArabseedRepository {
 
 
     fun prefetch(item: ArabseedItem) {
-
-        if (detailCache.containsKey(item.pageUrl)) return
-
-        Thread {
-
+        if (detailCache.containsKey(item.pageUrl) || !prefetching.add(item.pageUrl)) return
+        prefetchPool.execute {
             try { fetchDetail(item) } catch (_: Exception) {}
-
-        }.start()
+            finally { prefetching.remove(item.pageUrl) }
+        }
 
     }
 
@@ -438,7 +490,11 @@ object ArabseedRepository {
 
     fun fetchCategory(categoryPath: String, page: Int = 1, forceRefresh: Boolean = false): List<ArabseedItem> {
 
-        val cleanPath = categoryPath.trim().trimStart('/')
+        val rawClean = categoryPath.trim().trimStart('/')
+        val cleanPath = when (rawClean) {
+            "home/", "home", "" -> "main/"
+            else -> rawClean
+        }
 
         val cacheKey = "$cleanPath:$page"
 
@@ -484,9 +540,19 @@ object ArabseedRepository {
 
         // Normalize the primary provider before exposing a category page. The
         // home screen can render this result before secondary providers finish.
-        val items = MultiProviderRepository.mergeCatalogItems(
-            parseListing(html, defaultType),
-        )
+        val parsedItems = parseListing(html, defaultType)
+        if (html.isNotBlank() && parsedItems.isEmpty()) {
+            android.util.Log.w(TAG, "No catalog cards parsed for category=$cleanPath page=$page")
+        }
+        var items = MultiProviderRepository.mergeCatalogItems(parsedItems)
+
+        // Fallback: if home/main returned 0 items, retry with main/ directly
+        if (items.isEmpty() && cleanPath != "main/") {
+            try {
+                val fallbackHtml = fetchHtml("$BASE_URL/main/")
+                items = MultiProviderRepository.mergeCatalogItems(parseListing(fallbackHtml, defaultType))
+            } catch (_: Exception) {}
+        }
 
         if (items.isNotEmpty()) {
 
@@ -494,6 +560,7 @@ object ArabseedRepository {
 
         }
 
+            CatalogDiskCache.saveItems("arabseed:list:$cacheKey", items)
         return items
 
     }
@@ -502,26 +569,38 @@ object ArabseedRepository {
 
     fun fetchMovies(page: Int = 1): List<ArabseedItem> =
 
-        fetchCategory("%d8%a7%d9%81%d9%84%d8%a7%d9%85/", page)
+        fetchCategory("movies/", page)
 
 
 
     fun fetchSeries(page: Int = 1): List<ArabseedItem> =
 
-        fetchCategory("%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/", page)
+        fetchCategory("series/", page)
 
 
 
-    fun search(query: String): List<ArabseedItem> {
-
+    fun search(query: String, forceRefresh: Boolean = false): List<ArabseedItem> {
+        val normalized = query.trim().lowercase()
+        if (normalized.isBlank()) return emptyList()
+        val now = System.currentTimeMillis()
+        if (!forceRefresh) {
+            searchCache[normalized]?.let { (savedAt, result) ->
+                if (now - savedAt < SEARCH_CACHE_TTL && result.isNotEmpty()) return result
+            }
+            loadCachedSearch(normalized)?.let { cached ->
+                val savedAt = searchCache[normalized]?.first ?: 0L
+                if (now - savedAt < SEARCH_CACHE_TTL) return cached
+            }
+        }
         val encoded = URLEncoder.encode(query.trim(), "UTF-8")
-
         val url = "$BASE_URL/?s=$encoded"
-
-        return parseListing(fetchHtml(url), null)
-
+        val results = parseListing(fetchHtml(url), null)
+        if (results.isNotEmpty()) {
+            searchCache[normalized] = now to results
+            CatalogDiskCache.saveItems("arabseed:search:$normalized", results)
+        }
+        return results
     }
-
 
 
     fun fetchStoryFast(pageUrl: String): String =
@@ -530,66 +609,137 @@ object ArabseedRepository {
 
 
 
-    fun fetchServersFast(pageUrl: String): List<ArabseedServer> {
+        fun fetchServersFast(pageUrl: String): List<ArabseedServer> {
+        val cleanUrl = pageUrl.trimEnd('/')
+        val watchUrl = if (cleanUrl.endsWith("/watch")) "$cleanUrl/" else "$cleanUrl/watch/"
+        var servers = emptyList<ArabseedServer>()
+        try {
+            val watchHtml = fetchHtml(watchUrl)
+            servers = parseServersFast(watchHtml)
 
-        val watchUrl = pageUrl.trimEnd('/') + WATCH_SFX
+            // Resolve MySeed direct MP4 via vids.php -> player-gateway.php
+            try {
+                val vidsServer = servers.firstOrNull { it.embedUrl.contains("vids.php") }
+                val vidsSrc = vidsServer?.embedUrl ?: run {
+                    val wDoc = Jsoup.parse(watchHtml, BASE_URL)
+                    wDoc.selectFirst("iframe[src*='vids.php'], [data-link*='vids.php']")?.let {
+                        val s = it.attr("abs:src").ifBlank { it.attr("src").ifBlank { it.attr("data-link") } }.trim()
+                        if (s.startsWith("/")) "$BASE_URL$s" else s
+                    }
+                }
+                if (!vidsSrc.isNullOrBlank()) {
+                    val fullVids = if (vidsSrc.startsWith("/")) "$BASE_URL$vidsSrc" else vidsSrc
+                    val vHtml = fetchHtmlWithReferer(fullVids, "$BASE_URL/")
+                    val gwMatch = Regex("""src=["'](https?://[^"']*player-gateway\.php[^"']*)["']""").find(vHtml)
+                    val gwUrl = gwMatch?.groupValues?.get(1)?.replace("&amp;", "&")
+                    if (!gwUrl.isNullOrBlank()) {
+                        val gwHtml = fetchHtmlWithReferer(gwUrl, "$BASE_URL/")
+                        val directMatch = Regex("""<source\s+[^>]*src=["']([^"']+\.(?:mp4|m3u8)[^"']*)["']""", RegexOption.IGNORE_CASE).find(gwHtml)
+                        val directStream = directMatch?.groupValues?.get(1)
+                        if (!directStream.isNullOrBlank()) {
+                            val topServer = ArabseedServer("سيرفر ماي سيد (فائق السرعة ⚡)", fullVids, directStreamUrl = directStream)
+                            servers = listOf(topServer) + servers.filterNot { it.embedUrl.contains("vids.php") }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
 
-        return try {
+            if (servers.isEmpty()) servers = parseServersFast(fetchHtml(cleanUrl))
+        } catch (_: Exception) {
+            try { servers = parseServersFast(fetchHtml(cleanUrl)) } catch (_: Exception) {}
+        }
+        // Fallback: search if no servers found
+        if (servers.isEmpty()) {
+            try { servers = fetchServersViaSearch(pageUrl) } catch (_: Exception) {}
+        }
+        return servers
+    }
 
-            val servers = parseServersFast(fetchHtml(watchUrl))
-
-            if (servers.isNotEmpty()) servers else parseServersFast(fetchHtml(pageUrl))
-
-        } catch (_: Exception) { emptyList() }
-
+    /**
+     * لما الـ URL القديمة تعطي 404، يبحث تلقائياً بالعنوان المستخرج من الـ URL
+     * ويجيب السيرفرات من أول نتيجة مطابقة.
+     */
+    private fun fetchServersViaSearch(originalUrl: String): List<ArabseedServer> {
+        val slug = originalUrl.trimEnd('/').substringAfterLast('/')
+        val titleFromSlug = slug
+            .replace(Regex("""-s\d+-eps?\d+.*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""(مسلسل|فيلم|movie|series)-""", RegexOption.IGNORE_CASE), "")
+            .replace("-", " ").trim()
+        if (titleFromSlug.length < 2) return emptyList()
+        val searchResults = try { search(titleFromSlug) } catch (_: Exception) { emptyList() }
+        if (searchResults.isEmpty()) return emptyList()
+        val epNum = Regex("""-eps?(\d+)""", RegexOption.IGNORE_CASE).find(originalUrl)?.groupValues?.get(1)?.toIntOrNull()
+        val sNum  = Regex("""-s(\d+)-""",  RegexOption.IGNORE_CASE).find(originalUrl)?.groupValues?.get(1)?.toIntOrNull()
+        if (epNum != null) {
+            for (result in searchResults.take(3)) {
+                try {
+                    val bundle = fetchSeasonsAndEpisodes(result)
+                    val targetSeason = if (sNum != null)
+                        bundle.seasons.firstOrNull { it.number == sNum } ?: bundle.seasons.firstOrNull()
+                    else bundle.seasons.firstOrNull()
+                    val episode = targetSeason?.episodes?.firstOrNull { it.number == epNum }
+                    if (episode != null) {
+                        val epServers = try {
+                            val w = episode.pageUrl.trimEnd('/') + "/watch/"
+                            parseServersFast(fetchHtml(w)).ifEmpty { parseServersFast(fetchHtml(episode.pageUrl)) }
+                        } catch (_: Exception) { emptyList() }
+                        if (epServers.isNotEmpty()) return epServers
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        for (result in searchResults.take(3)) {
+            val s = try {
+                val w = result.pageUrl.trimEnd('/') + "/watch/"
+                parseServersFast(fetchHtml(w)).ifEmpty { parseServersFast(fetchHtml(result.pageUrl)) }
+            } catch (_: Exception) { emptyList() }
+            if (s.isNotEmpty()) return s
+        }
+        return emptyList()
     }
 
 
 
+
+
     fun fetchDetail(item: ArabseedItem): ArabseedDetail {
-
-        detailCache[item.pageUrl]?.let { return it }
-
-
-
-        var fullOverview = ""
-
-        var servers = emptyList<ArabseedServer>()
-
-        var preResolved: String? = null
-
-
-
-        val t1 = Thread { fullOverview = fetchStoryFast(item.pageUrl) }
-
-        val t2 = Thread {
-
-            servers = fetchServersFast(item.pageUrl)
-
-            servers.firstOrNull()?.let { preResolved = resolveDirectStream(it.embedUrl) }
-
+        val now = System.currentTimeMillis()
+        detailCache[item.pageUrl]?.let { cached ->
+            if (cached.servers.isNotEmpty() && now - (detailCacheAt[item.pageUrl] ?: now) < DETAIL_CACHE_TTL) {
+                return cached
+            }
         }
 
-        t1.start(); t2.start()
+        var fullOverview = ""
+        var servers = emptyList<ArabseedServer>()
+        var preResolved: String? = null
 
-        t1.join(3500); t2.join(4000)
+        try {
+            fullOverview = fetchStoryFast(item.pageUrl)
+        } catch (_: Exception) {}
 
-
+        try {
+            servers = fetchServersFast(item.pageUrl)
+            if (servers.isNotEmpty()) {
+                try {
+                    preResolved = resolveDirectStream(servers.first().embedUrl)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
 
         val detail = ArabseedDetail(
-
             item = item.copy(overview = fullOverview.ifBlank { item.overview }),
-
             servers = servers,
-
             preResolvedStream = preResolved,
-
         )
 
-        detailCache[item.pageUrl] = detail
+        if (servers.isNotEmpty()) {
+            detailCache[item.pageUrl] = detail
+            detailCacheAt[item.pageUrl] = System.currentTimeMillis()
+            CatalogDiskCache.saveDetail("arabseed:detail:" + item.pageUrl, detail)
+        }
 
         return detail
-
     }
 
 
@@ -599,12 +749,17 @@ object ArabseedRepository {
 
 
     private val seasonBundleCache = ConcurrentHashMap<String, ArabseedSeasonBundle>()
+    private val seasonBundleCacheAt = ConcurrentHashMap<String, Long>()
+    private const val SEASON_CACHE_TTL = 6 * 60 * 60 * 1000L
 
 
 
         fun fetchSeasonsAndEpisodes(item: ArabseedItem): ArabseedSeasonBundle {
 
-            seasonBundleCache[item.pageUrl]?.let { return it }
+            val now = System.currentTimeMillis()
+            seasonBundleCache[item.pageUrl]?.let { cached ->
+                if (now - (seasonBundleCacheAt[item.pageUrl] ?: now) < SEASON_CACHE_TTL) return cached
+            }
 
             return try {
 
@@ -621,6 +776,7 @@ object ArabseedRepository {
                     "a.episode__item", ".episode__item a",
                     "a[href*='%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9']",
                     "a[href*='الحلقة']", "a[href*='-episode-']", "a[href*='/episode/']",
+                    "a[href*='-eps']",  // MySeed: /مسلسل-حب-اسود-s1-eps20/
                     ".Episodes--List a", ".EpisodeBlock a",
                     ".episodes-list a", ".EpisodesList li a", ".eplister li a",
                     ".eps-list li a", ".eps a", "a.ep-item", ".episodios li a", ".eplist a"
@@ -695,6 +851,7 @@ object ArabseedRepository {
                 // multiple seasons and must not be treated as one season's episode list.
                 if (rawEpisodes.size <= 4 || isEpisodePage) {
                     val seriesLinkSelectors = listOf(
+                        "a[href*='/selary/']",  // MySeed parent-series path
                         "a[href*='/series/']", "a[href*='/season/']", "a[href*='الموسم']",
                         ".breadcrumb a", "ol.breadcrumb a", ".SeriesTitle a", ".series-title a",
                         ".entry-breadcrumb a", "a.SeriesLink"
@@ -751,7 +908,7 @@ object ArabseedRepository {
                         labelledSeasons.size == 1 -> labelledSeasons.single()
                         expectedSeasonNumber != null -> expectedSeasonNumber
                         !isEpisodePage -> 1
-                        else -> null
+                        else -> 1
                     }
                     val numberedEpisodes = parsedEpisodes.mapNotNull { (seasonNumber, episodeNumber, url) ->
                         (seasonNumber ?: inferredSeasonNumber)?.let { Triple(it, episodeNumber, url) }
@@ -842,15 +999,17 @@ object ArabseedRepository {
                     }.thenBy { it.title })
                     .take(12)
 
-                val bundle = ArabseedSeasonBundle(
+                val bundle = SeriesCatalogParser.normalizeSeasonBundle(ArabseedSeasonBundle(
 
                     seasons = seasons,
 
                     relatedParts = finalRelatedParts,
 
-                )
+                ))
 
                 seasonBundleCache[item.pageUrl] = bundle
+                seasonBundleCacheAt[item.pageUrl] = System.currentTimeMillis()
+                CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v2:" + item.pageUrl, bundle)
 
                 bundle
 
@@ -870,71 +1029,137 @@ object ArabseedRepository {
 
 
 
-    fun resolveDirectStream(serverUrl: String): String? {
+    fun resolveDirectStream(serverUrl: String): String? = resolveDirectStreamInternal(serverUrl, 0)
 
+    private fun resolveDirectStreamInternal(serverUrl: String, depth: Int): String? {
+        if (depth > 2) return null
         try {
-
             streamCache[serverUrl]?.let { return it }
 
-
-
-            if (!serverUrl.contains(GOVID_PLAY)) {
-
-                if (serverUrl.contains(".m3u8") || serverUrl.contains(".mp4")) {
-
-                    streamCache[serverUrl] = serverUrl
-
-                    return serverUrl
-
-                }
-
-                return null
-
+            if (serverUrl.contains(".m3u8") || serverUrl.contains(".mp4")) {
+                streamCache[serverUrl] = serverUrl
+                return serverUrl
             }
 
-
-
-            val html = fetchHtmlWithReferer(serverUrl, BASE_SLASH)
-
-            val iframeMatcher = Pattern.compile(IFRAME_RE).matcher(html)
-
-            val embedUrl = if (iframeMatcher.find()) {
-
-                iframeMatcher.group(1)
-
-            } else {
-
-                Jsoup.parse(html).selectFirst(IFRAME_GOVID)?.attr(R_ISRC)
-
-            } ?: return null
-
-
-
-            val embedHtml = fetchHtmlWithReferer(embedUrl, GOVID_SLASH)
-
-            val matcher = Pattern.compile(MOHIX_RE).matcher(embedHtml)
-
-            if (matcher.find()) {
-
-                val direct = hexToString(matcher.group(1) ?: return null)
-
-                if (direct.isNotBlank() && (direct.contains(".m3u8") || direct.contains(".mp4") || direct.startsWith(P_HTTP))) {
-
-                    streamCache[serverUrl] = direct
-
-                    return direct
-
+            // ── Fast direct provider resolvers ────────────────────────────
+            // 1. Vidara / Sugbaioug API resolver
+            if (serverUrl.contains("vidara.") || serverUrl.contains("sugbaioug.")) {
+                val fileCode = serverUrl.trimEnd('/').substringAfterLast('/')
+                if (fileCode.isNotBlank()) {
+                    try {
+                        val jsonBody = """{"filecode":"$fileCode","device":"android","codecs":["av01.0.09M.10"]}"""
+                        val postReq = Request.Builder()
+                            .url("https://vidara.to/api/stream")
+                            .post(jsonBody.toRequestBody("application/json".toMediaType()))
+                            .header("User-Agent", UA)
+                            .header("Referer", serverUrl)
+                            .header("Origin", "https://vidara.to")
+                            .build()
+                        client.newCall(postReq).execute().use { resp ->
+                            val bodyStr = resp.body?.string().orEmpty()
+                            val streamMatch = Regex(""""streaming_url"\s*:\s*"([^"]+)"""").find(bodyStr)
+                            streamMatch?.groupValues?.get(1)?.let { stream ->
+                                val cleanStream = stream.replace("\\/", "/")
+                                if (cleanStream.startsWith("http")) {
+                                    streamCache[serverUrl] = cleanStream
+                                    return cleanStream
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
-
             }
 
+            // 2. Vidmoly direct m3u8
+            if (serverUrl.contains("vidmoly")) {
+                try {
+                    val vmHtml = fetchHtmlWithReferer(serverUrl, "https://m.myseed.tv/")
+                    val vmMatch = Regex("""["'](https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)["']""").find(vmHtml)
+                    vmMatch?.groupValues?.get(1)?.let { vmStream ->
+                        streamCache[serverUrl] = vmStream
+                        return vmStream
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 3. Uqload direct mp4
+            if (serverUrl.contains("uqload")) {
+                try {
+                    val uqHtml = fetchHtmlWithReferer(serverUrl, "https://uqload.to/")
+                    val uqMatch = Regex("""sources\s*:\s*\[\s*["']([^"']+\.mp4[^"']*)["']""").find(uqHtml)
+                    uqMatch?.groupValues?.get(1)?.let { uqStream ->
+                        if (uqStream.startsWith("http")) {
+                            streamCache[serverUrl] = uqStream
+                            return uqStream
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val origin = try {
+                val u = java.net.URI.create(serverUrl)
+                "${u.scheme}://${u.host}/"
+            } catch (_: Exception) { BASE_SLASH }
+
+            val gHtml = fetchHtmlWithReferer(serverUrl, origin)
+            if (gHtml.isBlank()) return null
+
+            // 1. Direct <source src="..."> in HTML5 video tags (e.g. MySeed / player-gateway)
+            val sourceMatch = Regex("""<source\s+[^>]*src=["']([^"']+\.(?:mp4|m3u8)[^"']*)["']""", RegexOption.IGNORE_CASE).find(gHtml)
+            sourceMatch?.groupValues?.getOrNull(1)?.let {
+                streamCache[serverUrl] = it
+                return it
+            }
+
+            // 2. Direct regex match for mp4 or m3u8 in scripts/page
+            val dirRegex = Regex("""["'](https?://[^\s"'<>]+\.(?:m3u8|mp4)(?:\?[^\s"'<>]*)?)["']""", RegexOption.IGNORE_CASE)
+            dirRegex.find(gHtml)?.groupValues?.getOrNull(1)?.let {
+                streamCache[serverUrl] = it
+                return it
+            }
+
+            // 3. Follow iframe hops (e.g. /vids.php -> player-gateway.php -> video.mp4)
+            val doc = Jsoup.parse(gHtml, origin)
+            for (ifr in doc.select("iframe")) {
+                val src = ifr.attr("src").ifBlank { ifr.attr("data-src") }.trim()
+                if (src.isNotBlank() && !isAdUrl(src)) {
+                    val fullIfr = when {
+                        src.startsWith("http://") || src.startsWith("https://") -> src
+                        src.startsWith("//") -> "https:$src"
+                        src.startsWith("/") -> origin.trimEnd('/') + src
+                        else -> "$origin$src"
+                    }
+                    val resolved = resolveDirectStreamInternal(fullIfr, depth + 1)
+                    if (resolved != null) {
+                        streamCache[serverUrl] = resolved
+                        return resolved
+                    }
+                }
+            }
+
+            // 4. Hex decoding check
+            val hexRegex = Regex("""["'](68747470[0-9a-fA-F]{30,})["']""")
+            hexRegex.findAll(gHtml).forEach { m ->
+                val hex = m.groupValues[1]
+                val dec = hexToString(hex)
+                if (dec.startsWith("http") && (dec.contains(".m3u8") || dec.contains(".mp4"))) {
+                    streamCache[serverUrl] = dec
+                    return dec
+                }
+            }
+
+            // 5. JWPlayer / videojs regex
+            val jwRegex = Regex("""(?:file|sources|src)\s*:\s*(?:\[\s*\{[^}]*?file\s*:\s*["']([^"']+)["']|\[\s*["']([^"']+)["']|["']([^"']+\.(?:mp4|m3u8)[^"']*)["'])""", RegexOption.IGNORE_CASE)
+            jwRegex.find(gHtml)?.let { jm ->
+                val cand = jm.groupValues.drop(1).firstOrNull { it.isNotBlank() }
+                if (cand != null && cand.startsWith("http")) {
+                    streamCache[serverUrl] = cand
+                    return cand
+                }
+            }
         } catch (_: Exception) {}
-
         return null
-
     }
-
-
 
     private fun hexToString(hex: String): String {
 
@@ -986,13 +1211,23 @@ object ArabseedRepository {
 
 
 
-        val resp = client.newCall(req).execute()
-
-        val body = resp.body?.string() ?: throw IOException("Empty response")
-
-        if (resp.code !in 200..299) throw IOException("${resp.code}")
-
-        return body
+        val host = runCatching { java.net.URI.create(urlStr).host.orEmpty() }.getOrDefault("invalid-url")
+        return try {
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    android.util.Log.w(TAG, "HTTP ${resp.code} for host=$host")
+                    throw IOException("HTTP ${resp.code}")
+                }
+                val body = resp.body?.string() ?: throw IOException("Empty response")
+                if (body.isBlank()) android.util.Log.w(TAG, "Empty HTML response for host=$host")
+                body
+            }
+        } catch (error: Exception) {
+            if (error !is IOException || !error.message.orEmpty().startsWith("HTTP ")) {
+                android.util.Log.w(TAG, "Fetch failed for host=$host (${error.javaClass.simpleName})")
+            }
+            throw error
+        }
 
     }
 
@@ -1006,7 +1241,9 @@ object ArabseedRepository {
 
         val doc = Jsoup.parse(html, BASE_URL)
 
-        val elements = doc.select("a.movie__block, .item__contents a, .movie-item a, article a, .postDiv a")
+        // MySeed's current series catalog uses a new card template and /selary/ links;
+        // without this selector the series page downloaded successfully but parsed no rows.
+        val elements = doc.select("a.movie__block, .item__contents a, .movie-item a, article a, .postDiv a, .innov-series-card a")
 
         val items = mutableListOf<ArabseedItem>()
 
@@ -1123,29 +1360,36 @@ object ArabseedRepository {
 
 
     private fun parseOverview(html: String): String {
-
         if (html.isBlank()) return ""
-
         val doc = Jsoup.parse(html)
-
-        doc.selectFirst(STORY_SEL)?.text()?.let { cleanStoryText(it).takeIf { t -> t.length > 20 }?.let { return it } }
-
-        for (b in _storyFallbacks) {
-
-            val sel = X.s(b)
-
-            val txt = doc.selectFirst(sel)?.text()?.let { cleanStoryText(it) } ?: ""
-
-            if (txt.length > 25 && !txt.contains("اسرع موقع")) {
-
-                return txt
-
+        val modernSelectors = listOf(
+            ".post__story p",
+            ".post__story",
+            ".post__content",
+            ".story",
+            ".overview",
+            ".description",
+            "div.content p",
+            "div.entry-content p"
+        )
+        for (sel in modernSelectors) {
+            val el = doc.selectFirst(sel)
+            if (el != null) {
+                val t = cleanStoryText(el.text())
+                if (t.length > 20 && !t.contains("حقوق الطبع") && !t.contains("dmca") && !t.contains("اسرع موقع")) {
+                    return t
+                }
             }
-
         }
-
+        doc.selectFirst(STORY_SEL)?.text()?.let { cleanStoryText(it).takeIf { t -> t.length > 20 }?.let { return it } }
+        for (b in _storyFallbacks) {
+            val sel = X.s(b)
+            val txt = doc.selectFirst(sel)?.text()?.let { cleanStoryText(it) } ?: ""
+            if (txt.length > 25 && !txt.contains("اسرع موقع")) {
+                return txt
+            }
+        }
         return ""
-
     }
 
 
@@ -1158,109 +1402,100 @@ object ArabseedRepository {
 
 
 
-    private fun parseServersFast(html: String): List<ArabseedServer> {
-
+        private fun parseServersFast(html: String): List<ArabseedServer> {
         val servers = mutableListOf<ArabseedServer>()
-
         val doc = Jsoup.parse(html)
 
-
-
-        for (el in doc.select(SEL_DLINK)) {
-
-            val link = el.attr(DLINK_ATTR).trim()
-
-            val name = el.text().trim().ifBlank { "سيرفر ${servers.size + 1}" }
-
-            if (link.isNotBlank() && link.startsWith(P_HTTP) && !isAdUrl(link))
-
-                if (servers.none { it.embedUrl == link }) servers += ArabseedServer(name, link)
-
+        fun cleanServerName(rawName: String, url: String): String {
+            val u = url.lowercase()
+            return when {
+                u.contains("vids.php") || u.contains("player-gateway") -> "سيرفر ماي سيد (فائق السرعة ⚡)"
+                u.contains("bysezejataos") || u.contains("vidsharing") -> "Vidsharing (فائق السرعة ⚡)"
+                u.contains("uqload") -> "uqload (سريع)"
+                u.contains("voe.") -> "voe (سريع)"
+                u.contains("vidara.") || u.contains("sugbaioug.") -> "vidara (سريع)"
+                u.contains("vinvo.") -> "Vinvo (سريع)"
+                u.contains("vidmoly.") -> "Vidmoly (سريع)"
+                u.contains("playtube.") -> "Playtube"
+                u.contains("dsvplay.") -> "DSV Play"
+                rawName.isNotBlank() && !rawName.startsWith("سيرفر") -> rawName
+                else -> "سيرفر ${servers.size + 1}"
+            }
         }
 
-
-
-        for (el in doc.select("$SEL_DURL, $SEL_DSRC, $SEL_DEMBED")) {
-
-            val link = el.attr(R_DURL).ifBlank { el.attr(R_DEMBED).ifBlank { el.attr(R_DSRC) } }.trim()
-
-            val name = el.text().trim().ifBlank { "سيرفر ${servers.size + 1}" }
-
-            if (link.isNotBlank() && link.startsWith(P_HTTP) && !isAdUrl(link))
-
-                if (servers.none { it.embedUrl == link }) servers += ArabseedServer(name, link)
-
+        // 1. Elements with data-link
+        for (el in doc.select("[data-link], $SEL_DLINK, ul.servers li, .watch-servers li, #servers li, .servers li")) {
+            var link = el.attr("data-link").ifBlank { el.attr(DLINK_ATTR) }.trim()
+            val rawName = el.attr("data-server-name").ifBlank { el.text() }.trim()
+            if (link.isNotBlank() && !isAdUrl(link)) {
+                if (link.contains("id=")) {
+                    val b64 = link.substringAfter("id=").substringBefore("&")
+                    try {
+                        val decoded = String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT)).trim()
+                        if (decoded.startsWith("http")) link = decoded
+                    } catch (_: Exception) {}
+                }
+                val full = when {
+                    link.startsWith("http://") || link.startsWith("https://") -> link
+                    link.startsWith("//") -> "https:$link"
+                    link.startsWith("/") -> "${BASE_URL.trimEnd('/')}$link"
+                    else -> "${BASE_URL.trimEnd('/')}/$link"
+                }
+                val serverName = cleanServerName(rawName, full)
+                if (servers.none { it.embedUrl == full }) servers += ArabseedServer(serverName, full)
+            }
         }
 
-
-
-        for (ifr in doc.select(SEL_IFRAME)) {
-
-            val src = ifr.attr(R_ISRC).ifBlank { ifr.attr(R_DSRC) }.trim()
-
-            if (src.isNotBlank() && src.startsWith(P_HTTP) && !isAdUrl(src))
-
-                if (servers.none { it.embedUrl == src }) servers += ArabseedServer("سيرفر رئيسي", src)
-
+        // 2. Elements with data-url, data-src, data-embed
+        for (el in doc.select("$SEL_DURL, $SEL_DSRC, $SEL_DEMBED, [data-url], [data-src], [data-embed]")) {
+            val link = el.attr(R_DURL).ifBlank { el.attr(R_DEMBED).ifBlank { el.attr(R_DSRC).ifBlank { el.attr("data-url").ifBlank { el.attr("data-embed") } } } }.trim()
+            val rawName = el.attr("data-server-name").ifBlank { el.text() }.trim()
+            if (link.isNotBlank() && (link.startsWith("http") || link.startsWith("/")) && !isAdUrl(link)) {
+                val full = if (link.startsWith("http")) link else "${BASE_URL.trimEnd('/')}/" + link.trimStart('/')
+                val serverName = cleanServerName(rawName, full)
+                if (servers.none { it.embedUrl == full }) servers += ArabseedServer(serverName, full)
+            }
         }
 
+        // 3. Iframes
+        for (ifr in doc.select("iframe, $SEL_IFRAME")) {
+            val src = ifr.attr("src").ifBlank { ifr.attr(R_ISRC).ifBlank { ifr.attr(R_DSRC) } }.trim()
+            if (src.isNotBlank() && !isAdUrl(src)) {
+                val fullSrc = when {
+                    src.startsWith("http://") || src.startsWith("https://") -> src
+                    src.startsWith("//") -> "https:$src"
+                    src.startsWith("/") -> "${BASE_URL.trimEnd('/')}$src"
+                    else -> "${BASE_URL.trimEnd('/')}/$src"
+                }
+                val serverName = cleanServerName("سيرفر تشغيل", fullSrc)
+                if (servers.none { it.embedUrl == fullSrc }) servers += ArabseedServer(serverName, fullSrc)
+            }
+        }
 
-
-        return servers.take(8)
-
+        return servers.take(10)
     }
-
-
 
     private fun b(vararg ints: Int): ByteArray = ByteArray(ints.size) { ints[it].toByte() }
 
 
 
-    private val _badPatterns: List<String> by lazy {
-
-        listOf(
-
-            X.s(byteArrayOf(5, 159.toByte(), 155.toByte(), 43, 37, 184.toByte(), 190.toByte(), 50, 203.toByte(), 197.toByte(), 222.toByte())),
-
-            X.s(byteArrayOf(138.toByte(), 159.toByte(), 144.toByte(), 165.toByte(), 37, 184.toByte(), 182.toByte(), 184.toByte(), 78, 68, 221.toByte(), 211.toByte(), 235.toByte(), 104, 225.toByte(), 253.toByte(), 118)),
-
-            X.s(byteArrayOf(138.toByte(), 159.toByte(), 144.toByte(), 165.toByte(), 37, 184.toByte(), 55, 180.toByte(), 194.toByte(), 192.toByte(), 217.toByte(), 81, 235.toByte(), 239.toByte(), 231.toByte(), 119)),
-
-            X.s(byteArrayOf(135.toByte(), 28, 154.toByte(), 170.toByte(), 40, 63, 185.toByte(), 183.toByte(), 205.toByte())),
-
-            X.s(byteArrayOf(135.toByte(), 28, 154.toByte(), 34, 161.toByte(), 49, 54, 180.toByte())),
-
-            X.s(byteArrayOf(15, 159.toByte(), 25, 168.toByte(), 33, 177.toByte())),
-
-            X.s(byteArrayOf(15, 159.toByte(), 25, 171.toByte(), 163.toByte(), 177.toByte(), 57)),
-
-            X.s(byteArrayOf(129.toByte(), 159.toByte(), 16, 170.toByte(), 41, 186.toByte(), 176.toByte())),
-
-            X.s(byteArrayOf(133.toByte(), 18, 144.toByte(), 171.toByte(), 37, 190.toByte(), 190.toByte(), 179.toByte())),
-
-            X.s(byteArrayOf(15, 21, 144.toByte(), 32, 161.toByte(), 60, 59, 182.toByte(), 68, 198.toByte(), 91, 219.toByte())),
-
-            X.s(byteArrayOf(129.toByte(), 146.toByte(), 18, 170.toByte(), 168.toByte(), 48, 28, 48, 205.toByte(), 64, 81)),
-
-            X.s(byteArrayOf(135.toByte(), 152.toByte(), 154.toByte(), 34, 40, 186.toByte(), 190.toByte(), 179.toByte(), 201.toByte(), 198.toByte(), 88, 212.toByte(), 235.toByte())),
-
-            X.s(byteArrayOf(13, 21, 145.toByte(), 37, 46, 190.toByte(), 190.toByte(), 51, 197.toByte(), 71, 222.toByte(), 220.toByte())),
-
-        )
-
-    }
-
-
+    private val AD_PATTERNS = listOf(
+        "doubleclick", "googlead", "googlesyndication", "popads", "adsterra",
+        "propellerads", "monetag", "trafficjunky", "histats", "onclickmega",
+        "ad-maven", "adcash", "exoclick", "juicyads", "bet365", "1xbet", "melbet",
+        "facebook.com", "twitter.com", "instagram.com", "llvpn.com", "syndication",
+        "vidoomy", "adservice", "adsystem", "onclick", "popunder", "banner",
+        "track.", "ads.", "analytics", "coinhive", "adtrue", "revenuehits"
+    )
 
     private fun isAdUrl(url: String): Boolean {
-
-        val lower = url.lowercase()
-
-        return _badPatterns.any { lower.contains(it) }
-
+        val parsed = runCatching { java.net.URI.create(url) }.getOrNull() ?: return false
+        val host = parsed.host.orEmpty().lowercase(java.util.Locale.ROOT)
+        if (AD_PATTERNS.any { host.contains(it.lowercase(java.util.Locale.ROOT)) }) return true
+        val path = parsed.path.orEmpty()
+        return Regex("(?i)(^|/)(ads?|advert|banner|popunder|onclick|tracking|analytics)(/|$)")
+            .containsMatchIn(path)
     }
-
-
 
     private fun cleanTitle(raw: String): String =
 

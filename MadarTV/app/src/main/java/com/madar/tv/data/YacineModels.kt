@@ -37,5 +37,6 @@ data class YacineStream(
     val url: String,
     val userAgent: String,
     val referer: String,
-    val urlType: Int
+    val urlType: Int,
+    val headers: Map<String, String> = emptyMap(),
 )

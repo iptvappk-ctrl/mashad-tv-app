@@ -37,17 +37,17 @@ export default function Sidebar({
   selectedGenre,
 }: SidebarProps) {
   return (
-    <aside className="w-full lg:w-72 bg-[#0D111A] border border-[#1D273B] p-4 sm:p-5 rounded-3xl flex flex-col gap-6 flex-shrink-0 select-none shadow-2xl">
+    <aside className="w-full lg:w-72 bg-[#12131D] border border-amber-500/20 p-4 sm:p-5 rounded-3xl flex flex-col gap-6 flex-shrink-0 select-none shadow-2xl">
       {/* ── Search Input Box ────────────────────────────────────────── */}
       <div className="relative">
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="ابحث في مكتبة مَشْهَد..."
-          className="w-full bg-[#121824] border border-[#1D273B] text-xs text-white placeholder-gray-400 py-3 pr-10 pl-4 rounded-2xl focus:outline-none focus:border-[#E5B842] focus:ring-1 focus:ring-[#E5B842] transition"
+          placeholder="ابحث في مكتبة زقزوقة..."
+          className="w-full bg-[#161726] border border-amber-500/20 text-xs text-white placeholder-slate-400 py-3 pr-10 pl-4 rounded-2xl focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition"
         />
-        <Search size={16} className="absolute right-3.5 top-3.5 text-gray-400 pointer-events-none" />
+        <Search size={16} className="absolute right-3.5 top-3.5 text-amber-400/60 pointer-events-none" />
       </div>
 
       {/* ── Primary Navigation Links ─────────────────────────────────── */}

@@ -5,21 +5,24 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
-  --page: #f5f7fb;
-  --surface: #ffffff;
-  --surface-soft: #f0f3f9;
-  --ink: #182238;
-  --muted: #68758a;
-  --line: #e4e9f1;
-  --brand: #4d5fd1;
-  --brand-dark: #3748ae;
-  --brand-soft: #edf0ff;
-  --mint: #128b78;
+  color-scheme: dark;
+  --page: #090A0E;
+  --surface: #12131D;
+  --surface-soft: #181926;
+  --ink: #F9FAFB;
+  --muted: #9CA3AF;
+  --line: rgba(212, 175, 55, 0.15);
+  --brand: #D4AF37;
+  --brand-gold: #F59E0B;
+  --mint: #10B981;
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; color-scheme: light; }
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+  background-color: #090A0E;
+}
 body {
   color: var(--ink);
   background: var(--page);
@@ -33,31 +36,39 @@ button { -webkit-tap-highlight-color: transparent; }
 img { color: transparent; }
 
 ::-webkit-scrollbar { width: 7px; height: 7px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #cbd3e1; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #8795ae; }
+::-webkit-scrollbar-track { background: #090A0E; }
+::-webkit-scrollbar-thumb { background: #1F2232; border-radius: 8px; border: 1px solid rgba(212, 175, 55, 0.15); }
+::-webkit-scrollbar-thumb:hover { background: #D4AF37; }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
 .skeleton-shimmer {
-  background: linear-gradient(100deg, #edf0f6 25%, #f8f9fc 50%, #edf0f6 75%);
+  background: linear-gradient(100deg, #12131D 25%, #1D1F2F 50%, #12131D 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
+
 .glass-card {
-  background: #ffffff;
-  box-shadow: 0 8px 26px rgba(35, 49, 78, 0.06);
+  background: rgba(18, 19, 29, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(212, 175, 55, 0.14);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
 }
-.live-tv-light .text-white { color: #1f293b; }
-.live-tv-light .text-gray-300 { color: #475569; }
-.live-tv-light .text-gray-400 { color: #68758a; }
-.live-tv-light .hover\:text-white:hover { color: #1f293b; }
-.live-tv-light .bg-black\/60 .text-white,
-.live-tv-light .bg-black\/70 .text-white,
-.live-tv-light .bg-black\/75 .text-white,
-.live-tv-light .bg-red-500.text-white,
-.live-tv-light .bg-red-600.text-white,
-.live-tv-light .bg-gray-800.text-gray-300 { color: #ffffff; }
+
+.gold-glow {
+  box-shadow: 0 0 25px rgba(212, 175, 55, 0.25);
+}
+
+.gold-border {
+  border: 1px solid rgba(212, 175, 55, 0.2);
+}
+
+.gold-border-hover:hover {
+  border-color: rgba(212, 175, 55, 0.5);
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.18);
+}
+
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 @media (prefers-reduced-motion: reduce) {

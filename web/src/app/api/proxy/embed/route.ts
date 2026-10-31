@@ -6,11 +6,11 @@ export const dynamic = "force-dynamic";
 
 function getRefererForUrl(targetUrl: string): string {
   if (targetUrl.includes("akw.cam") || targetUrl.includes("akwam")) return "https://akw.cam/";
-  if (targetUrl.includes("wecima") || targetUrl.includes("myweecima")) return "https://myweecima.beauty/";
+  if (targetUrl.includes("wecima") || targetUrl.includes("myweecima")) return "https://myweecima.casa/";
   if (targetUrl.includes("fasel") || targetUrl.includes("fasel4k")) return "https://wb49584.fasel4k.site/";
   if (targetUrl.includes("egybest")) return "https://egybest.mx/";
-  if (targetUrl.includes("lodynet")) return "https://lodynet.art/";
-  if (targetUrl.includes("brstej")) return "https://brstej.surf/";
+  if (targetUrl.includes("lodynet")) return "https://lodynet.watch/";
+  if (targetUrl.includes("brstej")) return "https://brsteej.casa/";
   if (targetUrl.includes("q-ask") || targetUrl.includes("esheeq") || targetUrl.includes("3sk")) return "https://e.q-ask.video/";
   if (targetUrl.includes("uqload")) return "https://uqload.com/";
   if (targetUrl.includes("doodstream") || targetUrl.includes("dood")) return "https://doodstream.com/";
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
 
     // Clean player CSS: make video fill 100% of container, hide annoying ads/overlays
     const customStyle = `
-      <style id="mashad-embed-style">
+      <style id="zakzouka-embed-style">
         * { box-sizing: border-box !important; }
         html, body {
           width: 100vw !important;

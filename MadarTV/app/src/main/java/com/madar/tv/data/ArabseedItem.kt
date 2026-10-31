@@ -1,5 +1,8 @@
 package com.madar.tv.data
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class ArabCategory(
     val id: String,
     val title: String,
@@ -7,6 +10,7 @@ data class ArabCategory(
     val icon: String = "",
 )
 
+@Immutable
 data class ArabseedItem(
     val id: String,
     val title: String,
@@ -29,6 +33,7 @@ data class ArabseedItem(
 
 enum class ArabseedType { MOVIE, SERIES }
 
+@Immutable
 data class ArabseedDetail(
     val item: ArabseedItem,
     val servers: List<ArabseedServer>,
@@ -38,6 +43,7 @@ data class ArabseedDetail(
     override fun toString(): String = item.id
 }
 
+@Immutable
 data class ArabseedServer(
     val name: String,
     val embedUrl: String,
@@ -48,6 +54,7 @@ data class ArabseedServer(
 
 // ── Seasons & Episodes ────────────────────────────────────────────────────────
 
+@Immutable
 data class ArabseedEpisode(
     val number: Int,
     val title: String,
@@ -55,12 +62,14 @@ data class ArabseedEpisode(
     val seasonNumber: Int = 1,
 )
 
+@Immutable
 data class ArabseedSeason(
     val number: Int,
     val title: String,
     val episodes: List<ArabseedEpisode>,
 )
 
+@Immutable
 data class ArabseedSeasonBundle(
     val seasons: List<ArabseedSeason>,
     val relatedParts: List<ArabseedItem> = emptyList(), // e.g. "الجزء الثاني", "الموسم 2"
@@ -68,54 +77,55 @@ data class ArabseedSeasonBundle(
 
 object ArabseedCategories {
     val MAIN_TABS = listOf(
-        ArabCategory("home", "الرئيسية", "home/"),
-        ArabCategory("series", "المسلسلات", "%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/"),
-        ArabCategory("movies", "الافلام", "%d8%a7%d9%81%d9%84%d8%a7%d9%85/"),
-        ArabCategory("anime", "انمي", "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/"),
-        ArabCategory("ramadan", "رمضان", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2026/"),
+        ArabCategory("home", "الرئيسية", "main/"),
+        ArabCategory("series", "المسلسلات", "series/"),
+        ArabCategory("movies", "الافلام", "movies/"),
+        ArabCategory("anime", "انمي", "category/animation-movies/"),
+        ArabCategory("ramadan", "رمضان", "category/مسلسلات-رمضان/"),
         ArabCategory("variety", "منوعات", "category/%d8%a8%d8%b1%d8%a7%d9%85%d8%ac-%d8%aa%d9%84%d9%81%d8%b2%d9%8a%d9%88%d9%86%d9%8a%d8%a9/"),
     )
 
     fun getSubCategories(mainTabId: String): List<ArabCategory> = when (mainTabId) {
         "home" -> listOf(
-            ArabCategory("all", "تصفح الكل", "home/"),
+            ArabCategory("all", "تصفح الكل", "main/"),
             ArabCategory("trending", "الأكثر مشاهدة", "trend/"),
             ArabCategory("recent", "أضيف حديثاً", "recently/"),
         )
         "series" -> listOf(
-            ArabCategory("all_series", "كل المسلسلات", "%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/"),
-            ArabCategory("foreign_series", "مسلسلات اجنبي", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/"),
-            ArabCategory("turkish_series", "مسلسلات تركية", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/"),
-            ArabCategory("arabic_series", "مسلسلات عربي", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b9%d8%b1%d8%a8%d9%8a/"),
-            ArabCategory("asian_series", "مسلسلات اسيوية", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/"),
-            ArabCategory("indian_series", "مسلسلات هندية", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d8%a9/"),
-            ArabCategory("dubbed_series", "مسلسلات مدبلجة", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/"),
+            ArabCategory("all_series", "كل المسلسلات", "series/"),
+            ArabCategory("foreign_series", "مسلسلات اجنبي", "category/foreign-series/"),
+            ArabCategory("turkish_series", "مسلسلات تركي", "category/turkish-series/"),
+            ArabCategory("arabic_series", "مسلسلات عربي", "category/arabic-series/"),
+            ArabCategory("asian_series", "مسلسلات اسيوية", "category/مسلسلات-كوريه/"),
+            ArabCategory("indian_series", "مسلسلات هندية", "category/مسلسلات-هندية/"),
+            ArabCategory("dubbed_series", "مسلسلات مدبلجة", "category/dubbed-series/"),
         )
         "movies" -> listOf(
-            ArabCategory("all_movies", "كل الأفلام", "%d8%a7%d9%81%d9%84%d8%a7%d9%85/"),
-            ArabCategory("foreign_movies", "افلام اجنبي", "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/"),
-            ArabCategory("arabic_movies", "افلام عربي", "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/"),
-            ArabCategory("turkish_movies", "افلام تركية", "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/"),
-            ArabCategory("asian_movies", "افلام اسيوية", "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/"),
-            ArabCategory("indian_movies", "افلام هندي", "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a/"),
+            ArabCategory("all_movies", "كل الافلام", "movies/"),
+            ArabCategory("foreign_movies", "افلام اجنبي", "category/foreign-movies/"),
+            ArabCategory("arabic_movies", "افلام عربي", "category/arabic-movies/"),
+            ArabCategory("turkish_movies", "افلام تركي", "category/turkish-movies/"),
+            ArabCategory("asian_movies", "افلام اسيوية", "category/asian-movies/"),
+            ArabCategory("indian_movies", "افلام هندي", "category/indian-movies/"),
+            ArabCategory("animation_movies", "افلام انميشن", "category/animation-movies/"),
+            ArabCategory("dubbed_movies", "افلام مدبلجة", "category/dubbed-movies/"),
         )
         "anime" -> listOf(
-            ArabCategory("anime_movies", "افلام انمي", "category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a/"),
-            ArabCategory("anime_series", "مسلسلات انمي", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d9%86%d9%85%d9%8a/"),
+            ArabCategory("anime_movies", "افلام انمي", "category/animation-movies/"),
+            ArabCategory("anime_series", "مسلسلات انمي", "category/cartoon-series/"),
         )
         "ramadan" -> listOf(
-            ArabCategory("ramadan_2026", "مسلسلات رمضان 2026", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2026/"),
-            ArabCategory("ramadan_2025", "مسلسلات رمضان 2025", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2025/"),
-            ArabCategory("ramadan_2024", "مسلسلات رمضان 2024", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2024/"),
-            ArabCategory("ramadan_2023", "مسلسلات رمضان 2023", "category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2023/"),
-            ArabCategory("ramadan_2022", "مسلسلات رمضان 2022", "category/%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2022/"),
+            ArabCategory("ramadan_2026", "مسلسلات رمضان 2026", "category/مسلسلات-رمضان/ramadan-series-2026/"),
+            ArabCategory("ramadan_2025", "مسلسلات رمضان 2025", "category/مسلسلات-رمضان/ramadan-series-2025/"),
+            ArabCategory("ramadan_2024", "مسلسلات رمضان 2024", "category/مسلسلات-رمضان/ramadan-series-2024/"),
+            ArabCategory("ramadan_2023", "مسلسلات رمضان 2023", "category/مسلسلات-رمضان/ramadan-series-2023/"),
         )
         "variety" -> listOf(
             ArabCategory("tv_shows", "برامج تلفزيونية", "category/%d8%a8%d8%b1%d8%a7%d9%85%d8%ac-%d8%aa%d9%84%d9%81%d8%b2%d9%8a%d9%88%d9%86%d9%8a%d8%a9/"),
-            ArabCategory("wrestling", "عروض مصارعة", "category/%d8%b9%d8%b1%d9%88%d8%b6-%d9%85%d8%b5%d8%a7%d8%b1%d8%b9%d8%a9/"),
+            ArabCategory("wrestling", "عروض مصارعة", "category/wwe-shows/"),
         )
         else -> listOf(
-            ArabCategory("all", "تصفح الكل", "home/"),
+            ArabCategory("all", "تصفح الكل", "main/"),
         )
     }
 }

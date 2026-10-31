@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.madar.tv.data.FootballMatch
-import com.madar.tv.ui.theme.MashadColors
+import com.madar.tv.ui.theme.ZakzoukaColors
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -66,21 +66,50 @@ fun FootballMatchesWidget(
         }
     }
 
-    val liveAndUpcoming = remember(matches, currentTime) {
+    // Today midnight boundaries (local time)
+    val todayStart = remember(currentTime) {
+        java.util.Calendar.getInstance().apply {
+            timeInMillis = currentTime
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+    val todayEnd = remember(todayStart) { todayStart + 24 * 60 * 60 * 1000L }
+
+    // All today matches only
+    val todayMatches = remember(matches, todayStart, todayEnd) {
         matches.filter { m ->
-            m.state == "in" || m.state == "pre" ||
-            (m.kickoffEpochMs != null && m.kickoffEpochMs > currentTime - 2 * 60 * 60 * 1000)
+            m.state == "in" ||
+            (m.kickoffEpochMs != null && m.kickoffEpochMs >= todayStart && m.kickoffEpochMs < todayEnd)
+        }
+    }
+
+    // 1. Live + upcoming (strictly not finished)
+    val liveAndUpcoming = remember(todayMatches, currentTime) {
+        todayMatches.filter { m ->
+            m.state == "in" || (m.state != "post" && (m.kickoffEpochMs == null || m.kickoffEpochMs > currentTime - (130 * 60 * 1000L)))
         }.sortedWith(compareBy(
-            // live first
             { if (it.state == "in") 0 else 1 },
-            // then by kickoff time
             { it.kickoffEpochMs ?: Long.MAX_VALUE }
         ))
+    }
+
+    // 2. Finished today — strictly at the bottom
+    val finishedToday = remember(todayMatches, currentTime) {
+        todayMatches.filter { m ->
+            m.state == "post" ||
+            (m.state != "in" && m.kickoffEpochMs != null && m.kickoffEpochMs <= currentTime - (130 * 60 * 1000L))
+        }.sortedByDescending { it.kickoffEpochMs ?: 0L }
     }
 
     val filtered = remember(liveAndUpcoming, selectedFilter) {
         if (selectedFilter == "الكل") liveAndUpcoming
         else liveAndUpcoming.filter { it.leagueName.contains(selectedFilter, ignoreCase = true) }
+    }
+
+    val filteredFinished = remember(finishedToday, selectedFilter) {
+        if (selectedFilter == "الكل") finishedToday
+        else finishedToday.filter { it.leagueName.contains(selectedFilter, ignoreCase = true) }
     }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(0.dp)) {
@@ -90,7 +119,7 @@ fun FootballMatchesWidget(
             Modifier.fillMaxWidth()
                 .background(
                     Brush.horizontalGradient(
-                        listOf(MashadColors.Surface, MashadColors.SurfaceCard)
+                        listOf(ZakzoukaColors.Surface, ZakzoukaColors.SurfaceCard)
                     )
                 )
                 .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -98,22 +127,22 @@ fun FootballMatchesWidget(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(MashadColors.LiveGreen))
+                Box(Modifier.size(10.dp).clip(CircleShape).background(ZakzoukaColors.LiveGreen))
                 Text(
                     "المباريات القادمة والمباشرة",
-                    color = MashadColors.GoldLight, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    color = ZakzoukaColors.GoldLight, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                 )
             }
             Row(
                 Modifier.clip(RoundedCornerShape(20.dp))
-                    .background(MashadColors.Gold.copy(alpha = 0.12f))
-                    .border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(20.dp))
+                    .background(ZakzoukaColors.Gold.copy(alpha = 0.12f))
+                    .border(1.dp, ZakzoukaColors.GoldBorder, RoundedCornerShape(20.dp))
                     .clickable(onClick = onRefresh)
                     .padding(horizontal = 14.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text("تحديث", color = MashadColors.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("تحديث", color = ZakzoukaColors.Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Text("🔄", fontSize = 11.sp)
             }
         }
@@ -122,27 +151,27 @@ fun FootballMatchesWidget(
         Row(
             Modifier.fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .background(MashadColors.Surface)
+                .background(ZakzoukaColors.Surface)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             LEAGUE_FILTERS.forEach { league ->
                 val sel = selectedFilter == league
                 val chipBg by animateColorAsState(
-                    if (sel) MashadColors.Gold else MashadColors.SurfaceCard,
+                    if (sel) ZakzoukaColors.Gold else ZakzoukaColors.SurfaceCard,
                     label = "chip",
                 )
                 Box(
                     Modifier.clip(RoundedCornerShape(20.dp))
                         .background(chipBg)
-                        .border(1.dp, if (sel) MashadColors.Gold else MashadColors.GoldBorder, RoundedCornerShape(20.dp))
+                        .border(1.dp, if (sel) ZakzoukaColors.Gold else ZakzoukaColors.GoldBorder, RoundedCornerShape(20.dp))
                         .clickable { selectedFilter = league }
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         league,
-                        color = if (sel) Color.White else MashadColors.TextMuted,
+                        color = if (sel) Color.White else ZakzoukaColors.TextMuted,
                         fontSize = 11.sp,
                         fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal,
                     )
@@ -151,21 +180,21 @@ fun FootballMatchesWidget(
         }
 
         // Divider
-        Box(Modifier.fillMaxWidth().height(1.dp).background(MashadColors.GoldBorder.copy(alpha = 0.3f)))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(ZakzoukaColors.GoldBorder.copy(alpha = 0.3f)))
 
         // ── Match List ───────────────────────────────────────────────────────
         when {
-            loading -> MashadMatchSkeleton(Modifier.fillMaxWidth().height(180.dp))
+            loading -> ZakzoukaMatchSkeleton(Modifier.fillMaxWidth().height(180.dp))
             filtered.isEmpty() -> Box(
                 Modifier.fillMaxWidth().height(120.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("⚽", fontSize = 32.sp)
-                    Text("لا توجد مباريات قادمة حالياً", color = MashadColors.TextMuted, fontSize = 13.sp)
+                    Text("لا توجد مباريات قادمة حالياً", color = ZakzoukaColors.TextMuted, fontSize = 13.sp)
                     Text(
                         "تحديث 🔄",
-                        color = MashadColors.Gold,
+                        color = ZakzoukaColors.Gold,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable(onClick = onRefresh),
@@ -175,6 +204,23 @@ fun FootballMatchesWidget(
             else -> Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 filtered.forEach { match ->
                     FootballMatchRow(match = match, currentTime = currentTime, onClick = onMatchClick?.let { cb -> { cb(match) } })
+                }
+                // Finished matches at the bottom
+                if (filteredFinished.isNotEmpty()) {
+                    Box(
+                        Modifier.fillMaxWidth().background(ZakzoukaColors.SurfaceCard)
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "✅ مباريات انتهت اليوم",
+                            color = ZakzoukaColors.TextMuted,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    filteredFinished.forEach { match ->
+                        FootballMatchRow(match = match, currentTime = currentTime, onClick = null)
+                    }
                 }
             }
         }
@@ -187,16 +233,21 @@ fun FootballMatchesWidget(
 fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTimeMillis(), onClick: (() -> Unit)? = null) {
     val isLive = match.state == "in"
     val kickoffMs = match.kickoffEpochMs
+    val isFinished = match.state == "post" || (match.state != "in" && kickoffMs != null && kickoffMs <= currentTime - (130 * 60 * 1000L))
+    val isUpcoming = !isLive && !isFinished
+
     val timeStr = if (kickoffMs != null) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(kickoffMs))
+        SimpleDateFormat("h:mm a", Locale.forLanguageTag("ar")).apply {
+            timeZone = TimeZone.getDefault()
+        }.format(Date(kickoffMs)).replace("AM", "ص").replace("PM", "م")
     } else match.timeOrStatus
 
     val dateStr = if (kickoffMs != null) {
-        SimpleDateFormat("EEE d MMM", Locale.forLanguageTag("ar")).format(Date(kickoffMs))
+        "اليوم"
     } else ""
 
     val minutesUntil = if (kickoffMs != null) ((kickoffMs - currentTime) / 60_000).toInt() else Int.MAX_VALUE
-    val startingSoon = minutesUntil in 0..30 && !isLive
+    val startingSoon = minutesUntil in 0..30 && isUpcoming
 
     // Pulsing animation for live dot
     val infiniteTransition = rememberInfiniteTransition(label = "live_pulse")
@@ -208,16 +259,16 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
     Column(
         Modifier.fillMaxWidth()
             .let { if (onClick != null) it.clickable(onClick = onClick) else it }
-            .background(MashadColors.SurfaceCard)
+            .background(ZakzoukaColors.SurfaceCard)
             .border(
                 width = if (isLive) 1.dp else 0.dp,
-                color = if (isLive) MashadColors.LiveGreen.copy(alpha = 0.4f) else Color.Transparent,
+                color = if (isLive) ZakzoukaColors.LiveGreen.copy(alpha = 0.4f) else Color.Transparent,
             ),
     ) {
         // ── League banner ────────────────────────────────────────────────
         Row(
             Modifier.fillMaxWidth()
-                .background(if (isLive) MashadColors.LiveGreen.copy(alpha = 0.08f) else MashadColors.Surface.copy(alpha = 0.6f))
+                .background(if (isLive) ZakzoukaColors.LiveGreen.copy(alpha = 0.08f) else ZakzoukaColors.Surface.copy(alpha = 0.6f))
                 .padding(horizontal = 16.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -226,7 +277,7 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
                 Text("🏆", fontSize = 11.sp)
                 Text(
                     match.leagueName.ifBlank { "مباراة" },
-                    color = MashadColors.GoldLight,
+                    color = ZakzoukaColors.GoldLight,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -237,27 +288,37 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
             when {
                 isLive -> Row(
                     Modifier.clip(RoundedCornerShape(4.dp))
-                        .background(MashadColors.LiveGreen.copy(alpha = 0.15f))
+                        .background(ZakzoukaColors.LiveGreen.copy(alpha = 0.15f))
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(MashadColors.LiveGreen.copy(alpha = pulsAlpha)))
-                    Text("مباشر الآن", color = MashadColors.LiveGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(ZakzoukaColors.LiveGreen.copy(alpha = pulsAlpha)))
+                    Text("مباشر الآن 🔴", color = ZakzoukaColors.LiveGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+                isFinished -> Box(
+                    Modifier.clip(RoundedCornerShape(4.dp))
+                        .background(ZakzoukaColors.Surface.copy(alpha = 0.8f))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Text("انتهت ✅", color = ZakzoukaColors.TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
                 startingSoon -> Box(
                     Modifier.clip(RoundedCornerShape(4.dp))
-                        .background(MashadColors.Gold.copy(alpha = 0.15f))
+                        .background(ZakzoukaColors.Gold.copy(alpha = 0.15f))
                         .padding(horizontal = 8.dp, vertical = 2.dp),
                 ) {
                     Text(
-                        "يبدأ خلال ${minutesUntil} دقيقة",
-                        color = MashadColors.Gold, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        "تبدأ خلال ${minutesUntil} دقيقة",
+                        color = ZakzoukaColors.Gold, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                     )
                 }
-                else -> Column(horizontalAlignment = Alignment.End) {
-                    Text(timeStr, color = MashadColors.TextWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    if (dateStr.isNotBlank()) Text(dateStr, color = MashadColors.TextMuted, fontSize = 9.sp)
+                else -> Box(
+                    Modifier.clip(RoundedCornerShape(4.dp))
+                        .background(ZakzoukaColors.Gold.copy(alpha = 0.10f))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Text("قادمة اليوم ⏳", color = ZakzoukaColors.Gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -275,7 +336,7 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
             ) {
                 Text(
                     match.homeTeamArabic.ifBlank { match.homeTeam },
-                    color = MashadColors.TextWhite,
+                    color = ZakzoukaColors.TextWhite,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.End,
@@ -287,7 +348,7 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
                 AsyncImage(
                     model = match.homeLogo.ifEmpty { null },
                     contentDescription = match.homeTeam,
-                    modifier = Modifier.size(44.dp).clip(CircleShape).background(MashadColors.Surface),
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(ZakzoukaColors.Surface),
                     contentScale = ContentScale.Fit,
                 )
             }
@@ -302,7 +363,7 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             "${match.homeScore}  -  ${match.awayScore}",
-                            color = MashadColors.LiveGreen,
+                            color = ZakzoukaColors.LiveGreen,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Black,
                         )
@@ -313,12 +374,12 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
                         Box(
                             Modifier.clip(RoundedCornerShape(8.dp))
                                 .background(
-                                    if (startingSoon) MashadColors.Gold.copy(alpha = 0.12f)
-                                    else MashadColors.Surface
+                                    if (startingSoon) ZakzoukaColors.Gold.copy(alpha = 0.12f)
+                                    else ZakzoukaColors.Surface
                                 )
                                 .border(
                                     1.dp,
-                                    if (startingSoon) MashadColors.Gold.copy(alpha = 0.5f) else MashadColors.GoldBorder,
+                                    if (startingSoon) ZakzoukaColors.Gold.copy(alpha = 0.5f) else ZakzoukaColors.GoldBorder,
                                     RoundedCornerShape(8.dp),
                                 )
                                 .padding(horizontal = 10.dp, vertical = 5.dp),
@@ -326,14 +387,14 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
                         ) {
                             Text(
                                 timeStr,
-                                color = if (startingSoon) MashadColors.Gold else MashadColors.TextWhite,
+                                color = if (startingSoon) ZakzoukaColors.Gold else ZakzoukaColors.TextWhite,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                             )
                         }
                         if (dateStr.isNotBlank()) {
                             Spacer(Modifier.height(3.dp))
-                            Text(dateStr, color = MashadColors.TextMuted, fontSize = 9.sp, textAlign = TextAlign.Center)
+                            Text(dateStr, color = ZakzoukaColors.TextMuted, fontSize = 9.sp, textAlign = TextAlign.Center)
                         }
                     }
                 }
@@ -348,13 +409,13 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
                 AsyncImage(
                     model = match.awayLogo.ifEmpty { null },
                     contentDescription = match.awayTeam,
-                    modifier = Modifier.size(44.dp).clip(CircleShape).background(MashadColors.Surface),
+                    modifier = Modifier.size(44.dp).clip(CircleShape).background(ZakzoukaColors.Surface),
                     contentScale = ContentScale.Fit,
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
                     match.awayTeamArabic.ifBlank { match.awayTeam },
-                    color = MashadColors.TextWhite,
+                    color = ZakzoukaColors.TextWhite,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Start,
@@ -369,23 +430,33 @@ fun FootballMatchRow(match: FootballMatch, currentTime: Long = System.currentTim
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(if (isLive) MashadColors.LiveGreen.copy(alpha = 0.12f) else MashadColors.Surface.copy(alpha = 0.7f))
+                .background(if (isLive) ZakzoukaColors.LiveGreen.copy(alpha = 0.12f) else ZakzoukaColors.Surface.copy(alpha = 0.7f))
                 .padding(horizontal = 14.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
         ) {
+            val btnText = when {
+                isLive -> "🔴 شاهد البث المباشر الآن"
+                isFinished -> "✅ انتهت المباراة (${match.homeScore.ifBlank { "0" }} - ${match.awayScore.ifBlank { "0"}})"
+                else -> "📺 مشاهدة القناة الناقلة للمباراة (لم تبدأ بعد)"
+            }
+            val btnColor = when {
+                isLive -> ZakzoukaColors.LiveGreen
+                isFinished -> ZakzoukaColors.TextMuted
+                else -> ZakzoukaColors.Gold
+            }
             Text(
-                if (isLive) "🔴 شاهد البث المباشر الآن" else "📺 مشاهدة القناة الناقلة للمباراة",
-                color = if (isLive) MashadColors.LiveGreen else MashadColors.Gold,
+                btnText,
+                color = btnColor,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.width(6.dp))
-            Text("▶", color = if (isLive) MashadColors.LiveGreen else MashadColors.Gold, fontSize = 11.sp)
+            Text("▶", color = if (isLive) ZakzoukaColors.LiveGreen else ZakzoukaColors.Gold, fontSize = 11.sp)
         }
 
         // Divider between matches
-        Box(Modifier.fillMaxWidth().height(1.dp).background(MashadColors.GoldBorder.copy(alpha = 0.15f)))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(ZakzoukaColors.GoldBorder.copy(alpha = 0.15f)))
     }
 }
 
@@ -400,17 +471,17 @@ fun FinishedMatchesWidget(
     val finished = remember(matches) { matches.filter { it.state == "post" } }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(0.dp)) {
         Row(
-            Modifier.fillMaxWidth().background(MashadColors.Surface).padding(horizontal = 14.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().background(ZakzoukaColors.Surface).padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text("نتائج المباريات المنتهية", color = MashadColors.GoldLight, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("نتائج المباريات المنتهية", color = ZakzoukaColors.GoldLight, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
         if (loading) {
-            MashadMatchSkeleton(Modifier.fillMaxWidth().height(120.dp))
+            ZakzoukaMatchSkeleton(Modifier.fillMaxWidth().height(120.dp))
         } else if (finished.isEmpty()) {
             Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                Text("لا توجد نتائج", color = MashadColors.TextMuted, fontSize = 13.sp)
+                Text("لا توجد نتائج", color = ZakzoukaColors.TextMuted, fontSize = 13.sp)
             }
         } else {
             finished.forEach { match ->

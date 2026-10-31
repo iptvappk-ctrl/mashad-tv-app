@@ -99,10 +99,8 @@ export class MultiProviderAggregator {
     akwamProvider,
     wecimaProvider,
     faselHDProvider,
-    prestigeProvider,
     esheeqProvider,
     egybestProvider,
-    lodynetProvider,
   ];
 
   getProvider(id: string): BaseProvider | undefined {

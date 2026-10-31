@@ -36,6 +36,7 @@ export interface YacineStream {
   userAgent: string;
   referer: string;
   urlType: number;
+  headers: Record<string, string>;
 }
 
 const HARDCODED_KEY = "c!xZj+N9&G@Ev@vw";
@@ -253,12 +254,21 @@ function parseStreams(arr: any[]): YacineStream[] {
     .map((item: any) => {
       const headers = item.headers || {};
       const ua = headers["User-Agent"] || item.user_agent || UA;
+      const playbackHeaderNames = new Set(["user-agent", "referer", "origin", "accept", "accept-language"]);
+      const safeHeaders: Record<string, string> = Object.fromEntries(
+        Object.entries(headers as Record<string, unknown>)
+          .filter(([key, value]) => playbackHeaderNames.has(key.toLowerCase()) && typeof value === "string" && !/[\r\n]/.test(key + value))
+          .map(([key, value]) => [key, String(value)]),
+      ) as Record<string, string>;
+      safeHeaders["User-Agent"] = ua;
+      if (item.referer) safeHeaders.Referer = item.referer;
       return {
         name: item.name || "HD",
         url: item.url || "",
         userAgent: ua,
         referer: item.referer || "",
         urlType: item.url_type || 3,
+        headers: safeHeaders,
       };
     })
     .filter((s: YacineStream) => Boolean(s.url));

@@ -6,10 +6,10 @@ import java.net.URLDecoder
 /** Shared, conservative parsing for episode/season/part labels found in provider pages. */
 internal object SeriesCatalogParser {
     private val episodeNumberPattern = Regex(
-        """(?i)(?:الحلقة|حلقة|episode|(?<![a-z])ep)[\s._#=/:-]*([0-9]{1,4})(?![0-9])""",
+        """(?i)(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)[\s._#=/:-]*([0-9]{1,4})(?![0-9])""",
     )
     private val seasonNumberPattern = Regex(
-        """(?i)(?:الموسم|موسم|(?<![a-z])season)[\s._#=/:-]*([0-9]{1,2})(?![0-9])""",
+        """(?i)(?:الموسم|موسم|(?<![a-z])season|(?<![a-z])s)[\s._#=/:-]*([0-9]{1,2})(?![0-9])""",
     )
     private val partNumberPattern = Regex(
         """(?i)(?:الجزء|جزء|(?<![a-z])part)[\s._#=/:-]*([0-9]{1,3})(?![0-9])""",
@@ -32,7 +32,7 @@ internal object SeriesCatalogParser {
         "التاسع" to 9, "التاسعة" to 9,
         "العاشر" to 10, "العاشرة" to 10,
     )
-    private val episodeMarkerPattern = Regex("""(?i)(الحلقة|حلقة|episode|(?<![a-z])ep(?:[\s._#=/:-]|[0-9]|$))""")
+    private val episodeMarkerPattern = Regex("""(?i)(الحلقة|حلقة|episode|(?<![a-z])eps?(?:[\s._#=/:-]|[0-9]|$))""")
     private val partMarkerPattern = Regex("""(?i)(الجزء|جزء|(?<![a-z])part(?:[\s._#=/:-]|[0-9]|$))""")
 
     fun normalizeDigits(value: String): String = buildString(value.length) {
@@ -156,6 +156,34 @@ internal object SeriesCatalogParser {
         5 -> "الموسم الخامس"
         6 -> "الموسم السادس"
         else -> "الموسم $number"
+    }
+
+    /** Normalize provider and disk-cache data before the UI uses it. */
+    fun normalizeSeasonBundle(bundle: ArabseedSeasonBundle): ArabseedSeasonBundle {
+        val normalizedSeasons = bundle.seasons
+            .groupBy { it.number }
+            .toSortedMap()
+            .map { (seasonNumber, seasons) ->
+                val episodes = seasons.asSequence()
+                    .flatMap { it.episodes.asSequence() }
+                    .filter { it.number > 0 && it.pageUrl.startsWith("http", ignoreCase = true) }
+                    .distinctBy { it.number }
+                    .sortedBy { it.number }
+                    .map { episode -> episode.copy(seasonNumber = seasonNumber) }
+                    .toList()
+                ArabseedSeason(seasonNumber, seasonTitle(seasonNumber), episodes)
+            }
+            .filter { it.episodes.isNotEmpty() }
+
+        val relatedParts = bundle.relatedParts
+            .filter { it.pageUrl.startsWith("http", ignoreCase = true) }
+            .distinctBy { partNumber(it.title, it.pageUrl)?.let { n -> "part:$n" }
+                ?: normalizedUrl(it.pageUrl) }
+            .sortedWith(compareBy<ArabseedItem> {
+                partNumber(it.title, it.pageUrl) ?: Int.MAX_VALUE
+            }.thenBy { it.title.lowercase() })
+
+        return ArabseedSeasonBundle(normalizedSeasons, relatedParts)
     }
 
     fun cleanSeriesTitle(title: String): String {

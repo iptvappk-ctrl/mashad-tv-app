@@ -36,7 +36,7 @@ import coil3.compose.AsyncImage
 import com.madar.tv.data.ArabseedItem
 import com.madar.tv.data.ArabseedType
 import com.madar.tv.data.FavoritesRepository
-import com.madar.tv.ui.theme.MashadColors
+import com.madar.tv.ui.theme.ZakzoukaColors
 import kotlinx.coroutines.launch
 
 // ─── Favorites Screen ─────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ fun FavoritesScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(MashadColors.Background)
+            .background(ZakzoukaColors.Background)
     ) {
         // ── Header ────────────────────────────────────────────────────────────
         Box(
@@ -64,7 +64,7 @@ fun FavoritesScreen(
                 .statusBarsPadding()
                 .background(
                     Brush.horizontalGradient(
-                        listOf(MashadColors.Surface, MashadColors.SurfaceCard)
+                        listOf(ZakzoukaColors.Surface, ZakzoukaColors.SurfaceCard)
                     )
                 )
                 .padding(horizontal = 20.dp, vertical = 16.dp),
@@ -77,7 +77,7 @@ fun FavoritesScreen(
                     Text("❤️", fontSize = 22.sp)
                     Text(
                         "المفضلة",
-                        color = MashadColors.GoldLight,
+                        color = ZakzoukaColors.GoldLight,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -86,7 +86,7 @@ fun FavoritesScreen(
                     Spacer(Modifier.height(4.dp))
                     Text(
                         "${favorites.size} عنصر محفوظ",
-                        color = MashadColors.TextMuted,
+                        color = ZakzoukaColors.TextMuted,
                         fontSize = 12.sp,
                     )
                 }
@@ -94,7 +94,7 @@ fun FavoritesScreen(
         }
 
         // Gold divider line
-        Box(Modifier.fillMaxWidth().height(1.dp).background(MashadColors.GoldBorder.copy(alpha = 0.4f)))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(ZakzoukaColors.GoldBorder.copy(alpha = 0.4f)))
 
         // ── Content ───────────────────────────────────────────────────────────
         if (favorites.isEmpty()) {
@@ -110,14 +110,14 @@ fun FavoritesScreen(
                     Text("💔", fontSize = 64.sp)
                     Text(
                         "لا يوجد محتوى في المفضلة",
-                        color = MashadColors.TextWhite,
+                        color = ZakzoukaColors.TextWhite,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
                     )
                     Text(
                         "اضغط على ❤️ على أي فيلم أو مسلسل\nلإضافته هنا",
-                        color = MashadColors.TextMuted,
+                        color = ZakzoukaColors.TextMuted,
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center,
                         lineHeight = 20.sp,
@@ -182,8 +182,8 @@ fun FavoriteCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(10.dp))
-                .background(MashadColors.Surface)
-                .border(1.dp, MashadColors.GoldBorder, RoundedCornerShape(10.dp)),
+                .background(ZakzoukaColors.Surface)
+                .border(1.dp, ZakzoukaColors.GoldBorder, RoundedCornerShape(10.dp)),
         ) {
             // Poster
             if (item.posterUrl != null) {
@@ -215,7 +215,7 @@ fun FavoriteCard(
                         .align(Alignment.TopStart)
                         .padding(5.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(MashadColors.Gold)
+                        .background(ZakzoukaColors.Gold)
                         .padding(horizontal = 5.dp, vertical = 2.dp),
                 ) {
                     Text(item.quality, color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
@@ -246,7 +246,7 @@ fun FavoriteCard(
                     .size(26.dp)
                     .clip(CircleShape)
                     .background(Color(0xCC1A1A2E))
-                    .border(1.dp, MashadColors.Red.copy(alpha = 0.6f), CircleShape)
+                    .border(1.dp, ZakzoukaColors.Red.copy(alpha = 0.6f), CircleShape)
                     .clickable { onRemove() },
                 contentAlignment = Alignment.Center,
             ) {
@@ -271,7 +271,7 @@ fun FavoriteCard(
         // Title
         Text(
             text = item.arabicTitle.ifBlank { item.title },
-            color = MashadColors.TextWhite,
+            color = ZakzoukaColors.TextWhite,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 2,
@@ -313,12 +313,12 @@ fun FavoriteHeartButton(
             .size(size.dp)
             .clip(CircleShape)
             .background(
-                if (isFav) MashadColors.Red.copy(alpha = 0.18f)
+                if (isFav) ZakzoukaColors.Red.copy(alpha = 0.18f)
                 else Color(0xCC000000)
             )
             .border(
                 1.dp,
-                if (isFav) MashadColors.Red.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.2f),
+                if (isFav) ZakzoukaColors.Red.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.2f),
                 CircleShape,
             )
             .clickable {

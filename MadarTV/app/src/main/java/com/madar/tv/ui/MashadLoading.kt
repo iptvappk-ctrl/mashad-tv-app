@@ -1,11 +1,5 @@
 package com.madar.tv.ui
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +21,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,10 +31,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
-import com.madar.tv.ui.theme.MashadColors
+import com.madar.tv.ui.theme.ZakzoukaColors
 
 @Composable
-fun MashadCatalogSkeleton(modifier: Modifier = Modifier) {
+fun ZakzoukaCatalogSkeleton(modifier: Modifier = Modifier) {
     val shimmer = rememberShimmerOffset()
     LazyColumn(
         modifier = modifier,
@@ -54,7 +47,7 @@ fun MashadCatalogSkeleton(modifier: Modifier = Modifier) {
                 Box(
                     Modifier.fillMaxWidth().height(190.dp)
                         .clip(RoundedCornerShape(22.dp))
-                        .background(MashadColors.SurfaceHighlight)
+                        .background(ZakzoukaColors.SurfaceHighlight)
                         .shimmerMask(shimmer),
                 ) {
                     Column(
@@ -92,7 +85,7 @@ fun MashadCatalogSkeleton(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun MashadChannelSkeleton(modifier: Modifier = Modifier) {
+fun ZakzoukaChannelSkeleton(modifier: Modifier = Modifier) {
     val shimmer = rememberShimmerOffset()
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -104,7 +97,7 @@ fun MashadChannelSkeleton(modifier: Modifier = Modifier) {
         items(6) {
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                    .background(MashadColors.Surface).padding(12.dp),
+                    .background(ZakzoukaColors.Surface).padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(9.dp),
             ) {
@@ -117,10 +110,10 @@ fun MashadChannelSkeleton(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun MashadMatchSkeleton(modifier: Modifier = Modifier) {
+fun ZakzoukaMatchSkeleton(modifier: Modifier = Modifier) {
     val shimmer = rememberShimmerOffset()
     Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(MashadColors.Surface)
+        modifier.clip(RoundedCornerShape(16.dp)).background(ZakzoukaColors.Surface)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp),
     ) {
@@ -165,35 +158,27 @@ private fun ShimmerBlock(
 ) {
     Spacer(
         modifier.clip(shape)
-            .background(MashadColors.SurfaceHighlight)
+            .background(ZakzoukaColors.SurfaceHighlight)
             .shimmerMask(shimmer),
     )
 }
 
 @Composable
-private fun rememberShimmerOffset(): State<Float> {
-    val transition = rememberInfiniteTransition(label = "mashad-skeleton-shimmer")
-    return transition.animateFloat(
-        initialValue = -1f,
-        targetValue = 2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1350, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "shimmer-position",
-    )
-}
+private fun rememberShimmerOffset(): State<Float> = remember { androidx.compose.runtime.mutableStateOf(0f) }
 
 private fun Modifier.shimmerMask(shimmer: State<Float>): Modifier = drawWithCache {
-    val startX = (shimmer.value - 1f) * size.width
+    val width = size.width
+    val height = size.height
+    val startX = shimmer.value * width
     val brush = Brush.linearGradient(
         colors = listOf(
             Color.Transparent,
-            MashadColors.SurfaceCard.copy(alpha = 0.78f),
+            Color.White.copy(alpha = 0.55f),
+            ZakzoukaColors.GoldLight.copy(alpha = 0.35f),
             Color.Transparent,
         ),
         start = Offset(startX, 0f),
-        end = Offset(startX + size.width, size.height),
+        end = Offset(startX + width * 0.7f, height),
     )
     onDrawWithContent {
         drawContent()

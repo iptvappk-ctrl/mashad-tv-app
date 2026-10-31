@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -56,6 +57,52 @@ object FootballRepository {
     private var cachedMatches: List<FootballMatch> = emptyList()
     private var lastFetchTime = 0L
     private const val CACHE_TTL = 3 * 60 * 1000L // 3 minutes
+    private const val DISK_STALE_MS = 4L * 60 * 60 * 1000
+
+    fun loadCachedMatches(): List<FootballMatch>? {
+        if (cachedMatches.isNotEmpty()) return cachedMatches
+        val rows = CatalogDiskCache.loadJson("football:matches", DISK_STALE_MS)?.value?.optJSONArray("items") ?: return null
+        val loaded = buildList {
+            for (i in 0 until rows.length()) {
+                val row = rows.optJSONObject(i) ?: continue
+                add(FootballMatch(
+                    id = row.optString("id"),
+                    leagueName = row.optString("leagueName"),
+                    leagueCode = row.optString("leagueCode"),
+                    homeTeam = row.optString("homeTeam"),
+                    homeTeamArabic = row.optString("homeTeamArabic"),
+                    homeLogo = row.optString("homeLogo"),
+                    homeScore = row.optString("homeScore"),
+                    awayTeam = row.optString("awayTeam"),
+                    awayTeamArabic = row.optString("awayTeamArabic"),
+                    awayLogo = row.optString("awayLogo"),
+                    awayScore = row.optString("awayScore"),
+                    timeOrStatus = row.optString("timeOrStatus"),
+                    state = row.optString("state", "pre"),
+                    matchDate = row.optString("matchDate"),
+                    kickoffEpochMs = row.optLong("kickoffEpochMs").takeIf { it > 0L },
+                    league = row.optString("league"),
+                ))
+            }
+        }
+        if (loaded.isNotEmpty()) cachedMatches = loaded
+        return loaded.takeIf { it.isNotEmpty() }
+    }
+
+    private fun persistMatches(matches: List<FootballMatch>) {
+        val rows = org.json.JSONArray().apply {
+            matches.forEach { match ->
+                put(JSONObject()
+                    .put("id", match.id).put("leagueName", match.leagueName).put("leagueCode", match.leagueCode)
+                    .put("homeTeam", match.homeTeam).put("homeTeamArabic", match.homeTeamArabic).put("homeLogo", match.homeLogo)
+                    .put("homeScore", match.homeScore).put("awayTeam", match.awayTeam).put("awayTeamArabic", match.awayTeamArabic)
+                    .put("awayLogo", match.awayLogo).put("awayScore", match.awayScore).put("timeOrStatus", match.timeOrStatus)
+                    .put("state", match.state).put("matchDate", match.matchDate)
+                    .put("kickoffEpochMs", match.kickoffEpochMs ?: 0L).put("league", match.league))
+            }
+        }
+        CatalogDiskCache.saveJson("football:matches", JSONObject().put("items", rows))
+    }
 
     suspend fun fetchUpcomingMatches(forceRefresh: Boolean = false): List<FootballMatch> {
         val now = System.currentTimeMillis()
@@ -83,6 +130,7 @@ object FootballRepository {
                 if (sorted.isNotEmpty()) {
                     cachedMatches = sorted
                     lastFetchTime = now
+                    withContext(Dispatchers.IO) { persistMatches(sorted) }
                 }
                 if (sorted.isNotEmpty()) sorted else cachedMatches
             }
@@ -231,12 +279,8 @@ object FootballRepository {
 
             val timeDisplay = formatMatchTime(dateStr, state, shortDetail)
 
-            // Parse kickoff time for notification scheduling
-            val kickoffMs = try {
-                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'", Locale.US)
-                sdf.timeZone = TimeZone.getTimeZone("UTC")
-                sdf.parse(dateStr)?.time
-            } catch (_: Exception) { null }
+            // Parse kickoff time for notification scheduling and filtering
+            val kickoffMs = parseIsoDate(dateStr)?.time
 
             list += FootballMatch(
                 id = id,
@@ -259,6 +303,27 @@ object FootballRepository {
         return list
     }
 
+    fun parseIsoDate(isoDate: String): Date? {
+        val patterns = listOf(
+            "yyyy-MM-dd'T'HH:mm'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mmXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm",
+            "yyyy-MM-dd"
+        )
+        for (pattern in patterns) {
+            try {
+                val sdf = SimpleDateFormat(pattern, Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }
+                val d = sdf.parse(isoDate)
+                if (d != null) return d
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
     private fun formatMatchTime(isoDate: String, state: String, shortDetail: String): String {
         return when (state) {
             "in" -> {
@@ -270,13 +335,12 @@ object FootballRepository {
             }
             else -> {
                 try {
-                    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm'Z'", Locale.US)
-                    sdf.timeZone = TimeZone.getTimeZone("UTC")
-                    val date = sdf.parse(isoDate)
+                    val date = parseIsoDate(isoDate)
                     if (date != null) {
-                        val localFormat = SimpleDateFormat("HH:mm", Locale.US)
-                        localFormat.timeZone = TimeZone.getDefault()
-                        val timeStr = localFormat.format(date)
+                        val localFormat = SimpleDateFormat("h:mm a", Locale.forLanguageTag("ar")).apply {
+                            timeZone = TimeZone.getDefault()
+                        }
+                        val timeStr = localFormat.format(date).replace("AM", "ص").replace("PM", "م")
 
                         val calMatch = Calendar.getInstance().apply { time = date }
                         val calNow = Calendar.getInstance()
@@ -315,20 +379,30 @@ object FootballRepository {
         "Manchester United" to "مانشستر يونايتد",
         "Chelsea" to "تشيلسي",
         "Tottenham Hotspur" to "توتنهام",
+        "Tottenham" to "توتنهام",
         "Newcastle United" to "نيوكاسل",
+        "Newcastle" to "نيوكاسل",
         "Aston Villa" to "أستون فيلا",
         "West Ham United" to "وست هام",
+        "West Ham" to "وست هام",
         "Brighton & Hove Albion" to "برايتون",
+        "Brighton" to "برايتون",
         "Everton" to "إيفرتون",
         "Wolverhampton Wanderers" to "وولفرهامبتون",
+        "Wolves" to "وولفرهامبتون",
         "Crystal Palace" to "كريستال بالاس",
         "Brentford" to "برينتفورد",
         "Fulham" to "فولهام",
         "Bournemouth" to "بورنموث",
+        "AFC Bournemouth" to "بورنموث",
         "Nottingham Forest" to "نوتينغهام",
         "Leicester City" to "ليستر سيتي",
         "Ipswich Town" to "إبسويتش",
         "Southampton" to "ساوثهامبتون",
+        "Leeds United" to "ليدز يونايتد",
+        "Sunderland" to "سندرلاند",
+        "Coventry City" to "كوفنتري",
+        "Hull City" to "هال سيتي",
 
         // La Liga
         "Real Madrid" to "ريال مدريد",
@@ -340,6 +414,7 @@ object FootballRepository {
         "Real Betis" to "ريال بيتيس",
         "Real Sociedad" to "ريال سوسيداد",
         "Athletic Club" to "أتلتيك بيلباو",
+        "Athletic Bilbao" to "أتلتيك بيلباو",
         "Villarreal" to "فياريال",
         "Valencia" to "فالنسيا",
         "Girona" to "جيرونا",
@@ -350,12 +425,15 @@ object FootballRepository {
         "Las Palmas" to "لاس بالماس",
         "Rayo Vallecano" to "رايو فاليكانو",
         "Alavés" to "ديبورتيفو ألافيس",
+        "Alaves" to "ديبورتيفو ألافيس",
         "Espanyol" to "إسبانيول",
         "Leganés" to "ليغانيس",
+        "Leganes" to "ليغانيس",
         "Real Valladolid" to "بلد الوليد",
 
         // Serie A
         "Inter Milan" to "إنتر ميلان",
+        "Internazionale" to "إنتر ميلان",
         "Inter" to "إنتر ميلان",
         "AC Milan" to "ميلان",
         "Milan" to "ميلان",
@@ -392,32 +470,60 @@ object FootballRepository {
         "TSG Hoffenheim" to "هوفنهايم",
         "Werder Bremen" to "فيردر بريمن",
         "FC Augsburg" to "أوغسبورغ",
+        "Augsburg" to "أوغسبورغ",
         "Mainz 05" to "ماينز",
+        "Mainz" to "ماينز",
+        "FSV Mainz 05" to "ماينز",
+        "SV Elversberg" to "إيلفيرسبيرج",
+        "Elversberg" to "إيلفيرسبيرج",
         "Union Berlin" to "يونيون برلين",
         "FC St. Pauli" to "سانت باولي",
+        "St. Pauli" to "سانت باولي",
         "Holstein Kiel" to "هولشتاين كيل",
         "VfL Bochum" to "بوخوم",
+        "Bochum" to "بوخوم",
         "FC Heidenheim" to "هايدنهايم",
+        "Heidenheim" to "هايدنهايم",
 
         // Ligue 1
         "Paris Saint-Germain" to "باريس سان جيرمان",
+        "Paris SG" to "باريس سان جيرمان",
+        "PSG" to "باريس سان جيرمان",
         "Marseille" to "مارسيليا",
+        "Olympique Marseille" to "مارسيليا",
         "Monaco" to "موناكو",
+        "AS Monaco" to "موناكو",
         "Lyon" to "ليون",
+        "Olympique Lyonnais" to "ليون",
         "Lille" to "ليل",
+        "LOSC Lille" to "ليل",
         "Nice" to "نيس",
+        "OGC Nice" to "نيس",
         "Lens" to "لانس",
+        "RC Lens" to "لانس",
         "Rennes" to "رين",
+        "Stade Rennais" to "رين",
+        "Stade Rennais FC" to "رين",
         "Strasbourg" to "ستراسبورغ",
+        "RC Strasbourg Alsace" to "ستراسبورغ",
         "Toulouse" to "تولوز",
+        "Toulouse FC" to "تولوز",
         "Nantes" to "نانت",
+        "FC Nantes" to "نانت",
         "Reims" to "ستاد ريمس",
+        "Stade de Reims" to "ستاد ريمس",
         "Brest" to "ستاد بريست",
+        "Stade Brestois 29" to "ستاد بريست",
         "Montpellier" to "مونبلييه",
+        "Montpellier HSC" to "مونبلييه",
         "Auxerre" to "أوكسير",
+        "AJ Auxerre" to "أوكسير",
         "Saint-Étienne" to "سانت إتيان",
+        "Saint-Etienne" to "سانت إتيان",
         "Angers" to "أنجيه",
+        "Angers SCO" to "أنجيه",
         "Le Havre" to "لوهافر",
+        "Le Havre AC" to "لوهافر",
     )
 
     private fun toArabicTeam(teamName: String): String {

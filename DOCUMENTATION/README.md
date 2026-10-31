@@ -18,6 +18,9 @@
 | [07_MULTI_PROVIDER_STREAMING_AGGREGATOR.md](./07_MULTI_PROVIDER_STREAMING_AGGREGATOR.md) | **معمارية مجمّع البث الموحد (16 موقعاً عربياً)** | توثيق هندسي شامل لـ 16 موقعاً سينمائياً (أكوام، فاصل، وي سيما، قصة عشق، لودي نت، برستيج...) مع خوارزميات البحث المتوازي وفك السيرفرات. |
 | [08_FIREBASE_ANALYTICS_AND_DASHBOARD.md](./08_FIREBASE_ANALYTICS_AND_DASHBOARD.md) | **إعداد Firebase Analytics ولوحة الإدارة** | أحداث Android والويب، إعداد التطبيقات، ربط GA4 Data API، وقيود الإحصاءات الحقيقية. |
 | [09_MADAR_PLAYER_CAST_AND_UPDATES.md](./09_MADAR_PLAYER_CAST_AND_UPDATES.md) | **مشغل مشهد والجودة وCast والتحديثات الجانبية** | وحدة المشغل المستقلة، اختيار الجودة، Cast، إشعارات المحتوى، ومتطلبات نشر التحديث. |
+| [10_ANDROID_FREEZE_AND_PLAYER_REPAIR.md](./10_ANDROID_FREEZE_AND_PLAYER_REPAIR.md) | **إصلاح بطء تحميل الواجهة وفشل تشغيل المشغّل** | التحميل التدريجي، تقليل تركيب الشاشات المتزامنة، تصنيف روابط الفيديو، الرجوع للسيرفر البديل، وبناء APK مع حدود التحقق على الجهاز. |
+| [11_OPERATIONAL_SOURCE_PLAYER_AUDIT.md](./11_OPERATIONAL_SOURCE_PLAYER_AUDIT.md) | **تدقيق تشغيل المصادر والمشغّل والتنزيل والسعة** | نتائج الوصول ومحددات القوائم، إصلاحات التحديث الحالي، وحدود الإثبات الواقعي للإعلانات والبث والضغط. |
+| [12_FLUTTER_PORT_AND_FAST_START.md](./12_FLUTTER_PORT_AND_FAST_START.md) | **نسخة Flutter، بدء الواجهة سريعًا ومنطق الحلقات** | الكاش، التحميل بالخلفية، ترتيب المواسم والحلقات، إعداد API، وربط مشغل Android المستقل. |
 
 ---
 

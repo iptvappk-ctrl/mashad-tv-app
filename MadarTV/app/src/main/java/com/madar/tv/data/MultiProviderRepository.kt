@@ -1,4 +1,4 @@
-package com.madar.tv.data
+﻿package com.madar.tv.data
 
 
 
@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 
 /**
 
- * MultiProviderRepository — مجمّع المحتوى من 7 مواقع عربية شهيرة لتطبيق مَشْهَد TV
+ * MultiProviderRepository — مجمّع المحتوى من 7 مواقع عربية شهيرة لتطبيق زقزوقة TV
 
  * ───────────────────────────────────────────────────────────────────────────────
 
@@ -50,6 +50,8 @@ import java.util.concurrent.TimeUnit
 
 object MultiProviderRepository {
 
+    private const val TAG = "MultiProviderRepository"
+
 
 
     // ── Constants ──────────────────────────────────────────────────────
@@ -70,17 +72,20 @@ object MultiProviderRepository {
 
     // ── Thread Pool ────────────────────────────────────────────────────
 
-    private val pool = Executors.newCachedThreadPool()
+    // A cached pool can create one thread per source on every refresh/search.
+    // Keep network fan-out parallel but bounded for low-memory phones.
+    private val pool = Executors.newFixedThreadPool(6)
 
 
 
     // ── HTTP Client ────────────────────────────────────────────────────
 
     private val http = OkHttpClient.Builder()
-
-        .connectTimeout(3, TimeUnit.SECONDS)
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+        .connectTimeout(6, TimeUnit.SECONDS)
 
         .readTimeout(4, TimeUnit.SECONDS)
+        .callTimeout(7, TimeUnit.SECONDS)
 
         .followRedirects(true)
 
@@ -97,10 +102,61 @@ object MultiProviderRepository {
     private val searchCache = ConcurrentHashMap<String, Pair<Long, List<ArabseedItem>>>()
 
     private val detailCache = ConcurrentHashMap<String, ArabseedDetail>()
+    private val detailCacheAt = ConcurrentHashMap<String, Long>()
+    private val seasonCacheAt = ConcurrentHashMap<String, Long>()
+    private const val SEASON_TTL = 6 * 60 * 60 * 1000L
+
 
     private val seasonCache = ConcurrentHashMap<String, ArabseedSeasonBundle>()
 
 
+
+    private fun catalogCacheKey(type: ArabseedType?, page: Int): String = when (type) {
+        ArabseedType.MOVIE -> "movies:$page"
+        ArabseedType.SERIES -> "series:$page"
+        null -> "catalog:$page"
+    }
+
+    fun loadCachedCatalog(type: ArabseedType?, page: Int = 1): List<ArabseedItem>? {
+        val key = catalogCacheKey(type, page)
+        listCache[key]?.let { cached ->
+            if (System.currentTimeMillis() - cached.first <= 14L * 24 * 60 * 60 * 1000) return cached.second
+        }
+        val snapshot = CatalogDiskCache.loadItems("providers:list:$key") ?: return null
+        listCache[key] = snapshot.savedAt to snapshot.value
+        return snapshot.value
+    }
+
+    fun loadCachedSearch(query: String): List<ArabseedItem>? {
+        val key = "search:" + query.trim().lowercase()
+        if (key == "search:") return null
+        searchCache[key]?.let { cached ->
+            if (System.currentTimeMillis() - cached.first <= 14L * 24 * 60 * 60 * 1000) return cached.second
+        }
+        val snapshot = CatalogDiskCache.loadItems("providers:" + key) ?: return null
+        searchCache[key] = snapshot.savedAt to snapshot.value
+        return snapshot.value
+    }
+
+    fun loadCachedDetail(pageUrl: String): ArabseedDetail? {
+        detailCache[pageUrl]?.let { if (it.servers.isNotEmpty()) return it }
+        val snapshot = CatalogDiskCache.loadDetail("providers:detail:" + pageUrl) ?: return null
+        if (snapshot.value.servers.isEmpty()) return null
+        detailCache[pageUrl] = snapshot.value
+        detailCacheAt[pageUrl] = snapshot.savedAt
+        return snapshot.value
+    }
+
+    fun getCachedDetail(pageUrl: String): ArabseedDetail? = detailCache[pageUrl]
+
+    fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
+        seasonCache[pageUrl]?.let { return it }
+        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v2:" + pageUrl) ?: return null
+        val normalized = SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
+        seasonCache[pageUrl] = normalized
+        seasonCacheAt[pageUrl] = snapshot.savedAt
+        return normalized
+    }
 
     fun clearCache() {
 
@@ -198,11 +254,14 @@ object MultiProviderRepository {
 
             name = "وي سيما",
 
-            baseUrl = "https://myweecima.beauty",
+            // .casa currently redirects to .shop; using the final host keeps relative URLs resolvable.
+            baseUrl = "https://myweecima.shop",
 
             moviesPath = "/movies.php?page={page}",
 
-            seriesPath = "/series.php?page={page}",
+            // The old series.php endpoint currently serves only its navigation shell;
+            // the live catalog is published at all-series.php.
+            seriesPath = "/all-series.php?page={page}",
 
             searchPath = "/search.php?keywords={q}",
 
@@ -240,17 +299,21 @@ object MultiProviderRepository {
 
             cardSelectors = listOf(
 
+                "div.list-movie",
+
+                ".list-movie",
+
+                ".postDiv",
+
+                "a.list-title",
+
                 "a[href*='/movie/']",
 
                 "a[href*='/serie/']",
 
-                ".postDiv a",
-
-                ".movie__block a",
-
             ),
 
-            titleSelectors = listOf("h2", "h3", ".post__title"),
+            titleSelectors = listOf(".list-title", "h2", "h3", ".post__title"),
 
         ),
 
@@ -298,7 +361,7 @@ object MultiProviderRepository {
 
             name = "لودي نت",
 
-            baseUrl = "https://lodynet.art",
+            baseUrl = "https://lodynet.watch",
 
             moviesPath = "/page/{page}/",
 
@@ -319,7 +382,7 @@ object MultiProviderRepository {
             ),
 
             titleSelectors = listOf("h2", "h3", ".entry-title", ".title"),
-
+            enabled = false,
         ),
 
 
@@ -332,11 +395,11 @@ object MultiProviderRepository {
 
             name = "بريستيج",
 
-            baseUrl = "https://brstej.surf",
+            baseUrl = "https://brstejj.cyou",
 
-            moviesPath = "/movies.php?page={page}",
+            moviesPath = "/cat03.php?cat=movies2-2224",
 
-            seriesPath = "/series.php?page={page}",
+            seriesPath = "/moslslat.php",
 
             searchPath = "/?s={q}",
 
@@ -344,13 +407,23 @@ object MultiProviderRepository {
 
                 "a[href*='video.php?vid=']",
 
+                "a[href*='series1.php']",
+
                 ".movie__block a",
 
                 ".MovieBlock a",
 
+                ".ptoday-card a",
+
+                ".pgh-card a",
+
+                ".pgh-series-card a",
+
+                ".pgh-simple-card a",
+
             ),
 
-            titleSelectors = listOf("h2", "h3", ".Title", "span.title"),
+            titleSelectors = listOf("h2", "h3", ".Title", "span.title", ".pgh-card-title", ".pgh-series-name"),
 
         ),
 
@@ -374,11 +447,13 @@ object MultiProviderRepository {
 
             cardSelectors = listOf(
 
-                "a[href*='/video-']",
+                "div.thumb a",
+
+                "article a",
 
                 ".video-card a",
 
-                "article a",
+                "a[href*='/video-']",
 
             ),
 
@@ -400,7 +475,7 @@ object MultiProviderRepository {
 
             || pageUrl.contains("egybest") || pageUrl.contains("lodynet")
 
-            || pageUrl.contains("brstej") || pageUrl.contains("q-ask") || pageUrl.contains("3sk")
+            || pageUrl.contains("brstej") || pageUrl.contains("brstejj.cyou") || pageUrl.contains("q-ask") || pageUrl.contains("3sk")
 
     }
 
@@ -460,13 +535,23 @@ object MultiProviderRepository {
 
                 .build()
 
+            val host = runCatching { java.net.URI.create(url).host.orEmpty() }.getOrDefault("invalid-url")
             http.newCall(req).execute().use { r ->
-
-                if (r.isSuccessful) r.body?.string() ?: "" else ""
-
+                if (!r.isSuccessful) {
+                    android.util.Log.w(TAG, "HTTP ${r.code} for host=$host")
+                    ""
+                } else {
+                    val body = r.body?.string().orEmpty()
+                    if (body.isBlank()) android.util.Log.w(TAG, "Empty HTML response for host=$host")
+                    body
+                }
             }
 
-        } catch (_: Exception) { "" }
+        } catch (error: Exception) {
+            val host = runCatching { java.net.URI.create(url).host.orEmpty() }.getOrDefault("invalid-url")
+            android.util.Log.w(TAG, "Fetch failed for host=$host (${error.javaClass.simpleName})")
+            ""
+        }
 
     }
 
@@ -506,8 +591,16 @@ object MultiProviderRepository {
 
             for (el in elements) {
 
-                val href = el.attr("abs:href").ifBlank { el.attr("href") }
-
+                var rawHref = el.attr("abs:href").ifBlank { el.attr("href") }.trim()
+                if (rawHref.isBlank() || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) {
+                    rawHref = el.selectFirst("a[href]")?.let { it.attr("abs:href").ifBlank { it.attr("href") } }?.trim() ?: ""
+                }
+                val href = when {
+                    rawHref.startsWith("http") -> rawHref
+                    rawHref.startsWith("/") -> "${provider.baseUrl.trimEnd('/')}$rawHref"
+                    rawHref.isNotBlank() -> "${provider.baseUrl.trimEnd('/')}/$rawHref"
+                    else -> ""
+                }
                 if (href.isBlank() || !href.startsWith("http")) continue
 
                 if (href.contains("/category") || href.contains("/tag/") || href.contains("/page/") || href.contains("category.php") || href.contains("topvideos") || href.contains("favicons")) continue
@@ -530,12 +623,17 @@ object MultiProviderRepository {
 
                 if (title.isBlank()) title = el.selectFirst("img")?.attr("alt")?.trim() ?: ""
 
+                if (title.isBlank()) {
+                    val directTxt = el.ownText().trim().ifBlank { el.text().trim() }
+                    if (directTxt.length in 2..100) title = directTxt
+                }
+
                 if (title.length < 2) continue
 
 
 
                 // Poster
-                val img = el.selectFirst("img")
+                val img = el.selectFirst("img") ?: el.selectFirst("[data-src]")
                 var poster: String? = null
 
                 // 1. Try img attributes (data-src, src, etc.)
@@ -679,20 +777,30 @@ object MultiProviderRepository {
 
 
 
-    fun fetchMoviesAll(page: Int = 1, forceRefresh: Boolean = false): List<ArabseedItem> =
-        fetchCatalogAll(page, ArabseedType.MOVIE, forceRefresh)
+    fun fetchMoviesAll(
+        page: Int = 1,
+        forceRefresh: Boolean = false,
+        onPartial: ((List<ArabseedItem>) -> Unit)? = null,
+    ): List<ArabseedItem> = fetchCatalogAll(page, ArabseedType.MOVIE, forceRefresh, onPartial)
 
-    fun fetchSeriesAll(page: Int = 1, forceRefresh: Boolean = false): List<ArabseedItem> =
-        fetchCatalogAll(page, ArabseedType.SERIES, forceRefresh)
+    fun fetchSeriesAll(
+        page: Int = 1,
+        forceRefresh: Boolean = false,
+        onPartial: ((List<ArabseedItem>) -> Unit)? = null,
+    ): List<ArabseedItem> = fetchCatalogAll(page, ArabseedType.SERIES, forceRefresh, onPartial)
 
     /** Fetch both media types from every configured provider in parallel. */
-    fun fetchCatalogAll(page: Int = 1, forceRefresh: Boolean = false): List<ArabseedItem> =
-        fetchCatalogAll(page, type = null, forceRefresh = forceRefresh)
+    fun fetchCatalogAll(
+        page: Int = 1,
+        forceRefresh: Boolean = false,
+        onPartial: ((List<ArabseedItem>) -> Unit)? = null,
+    ): List<ArabseedItem> = fetchCatalogAll(page, type = null, forceRefresh = forceRefresh, onPartial = onPartial)
 
     private fun fetchCatalogAll(
         page: Int,
         type: ArabseedType?,
         forceRefresh: Boolean,
+        onPartial: ((List<ArabseedItem>) -> Unit)? = null,
     ): List<ArabseedItem> {
         val cacheType = when (type) {
             ArabseedType.MOVIE -> "movies"
@@ -704,6 +812,11 @@ object MultiProviderRepository {
         if (!forceRefresh) {
             listCache[key]?.let { (savedAt, items) ->
                 if (now - savedAt < LIST_TTL && items.isNotEmpty()) return items
+            }
+            val snapshot = CatalogDiskCache.loadItems("providers:list:$key")
+            if (snapshot != null) {
+                listCache[key] = snapshot.savedAt to snapshot.value
+                if (now - snapshot.savedAt < LIST_TTL) return snapshot.value
             }
         }
 
@@ -719,7 +832,12 @@ object MultiProviderRepository {
                     try {
                         val path = if (catalogType == ArabseedType.MOVIE) provider.moviesPath else provider.seriesPath
                         val url = "${provider.baseUrl}${path.replace("{page}", page.toString())}"
-                        parseItems(fetchHtml(url, "${provider.baseUrl}/"), provider, catalogType)
+                        val html = fetchHtml(url, "${provider.baseUrl}/")
+                        val parsed = parseItems(html, provider, catalogType)
+                        if (html.isNotBlank() && parsed.isEmpty()) {
+                            android.util.Log.w(TAG, "No catalog cards parsed for provider=${provider.name} type=$catalogType")
+                        }
+                        parsed
                     } catch (_: Exception) {
                         emptyList()
                     }
@@ -727,10 +845,23 @@ object MultiProviderRepository {
             }
         }
 
-        val combined = collectParallel(tasks)
+        // The home catalog requests movies and series from each provider. With a six-thread pool
+        // those twelve requests run in two waves, so allow both waves to finish while partial rows
+        // continue reaching the UI immediately.
+        val combined = collectParallel(
+            tasks,
+            timeoutSeconds = if (type == null) 16L else 8L,
+        ) { batch ->
+            if (batch.isNotEmpty()) onPartial?.invoke(deduplicateItems(batch, expectedType = type))
+        }
         val deduped = deduplicateItems(combined, expectedType = type)
-        val enriched = enrichPostersFromSource(deduped)
-        if (enriched.isNotEmpty()) listCache[key] = System.currentTimeMillis() to enriched
+        // Keep catalog refresh bounded: AsyncImage loads poster images directly,
+        // so opening one page here per missing poster only delays the first screen.
+        val enriched = deduped
+        if (enriched.isNotEmpty()) {
+            listCache[key] = System.currentTimeMillis() to enriched
+            CatalogDiskCache.saveItems("providers:list:$key", enriched)
+        }
         return enriched
     }
 
@@ -740,12 +871,16 @@ object MultiProviderRepository {
         searchCache.clear()
     }
 
-    private fun collectParallel(tasks: List<() -> List<ArabseedItem>>): List<ArabseedItem> {
+    private fun collectParallel(
+        tasks: List<() -> List<ArabseedItem>>,
+        timeoutSeconds: Long = 8L,
+        onPartial: ((List<ArabseedItem>) -> Unit)? = null,
+    ): List<ArabseedItem> {
         if (tasks.isEmpty()) return emptyList()
         val completion = ExecutorCompletionService<List<ArabseedItem>>(pool)
         val submitted = tasks.map { task -> completion.submit(Callable { task() }) }
         val results = mutableListOf<ArabseedItem>()
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds)
         for (index in tasks.indices) {
             val remaining = deadline - System.nanoTime()
             if (remaining <= 0L) break
@@ -756,7 +891,9 @@ object MultiProviderRepository {
                 break
             }
             try {
-                results += finished.get()
+                val batch = finished.get()
+                results += batch
+                if (batch.isNotEmpty()) onPartial?.invoke(batch)
             } catch (_: Exception) {
                 // A failing source does not discard results from the others.
             }
@@ -764,14 +901,21 @@ object MultiProviderRepository {
         submitted.filterNot { it.isDone }.forEach { it.cancel(true) }
         return results
     }
-    fun searchAll(query: String): List<ArabseedItem> {
+    fun searchAll(query: String, forceRefresh: Boolean = false): List<ArabseedItem> {
         val q = query.trim()
         if (q.isBlank()) return emptyList()
 
         val key = "search:${q.lowercase()}"
         val now = System.currentTimeMillis()
-        searchCache[key]?.let { (savedAt, items) ->
-            if (now - savedAt < SEARCH_TTL && items.isNotEmpty()) return items
+        if (!forceRefresh) {
+            searchCache[key]?.let { (savedAt, items) ->
+                if (now - savedAt < SEARCH_TTL && items.isNotEmpty()) return items
+            }
+            val snapshot = CatalogDiskCache.loadItems("providers:" + key)
+            if (snapshot != null) {
+                searchCache[key] = snapshot.savedAt to snapshot.value
+                if (now - snapshot.savedAt < SEARCH_TTL) return snapshot.value
+            }
         }
 
         val tasks = PROVIDERS.filter { it.enabled }.map { provider ->
@@ -786,7 +930,10 @@ object MultiProviderRepository {
             }
         }
         val results = deduplicateItems(collectParallel(tasks))
-        if (results.isNotEmpty()) searchCache[key] = System.currentTimeMillis() to results
+        if (results.isNotEmpty()) {
+            searchCache[key] = System.currentTimeMillis() to results
+            CatalogDiskCache.saveItems("providers:" + key, results)
+        }
         return results
     }
 
@@ -927,13 +1074,13 @@ object MultiProviderRepository {
 
                 if (vid.isNotBlank()) {
 
-                    servers += ArabseedServer("سيرفر 1 (فائق السرعة)", "https://myweecima.beauty/embed.php?vid=$vid")
+                    servers += ArabseedServer("سيرفر 1 (فائق السرعة)", "https://myweecima.shop/embed.php?vid=$vid")
 
                     try {
 
-                        val dlHtml = fetchHtml("https://myweecima.beauty/downloads.php?vid=$vid", pageUrl)
+                        val dlHtml = fetchHtml("https://myweecima.shop/downloads.php?vid=$vid", pageUrl)
 
-                        val dlDoc = Jsoup.parse(dlHtml, "https://myweecima.beauty/")
+                        val dlDoc = Jsoup.parse(dlHtml, "https://myweecima.shop/")
 
                         for (a in dlDoc.select("a[href]")) {
 
@@ -1112,49 +1259,45 @@ object MultiProviderRepository {
 
 
     fun fetchDetail(item: ArabseedItem): ArabseedDetail {
-
-        detailCache[item.pageUrl]?.let { return it }
-
-
+        val now = System.currentTimeMillis()
+        detailCache[item.pageUrl]?.let { cached ->
+            if (cached.servers.isNotEmpty() && now - (detailCacheAt[item.pageUrl] ?: now) < DETAIL_TTL) return cached
+        }
 
         var pageMetadata: Pair<String, List<String>> = "" to emptyList()
-
         var servers = emptyList<ArabseedServer>()
 
+        try {
+            pageMetadata = fetchStoryAndCast(item.pageUrl)
+        } catch (_: Exception) {}
 
-
-        val t1 = Thread { pageMetadata = fetchStoryAndCast(item.pageUrl) }
-
-        val t2 = Thread { servers = fetchServers(item.pageUrl) }
-
-        t1.start(); t2.start()
-
-        try { t1.join(4000); t2.join(4500) } catch (_: Exception) {}
-
-
+        try {
+            servers = fetchServers(item.pageUrl)
+        } catch (_: Exception) {}
 
         val detail = ArabseedDetail(
-
             item = item.copy(overview = pageMetadata.first.ifBlank { item.overview }),
-
             servers = servers,
-
             preResolvedStream = servers.firstOrNull()?.directStreamUrl,
-
             cast = pageMetadata.second,
-
         )
 
-        detailCache[item.pageUrl] = detail
+        if (servers.isNotEmpty()) {
+            detailCache[item.pageUrl] = detail
+            detailCacheAt[item.pageUrl] = System.currentTimeMillis()
+            CatalogDiskCache.saveDetail("providers:detail:" + item.pageUrl, detail)
+        }
 
         return detail
-
     }
 
 
 
     fun fetchSeasonsAndEpisodes(item: ArabseedItem): ArabseedSeasonBundle {
-        seasonCache[item.pageUrl]?.let { return it }
+        val now = System.currentTimeMillis()
+        seasonCache[item.pageUrl]?.let { cached ->
+            if (now - (seasonCacheAt[item.pageUrl] ?: now) < SEASON_TTL) return cached
+        }
         val provider = getProviderForUrl(item.pageUrl)
         val baseUrl = provider?.baseUrl ?: ""
 
@@ -1285,7 +1428,7 @@ object MultiProviderRepository {
                 labelledSeasons.size == 1 -> labelledSeasons.single()
                 expectedSeasonNumber != null -> expectedSeasonNumber
                 !isEpisodePage -> 1
-                else -> null
+                else -> 1
             }
             val numberedEpisodes = parsedEpisodes.mapNotNull { (seasonNumber, episodeNumber, href) ->
                 (seasonNumber ?: inferredSeasonNumber)?.let { Triple(it, episodeNumber, href) }
@@ -1346,8 +1489,12 @@ object MultiProviderRepository {
                 .sortedWith(compareBy<ArabseedItem> {
                     SeriesCatalogParser.partNumber(it.title, it.pageUrl) ?: Int.MAX_VALUE
                 }.thenBy { it.title })
-            val bundle = ArabseedSeasonBundle(seasons = seasons, relatedParts = cleanParts)
+            val bundle = SeriesCatalogParser.normalizeSeasonBundle(
+                ArabseedSeasonBundle(seasons = seasons, relatedParts = cleanParts),
+            )
             seasonCache[item.pageUrl] = bundle
+            seasonCacheAt[item.pageUrl] = System.currentTimeMillis()
+            CatalogDiskCache.saveSeasonBundle("providers:seasons:v2:" + item.pageUrl, bundle)
             bundle
         } catch (_: Exception) {
             ArabseedSeasonBundle(emptyList())
@@ -1421,20 +1568,50 @@ object MultiProviderRepository {
     }
 
     private fun collapseSeriesEntries(items: List<ArabseedItem>): List<ArabseedItem> {
-        val groups = mutableListOf<MutableList<Pair<Int, ArabseedItem>>>()
+        val parent = IntArray(items.size) { it }
+        fun find(index: Int): Int {
+            var root = index
+            while (parent[root] != root) root = parent[root]
+            var current = index
+            while (parent[current] != current) {
+                val next = parent[current]
+                parent[current] = root
+                current = next
+            }
+            return root
+        }
+        fun union(first: Int, second: Int) {
+            val a = find(first)
+            val b = find(second)
+            if (a != b) parent[maxOf(a, b)] = minOf(a, b)
+        }
 
+        // Compare a series only with entries sharing a normalized title key.
+        // This avoids scanning every previous item on each batch merge.
+        val titleBuckets = mutableMapOf<String, MutableList<Int>>()
         items.forEachIndexed { index, item ->
             if (item.type != ArabseedType.SERIES) return@forEachIndexed
             val keys = titleKeys(item)
             val year = releaseYear(item)
-            val group = groups.firstOrNull { entries ->
-                val sample = entries.first().second
-                val sampleYear = releaseYear(sample)
-                val yearsCompatible = sampleYear.isBlank() || year.isBlank() || sampleYear == year
-                yearsCompatible && titleKeys(sample).any(keys::contains)
+            val candidates = keys.asSequence().flatMap { titleBuckets[it].orEmpty().asSequence() }.toSet()
+            val knownYears = candidates.asSequence().map { releaseYear(items[it]) }
+                .plus(year).filter { it.isNotBlank() }.toSet()
+            candidates.forEach { candidateIndex ->
+                val candidateYear = releaseYear(items[candidateIndex])
+                val sameKnownYear = candidateYear.isNotBlank() && candidateYear == year
+                val safelyUnknownYear = knownYears.size <= 1 && (candidateYear.isBlank() || year.isBlank())
+                if (sameKnownYear || safelyUnknownYear) {
+                    union(index, candidateIndex)
+                }
             }
-            if (group == null) groups += mutableListOf(index to item) else group += index to item
+            keys.forEach { key -> titleBuckets.getOrPut(key) { mutableListOf() }.add(index) }
         }
+
+        val groups = items.indices
+            .filter { items[it].type == ArabseedType.SERIES }
+            .groupBy(::find)
+            .values
+            .map { indices -> indices.map { it to items[it] } }
 
         val representatives = groups.associate { entries ->
             val latest = entries.maxWithOrNull(
@@ -1544,6 +1721,17 @@ object MultiProviderRepository {
         expectedType: ArabseedType? = null,
     ): List<ArabseedItem> {
         val unique = mutableListOf<ArabseedItem>()
+        val exactUrlIndex = mutableMapOf<Pair<ArabseedType, String>, Int>()
+        val titleIndex = mutableMapOf<Pair<ArabseedType, String>, MutableSet<Int>>()
+
+        fun indexItem(index: Int, item: ArabseedItem) {
+            val normalizedUrl = SeriesCatalogParser.normalizedUrl(item.pageUrl)
+            exactUrlIndex.putIfAbsent(item.type to normalizedUrl, index)
+            titleKeys(item).forEach { key ->
+                titleIndex.getOrPut(item.type to key) { linkedSetOf() }.add(index)
+            }
+        }
+
         for (item in items) {
             if (expectedType != null && item.type != expectedType) continue
             if (item.title.isBlank() || !item.pageUrl.startsWith("http", ignoreCase = true)) continue
@@ -1551,18 +1739,32 @@ object MultiProviderRepository {
             val keys = titleKeys(item)
             if (keys.isEmpty()) continue
             val year = releaseYear(item)
-            val duplicateIndex = unique.indexOfFirst { current ->
-                if (current.type != item.type) return@indexOfFirst false
-                if (current.pageUrl == item.pageUrl) return@indexOfFirst true
+            val exactKey = item.type to SeriesCatalogParser.normalizedUrl(item.pageUrl)
+            val candidates = exactUrlIndex[exactKey]?.let { setOf(it) }
+                ?: keys.asSequence()
+                    .flatMap { titleIndex[item.type to it].orEmpty().asSequence() }
+                    .toSortedSet()
+            val duplicateIndex = candidates.firstOrNull { index ->
+                val current = unique[index]
+                if (current.type != item.type) return@firstOrNull false
+                if (SeriesCatalogParser.normalizedUrl(current.pageUrl) == exactKey.second) return@firstOrNull true
                 val currentYear = releaseYear(current)
                 val yearsCompatible = currentYear.isBlank() || year.isBlank() || currentYear == year
                 val sameWorkTitle = titleKeys(current).any(keys::contains)
-                if (!yearsCompatible || !sameWorkTitle) return@indexOfFirst false
+                if (!yearsCompatible || !sameWorkTitle) return@firstOrNull false
                 item.type != ArabseedType.SERIES
                     || seriesEntryKeys(current).any(seriesEntryKeys(item)::contains)
             }
-            if (duplicateIndex < 0) unique += item
-            else unique[duplicateIndex] = mergeDuplicate(unique[duplicateIndex], item)
+            if (duplicateIndex == null) {
+                val index = unique.size
+                unique += item
+                indexItem(index, item)
+            } else {
+                val merged = mergeDuplicate(unique[duplicateIndex], item)
+                unique[duplicateIndex] = merged
+                indexItem(duplicateIndex, merged)
+                exactUrlIndex.putIfAbsent(exactKey, duplicateIndex)
+            }
         }
         return collapseSeriesEntries(unique)
     }
@@ -1592,7 +1794,7 @@ object MultiProviderRepository {
         val posterMap = mutableMapOf<String, String>()
         for ((url, future) in futureMap) {
             try {
-                val p = future.get(3, TimeUnit.SECONDS)
+                val p = future.get(1, TimeUnit.SECONDS)
                 if (p != null) posterMap[url] = p
             } catch (_: Exception) {}
         }
