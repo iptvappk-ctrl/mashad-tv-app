@@ -10,6 +10,7 @@ import org.json.JSONObject
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val mediaBridge = FlutterMediaBridge(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "madar/native")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -25,9 +26,28 @@ class MainActivity : FlutterActivity() {
                     }
                     "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), result)
                     "player.store" -> openPlayerStore(result)
-                    else -> result.notImplemented()
+                    "download.start" -> startDownload(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), result)
+                    else -> if (!mediaBridge.handle(call, result)) result.notImplemented()
                 }
             }
+    }
+
+    private fun startDownload(url: String?, title: String?, userAgent: String?, referer: String?, result: MethodChannel.Result) {
+        val target = url.orEmpty()
+        if (!target.startsWith("https://", true) && !target.startsWith("http://", true)) {
+            result.success(false)
+            return
+        }
+        runCatching {
+            com.madar.tv.download.ZakzoukaDownloadService.startDownload(
+                context = this,
+                title = title.orEmpty(),
+                url = target,
+                userAgent = userAgent.orEmpty(),
+                referer = referer.orEmpty(),
+            )
+        }.onSuccess { result.success(true) }
+            .onFailure { result.success(false) }
     }
 
     private fun openPlayer(

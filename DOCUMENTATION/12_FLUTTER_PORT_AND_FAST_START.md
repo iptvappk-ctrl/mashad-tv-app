@@ -14,23 +14,23 @@
 
 ## Flutter application
 
-The independent project lives in `MadarFlutter`. It provides an RTL light interface, animated tab transitions, catalogue filters, search, saved favourites, details, cast, season and episode lists, exact adjacent-episode navigation, live events, stale-while-revalidate JSON cache, and a native Android bridge to `com.madar.player`.
+The independent project lives in `MadarFlutter`. Its user-facing shell mirrors the native app: a light RTL cinema catalog with the same six content tabs and subcategories, plus `أفلام ومسلسلات`, `بثات الكورة`, and `المفضلة` bottom navigation. The user does not enter or configure a content server.
 
-The Flutter app uses the existing web API contract:
+`FlutterMediaBridge.kt` connects Flutter to the same Android repositories used by MadarTV: `ArabseedRepository`, `MultiProviderRepository`, `YacineRepository`, and `FootballRepository`. Disk caches initialize in the Flutter host process. Flutter reads cached content first, renders primary-source results as they arrive, and loads provider results in the background before merging and de-duplicating them.
 
-- `/api/cinema/movies`, `/api/cinema/series`, `/api/cinema/search`
-- `/api/cinema/detail`, `/api/cinema/resolve`
-- `/api/yacine/events`, `/api/yacine/stream`
+The Flutter flow includes search, details/story/cast, related parts, numbered seasons and episodes, exact same-season previous/next navigation, playback server selection through the companion player, match and channel streams, saved favorites, and the Android download service. Bounded poster decoding and retained tab state keep navigation light.
 
-The API origin can be supplied at build time with `MADAR_API_BASE_URL` or changed from the network-settings button in the Flutter app; the chosen HTTPS origin is saved locally. The default `http://10.0.2.2:3000` only reaches a web server running on the development PC from an Android emulator. A physical phone needs an HTTPS host reachable from that phone. No backend URL was configured as a public production endpoint in this workspace. No API secrets are placed in the Flutter project.
+Flutter content and playback still depend on the third-party providers and their current responses. Code integration does not certify that every source is reachable, that a stream is valid, or that rights/access remain available.
 
 ## Build commands
 
 From `MadarFlutter`:
 
 ```powershell
-& 'C:\src\flutter\bin\flutter.bat' build apk --debug --dart-define=MADAR_API_BASE_URL=https://YOUR-HOST
+& 'C:\src\flutter\bin\flutter.bat' build apk --release --target-platform android-arm64
 ```
+
+The Flutter bridge calls the existing Android repositories directly; there is no API-origin field or `MADAR_API_BASE_URL` setting in the user app.
 
 For the Android app and companion player:
 
@@ -39,6 +39,8 @@ cd MadarTV
 ./gradlew.bat :app:assembleDebug :madar-player:assembleDebug
 ```
 
+The Flutter parity APK uses version `1.0.2+3` and targets Android ARM64. Release builds currently use the debug signing config for manual device installation; store publication requires a protected release key.
+
 ## Verification boundary
 
-Build success confirms compilation and packaging only. It does not confirm that third-party source pages are reachable, that a particular match has an active stream, or that the server accepts a stream on an actual phone. The workspace has no attached Android device, and there is no configured public API host in this checkout. The 750 ms target is first-screen/skeleton dismissal; a cold catalogue still depends on the network and provider response times.
+Build success confirms compilation and packaging only. It does not confirm that third-party source pages are reachable, that a particular match has an active stream, or that the player accepts a stream on an actual phone. No attached Android device was available during the last documented check. A cold catalog still depends on network and provider response times; cached data appears immediately when available.
