@@ -102,17 +102,84 @@ class FlutterMediaBridge(context: Context) {
             val item = call.argument<Map<String, Any?>>("item")?.toItem()
                 ?: throw IllegalArgumentException("المسلسل غير صالح")
             val seriesItem = item.asParentSeries()
-            val bundle = if (method.endsWith("cached")) loadCachedSeasons(seriesItem) else fetchSeasons(seriesItem)
-            bundle?.toMap()
+            val force = call.argument<Boolean>("force") ?: false
+            val bundle = if (method.endsWith("cached")) {
+                loadCachedSeasons(seriesItem)
+            } else {
+                fetchSeasons(seriesItem, force)
+            }
+            bundle?.toMap()?.let { mapped ->
+                if (method.endsWith("cached")) mapped
+                else mapped + ("backgroundRefreshing" to
+                    MultiProviderRepository.isSeasonAggregationRunning(seriesItem.pageUrl))
+            }
+        }
+        "media.seasons.status" -> {
+            val item = call.argument<Map<String, Any?>>("item")?.toItem()
+                ?: throw IllegalArgumentException("المسلسل غير صالح")
+            val seriesItem = item.asParentSeries()
+            mapOf(
+                "backgroundRefreshing" to
+                    MultiProviderRepository.isSeasonAggregationRunning(seriesItem.pageUrl),
+            )
+        }
+        "media.season.page.fetch" -> {
+            val item = call.argument<Map<String, Any?>>("item")?.toItem()
+                ?: throw IllegalArgumentException("المسلسل غير صالح")
+            val seriesItem = item.asParentSeries()
+            val seasonUrl = call.argument<String>("seasonUrl").orEmpty().trim()
+            val seasonNumber = call.argument<Number>("seasonNumber")?.toInt() ?: 0
+            val uri = runCatching { java.net.URI(seasonUrl) }.getOrNull()
+                ?: throw IllegalArgumentException("رابط الموسم غير صالح")
+            val host = uri.host?.lowercase().orEmpty()
+            val isArabseed = host == "myseed.tv" || host.endsWith(".myseed.tv")
+            if (seasonNumber <= 0 || uri.scheme !in setOf("http", "https") || host.isBlank() ||
+                (!isArabseed && !MultiProviderRepository.isMultiProvider(seasonUrl))
+            ) throw IllegalArgumentException("رابط الموسم غير تابع لمصدر مدعوم")
+
+            val seasonTitle = SeriesCatalogParser.seasonTitle(seasonNumber)
+            val seasonItem = seriesItem.copy(
+                id = "${seriesItem.id}_season_$seasonNumber",
+                title = seasonTitle,
+                arabicTitle = seasonTitle,
+                pageUrl = seasonUrl,
+                providerName = if (isArabseed) "عرب سيد" else seriesItem.providerName,
+                parentSeriesTitle = null,
+                parentSeriesPageUrl = null,
+                latestEpisodeLabel = "",
+            )
+            val bundle = if (isArabseed) {
+                ArabseedRepository.fetchSeasonsAndEpisodes(
+                    seasonItem,
+                    forceRefresh = true,
+                    seasonNumbersOnly = setOf(seasonNumber),
+                )
+            } else {
+                MultiProviderRepository.fetchSeasonsAndEpisodes(
+                    seasonItem,
+                    forceRefresh = true,
+                    seasonNumbersOnly = setOf(seasonNumber),
+                )
+            }
+            MultiProviderRepository.cacheSeasonPageEnrichment(seriesItem, seasonItem, bundle)
+            bundle.toMap()
         }
         "media.servers" -> {
             val url = call.argument<String>("url").orEmpty()
             val provider = call.argument<String>("provider").orEmpty()
             val rows = if (provider == "عرب سيد") ArabseedRepository.fetchEpisodeServers(url)
                 else MultiProviderRepository.fetchServers(url)
-            rows.map { it.toMap() }
+            rows.filter { row ->
+                isAllowedResolverInput(row.embedUrl) &&
+                    (row.directStreamUrl.isNullOrBlank() || isAllowedResolverInput(row.directStreamUrl))
+            }.map { it.toMap() }
         }
-        "media.resolve" -> ArabseedRepository.resolveDirectStream(call.argument<String>("url").orEmpty())
+        "media.resolve" -> {
+            val source = call.argument<String>("url").orEmpty()
+            if (!isAllowedResolverInput(source)) null
+            else ArabseedRepository.resolveDirectStream(source)
+                ?.takeIf(::isAllowedResolverInput)
+        }
         "live.events.cached" -> (YacineRepository.getCachedEvents() ?: emptyList()).map { it.toMap() }
         "live.events.fetch" -> YacineRepository.getEvents(forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
         "live.categories.cached" -> (YacineRepository.getCachedCategories() ?: emptyList()).map { it.toMap() }
@@ -142,8 +209,14 @@ class FlutterMediaBridge(context: Context) {
             else -> ArabseedRepository.fetchCategory(path, page, forceRefresh = force)
         }
         val providerRows = when (tab) {
-            "series" -> if (fetch) MultiProviderRepository.fetchSeriesAll(page, forceRefresh = force) else MultiProviderRepository.loadCachedCatalog(ArabseedType.SERIES, page).orEmpty()
-            "movies" -> if (fetch) MultiProviderRepository.fetchMoviesAll(page, forceRefresh = force) else MultiProviderRepository.loadCachedCatalog(ArabseedType.MOVIE, page).orEmpty()
+            "series" -> if (path.trim('/') == "series") {
+                if (fetch) MultiProviderRepository.fetchSeriesAll(page, forceRefresh = force)
+                else MultiProviderRepository.loadCachedCatalog(ArabseedType.SERIES, page).orEmpty()
+            } else emptyList()
+            "movies" -> if (path.trim('/') == "movies") {
+                if (fetch) MultiProviderRepository.fetchMoviesAll(page, forceRefresh = force)
+                else MultiProviderRepository.loadCachedCatalog(ArabseedType.MOVIE, page).orEmpty()
+            } else emptyList()
             "home" -> if (path == "main/" || path == "main") {
                 if (fetch) MultiProviderRepository.fetchCatalogAll(page, forceRefresh = force)
                 else MultiProviderRepository.loadCachedCatalog(null, page).orEmpty()
@@ -161,8 +234,8 @@ class FlutterMediaBridge(context: Context) {
     }
 
     private fun providerCatalog(path: String, tab: String, page: Int, force: Boolean): List<ArabseedItem> = when (tab) {
-        "series" -> MultiProviderRepository.fetchSeriesAll(page, forceRefresh = force)
-        "movies" -> MultiProviderRepository.fetchMoviesAll(page, forceRefresh = force)
+        "series" -> if (path.trim('/') == "series") MultiProviderRepository.fetchSeriesAll(page, forceRefresh = force) else emptyList()
+        "movies" -> if (path.trim('/') == "movies") MultiProviderRepository.fetchMoviesAll(page, forceRefresh = force) else emptyList()
         "home" -> if (path == "main/" || path == "main") MultiProviderRepository.fetchCatalogAll(page, forceRefresh = force) else emptyList()
         else -> emptyList()
     }
@@ -176,12 +249,48 @@ class FlutterMediaBridge(context: Context) {
         else MultiProviderRepository.fetchDetail(item)
 
     private fun loadCachedSeasons(item: ArabseedItem): ArabseedSeasonBundle? =
-        if (item.providerName == "عرب سيد") ArabseedRepository.loadCachedSeasonBundle(item.pageUrl)
-        else MultiProviderRepository.loadCachedSeasonBundle(item.pageUrl)
+        MultiProviderRepository.loadCachedMergedSeasonBundle(item.pageUrl)
+            ?: if (item.providerName == "عرب سيد") ArabseedRepository.loadCachedSeasonBundle(item.pageUrl)
+            else MultiProviderRepository.loadCachedSeasonBundle(item.pageUrl)
 
-    private fun fetchSeasons(item: ArabseedItem): ArabseedSeasonBundle =
-        if (item.providerName == "عرب سيد") ArabseedRepository.fetchSeasonsAndEpisodes(item)
-        else MultiProviderRepository.fetchSeasonsAndEpisodes(item)
+    private fun fetchSeasons(item: ArabseedItem, forceRefresh: Boolean): ArabseedSeasonBundle {
+        val cached = MultiProviderRepository.loadCachedMergedSeasonBundle(item.pageUrl)
+        val refreshIncompleteCache = !forceRefresh &&
+            MultiProviderRepository.shouldRefreshSeasonBundle(item)
+        if (cached != null && !forceRefresh && !refreshIncompleteCache) return cached
+        val shouldForceRefresh = forceRefresh || refreshIncompleteCache
+        val seasonsToRepair = if (refreshIncompleteCache) {
+            MultiProviderRepository.seasonNumbersNeedingRepair(
+                cached ?: loadCachedSeasons(item),
+            ).takeIf { it.isNotEmpty() }
+        } else null
+        val primary = if (item.providerName == "عرب سيد") {
+            ArabseedRepository.fetchSeasonsAndEpisodes(
+                item,
+                shouldForceRefresh,
+                seasonNumbersOnly = seasonsToRepair,
+            )
+        } else {
+            MultiProviderRepository.fetchSeasonsAndEpisodes(
+                item,
+                shouldForceRefresh,
+                seasonNumbersOnly = seasonsToRepair,
+            )
+        }
+        return MultiProviderRepository.fetchSeasonBundleWithBackgroundMerge(
+            item,
+            primary,
+            shouldForceRefresh,
+        )
+    }
+}
+
+private fun isAllowedResolverInput(value: String): Boolean {
+    val uri = runCatching { java.net.URI(value.trim()) }.getOrNull() ?: return false
+    if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) return false
+    val host = uri.host.lowercase()
+    val redirectDomains = listOf("google.com", "googleadservices.com", "doubleclick.net", "googlesyndication.com")
+    return redirectDomains.none { host == it || host.endsWith(".$it") }
 }
 
 private fun ArabseedItem.toMap(): Map<String, Any?> = mapOf(
@@ -233,8 +342,9 @@ private fun ArabseedSeasonBundle.toMap(): Map<String, Any?> {
     return mapOf(
     "seasons" to normalized.seasons.map { season -> mapOf(
         "number" to season.number, "title" to season.title,
+        "pageUrl" to season.pageUrl,
         "episodes" to season.episodes.sortedWith(compareBy<ArabseedEpisode> { it.seasonNumber }.thenBy { it.number }).map { episode ->
-            mapOf("number" to episode.number, "title" to episode.title, "pageUrl" to episode.pageUrl, "seasonNumber" to episode.seasonNumber)
+            mapOf("number" to episode.number, "title" to episode.title, "pageUrl" to episode.pageUrl, "seasonNumber" to episode.seasonNumber, "providerName" to episode.providerName)
         },
     ) },
     "relatedParts" to normalized.relatedParts.map { it.toMap() },

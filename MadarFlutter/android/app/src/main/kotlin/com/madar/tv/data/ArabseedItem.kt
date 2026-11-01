@@ -54,12 +54,14 @@ data class ArabseedEpisode(
     val title: String,
     val pageUrl: String,
     val seasonNumber: Int = 1,
+    val providerName: String = "",
 )
 
 data class ArabseedSeason(
     val number: Int,
     val title: String,
     val episodes: List<ArabseedEpisode>,
+    val pageUrl: String = "",
 )
 
 data class ArabseedSeasonBundle(

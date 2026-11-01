@@ -166,22 +166,59 @@ internal object SeriesCatalogParser {
 
     /** Links explicitly labelled as a season, used to fetch each season page on sources
      * which only render the currently selected season's episode list in the page body. */
-    fun linkedSeasonPages(document: Document, currentPageUrl: String): List<Pair<Int, String>> =
-        document.select("a[href]")
-            .mapNotNull { link ->
-                val href = link.attr("abs:href").ifBlank { link.attr("href") }.trim()
-                val title = link.text().trim().ifBlank {
-                    link.attr("title").ifBlank { link.attr("aria-label") }
+    fun linkedSeasonPages(document: Document, currentPageUrl: String): List<Pair<Int, String>> {
+        val seasonContainerMarker = Regex("""(?i)(season|الموسم|مواسم)""")
+        return document.select(
+            "a[href], [data-season][data-url], [data-season-number][data-url], " +
+                "[data-season][data-href], [data-season-number][data-href]",
+        ).mapNotNull { link ->
+            val urlAttribute = listOf("href", "data-url", "data-href")
+                .firstOrNull { link.attr(it).isNotBlank() } ?: return@mapNotNull null
+            val rawUrl = link.attr(urlAttribute).trim()
+            val href = link.absUrl(urlAttribute).ifBlank {
+                runCatching { java.net.URI(currentPageUrl).resolve(rawUrl).toString() }
+                    .getOrDefault(rawUrl)
+            }.trim()
+            val label = listOf(link.text(), link.attr("title"), link.attr("aria-label"))
+                .filter(String::isNotBlank)
+                .joinToString(" ")
+            if (href.isBlank() || !href.startsWith("http", ignoreCase = true) ||
+                normalizedUrl(href) == normalizedUrl(currentPageUrl) || isEpisode(label, href)
+            ) return@mapNotNull null
+
+            var seasonContext = false
+            var inheritedSeasonNumber: Int? = null
+            var node: Element? = link
+            var depth = 0
+            while (node != null && depth < 5 && !seasonContext) {
+                val marker = "${node.id()} ${node.className()} ${node.attr("role")} " +
+                    "${node.attr("title")} ${node.attr("aria-label")}"
+                if (inheritedSeasonNumber == null) {
+                    inheritedSeasonNumber = listOf("data-season-number", "data-season", "data-season_num")
+                        .firstNotNullOfOrNull { name ->
+                            node.attr(name).toIntOrNull()?.takeIf { it > 0 }
+                                ?: seasonNumber(node.attr(name), "")
+                        }
                 }
-                if (href.isBlank() || !href.startsWith("http", ignoreCase = true) ||
-                    normalizedUrl(href) == normalizedUrl(currentPageUrl) || isEpisode(title, href)
-                ) return@mapNotNull null
-                val number = seasonNumber(title, href) ?: return@mapNotNull null
-                number to href
+                seasonContext = seasonContainerMarker.containsMatchIn(marker)
+                node = node.parent()
+                depth++
             }
+            val dataSeason = listOf("data-season-number", "data-season", "data-season_num")
+                .firstNotNullOfOrNull { name ->
+                    link.attr(name).toIntOrNull()?.takeIf { it > 0 }
+                        ?: seasonNumber(link.attr(name), "")
+                }
+            val numericTab = normalizeDigits(label).trim().toIntOrNull()
+                ?.takeIf { seasonContext && it in 1..99 }
+            val number = seasonNumber(label, href) ?: dataSeason ?: inheritedSeasonNumber ?: numericTab
+                ?: return@mapNotNull null
+            number to href
+        }
             .distinctBy { normalizedUrl(it.second) }
             .sortedBy { it.first }
-            .take(10)
+            .take(30)
+    }
 
     fun partNumber(title: String, url: String): Int? = extractLabeledNumber(
         title = title,
@@ -232,18 +269,25 @@ internal object SeriesCatalogParser {
                 }
             }
         }
-        val normalizedSeasons = byUrl.values
-            .groupBy { it.first }
-            .toSortedMap()
-            .map { (seasonNumber, rows) ->
-                val episodes = rows.asSequence()
+        val episodesBySeason = byUrl.values.groupBy { it.first }
+        val seasonNumbers = (bundle.seasons.map { it.number } + episodesBySeason.keys)
+            .filter { it > 0 }
+            .distinct()
+            .sorted()
+        val normalizedSeasons = seasonNumbers
+            .map { seasonNumber ->
+                val episodes = episodesBySeason[seasonNumber].orEmpty().asSequence()
                     .map { it.second }
                     .distinctBy { it.number }
                     .sortedBy { it.number }
                     .toList()
-                ArabseedSeason(seasonNumber, seasonTitle(seasonNumber), episodes)
+                val seasonPageUrl = bundle.seasons
+                    .firstOrNull { it.number == seasonNumber && it.pageUrl.isNotBlank() }
+                    ?.pageUrl
+                    .orEmpty()
+                ArabseedSeason(seasonNumber, seasonTitle(seasonNumber), episodes, seasonPageUrl)
             }
-            .filter { it.episodes.isNotEmpty() }
+            .filter { it.episodes.isNotEmpty() || it.pageUrl.isNotBlank() }
 
         val relatedParts = bundle.relatedParts
             .filter { it.pageUrl.startsWith("http", ignoreCase = true) }
@@ -266,6 +310,11 @@ internal object SeriesCatalogParser {
             .trim()
         return withoutSeriesSuffix
     }
+
+    fun normalizedSeriesTitle(title: String): String = normalizeText(cleanSeriesTitle(title))
+        .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
     private fun extractLabeledNumber(
         title: String,

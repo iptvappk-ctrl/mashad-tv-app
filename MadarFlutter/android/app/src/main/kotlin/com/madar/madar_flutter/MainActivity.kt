@@ -34,7 +34,7 @@ class MainActivity : FlutterActivity() {
 
     private fun startDownload(url: String?, title: String?, userAgent: String?, referer: String?, result: MethodChannel.Result) {
         val target = url.orEmpty()
-        if (!target.startsWith("https://", true) && !target.startsWith("http://", true)) {
+        if (!isSafeMediaUrl(target)) {
             result.success(false)
             return
         }
@@ -55,7 +55,7 @@ class MainActivity : FlutterActivity() {
         headers: Map<String, String>?, backupSourcesJson: String?, isLive: Boolean, result: MethodChannel.Result,
     ) {
         val stream = url.orEmpty()
-        if (!stream.startsWith("http://", true) && !stream.startsWith("https://", true)) {
+        if (!isSafeMediaUrl(stream)) {
             result.success(false)
             return
         }
@@ -78,6 +78,19 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             result.success(false)
         }
+    }
+
+    private fun isSafeMediaUrl(value: String): Boolean {
+        val uri = runCatching { Uri.parse(value.trim()) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase().orEmpty()
+        if ((uri.scheme != "http" && uri.scheme != "https") || host.isBlank()) return false
+        val redirectDomains = listOf(
+            "google.com",
+            "googleadservices.com",
+            "doubleclick.net",
+            "googlesyndication.com",
+        )
+        return redirectDomains.none { host == it || host.endsWith(".$it") }
     }
 
     private fun openPlayerStore(result: MethodChannel.Result) {

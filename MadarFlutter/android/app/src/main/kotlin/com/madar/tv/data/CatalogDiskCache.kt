@@ -105,6 +105,7 @@ object CatalogDiskCache {
                                 title = episode.optString("title"),
                                 pageUrl = url,
                                 seasonNumber = episode.optInt("seasonNumber", season.optInt("number", 1)),
+                                providerName = episode.optString("providerName"),
                             ),
                         )
                     }
@@ -113,6 +114,7 @@ object CatalogDiskCache {
                     number = season.optInt("number", 1),
                     title = season.optString("title"),
                     episodes = episodes,
+                    pageUrl = season.optString("pageUrl"),
                 ))
             }
         }
@@ -135,7 +137,8 @@ object CatalogDiskCache {
                                 .put("number", episode.number)
                                 .put("title", episode.title)
                                 .put("pageUrl", episode.pageUrl)
-                                .put("seasonNumber", episode.seasonNumber),
+                                .put("seasonNumber", episode.seasonNumber)
+                                .put("providerName", episode.providerName),
                         )
                     }
                 }
@@ -143,6 +146,7 @@ object CatalogDiskCache {
                     JSONObject()
                         .put("number", season.number)
                         .put("title", season.title)
+                        .put("pageUrl", season.pageUrl)
                         .put("episodes", episodes),
                 )
             }

@@ -21,6 +21,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            // Match the existing companion-player releases so installs can update in place.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

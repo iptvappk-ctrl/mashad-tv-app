@@ -399,31 +399,84 @@ Map<String, dynamic> _mergeSeasonBundles(
 ) {
   final oldSeasons = _maps(cached?['seasons']);
   final newSeasons = _maps(fresh['seasons']);
-  final oldByNumber = {
-    for (final season in oldSeasons) _integer(season['number']): season,
-  };
   final merged = <int, Map<String, dynamic>>{};
-  for (final season in newSeasons) {
-    final number = _integer(season['number']);
-    final old = oldByNumber[number];
-    final newEpisodes = _maps(season['episodes']);
-    final oldEpisodes = _maps(old?['episodes']);
-    merged[number] = old != null && oldEpisodes.length > newEpisodes.length
-        ? old
-        : season;
+  final seasonNumbers = <int>{
+    ...oldSeasons.map((season) => _integer(season['number'])),
+    ...newSeasons.map((season) => _integer(season['number'])),
+  }..removeWhere((number) => number <= 0);
+  for (final number in seasonNumbers) {
+    final old = oldSeasons
+        .where((season) => _integer(season['number']) == number)
+        .firstOrNull;
+    final freshSeason = newSeasons
+        .where((season) => _integer(season['number']) == number)
+        .firstOrNull;
+    final episodesByNumber = <int, Map<String, dynamic>>{};
+    final unnumberedByUrl = <String, Map<String, dynamic>>{};
+    for (final episode in [
+      ..._maps(old?['episodes']),
+      ..._maps(freshSeason?['episodes']),
+    ]) {
+      final episodeNumber = _episodeNumber(episode);
+      final url = _normalizedMediaUrl(_text(episode['pageUrl']));
+      if (episodeNumber > 0) {
+        episodesByNumber[episodeNumber] = {
+          ...?episodesByNumber[episodeNumber],
+          ...episode,
+        };
+      } else if (url.isNotEmpty) {
+        unnumberedByUrl[url] = {...?unnumberedByUrl[url], ...episode};
+      }
+    }
+    final episodes = [...episodesByNumber.values, ...unnumberedByUrl.values]
+      ..sort((a, b) {
+        final numberOrder = _episodeNumber(a).compareTo(_episodeNumber(b));
+        if (numberOrder != 0) return numberOrder;
+        return _text(a['pageUrl']).compareTo(_text(b['pageUrl']));
+      });
+    merged[number] = {
+      ...?old,
+      ...?freshSeason,
+      'number': number,
+      'title': _text(freshSeason?['title']).ifEmpty(_text(old?['title'])),
+      'episodes': episodes,
+    };
   }
-  for (final season in oldSeasons) {
-    merged.putIfAbsent(_integer(season['number']), () => season);
+  final partsByUrl = <String, Map<String, dynamic>>{};
+  for (final part in [
+    ..._maps(cached?['relatedParts']),
+    ..._maps(fresh['relatedParts']),
+  ]) {
+    final url = _normalizedMediaUrl(_text(part['pageUrl']));
+    if (url.isNotEmpty) partsByUrl[url] = {...?partsByUrl[url], ...part};
   }
-  final freshParts = _maps(fresh['relatedParts']);
-  final oldParts = _maps(cached?['relatedParts']);
-  final parts = freshParts.isNotEmpty ? freshParts : oldParts;
+  final parts = partsByUrl.values.toList()
+    ..sort((a, b) => _text(a['title']).compareTo(_text(b['title'])));
   return {
     ...fresh,
     'seasons': merged.values.toList()
       ..sort((a, b) => _integer(a['number']).compareTo(_integer(b['number']))),
     'relatedParts': parts,
   };
+}
+
+List<Map<String, dynamic>> _orderedEpisodes(dynamic value) {
+  final byNumber = <int, Map<String, dynamic>>{};
+  final unnumberedByUrl = <String, Map<String, dynamic>>{};
+  for (final episode in _maps(value)) {
+    final number = _episodeNumber(episode);
+    final url = _normalizedMediaUrl(_text(episode['pageUrl']));
+    if (number > 0) {
+      byNumber[number] = {...?byNumber[number], ...episode};
+    } else if (url.isNotEmpty) {
+      unnumberedByUrl[url] = {...?unnumberedByUrl[url], ...episode};
+    }
+  }
+  return [...byNumber.values, ...unnumberedByUrl.values]..sort((a, b) {
+    final numberOrder = _episodeNumber(a).compareTo(_episodeNumber(b));
+    if (numberOrder != 0) return numberOrder;
+    return _text(a['pageUrl']).compareTo(_text(b['pageUrl']));
+  });
 }
 
 String _cleanTitle(String value) {
@@ -469,6 +522,9 @@ class MediaItem {
       overview;
   final String parentSeriesTitle, parentSeriesPageUrl, latestEpisodeLabel;
   final bool isSeries;
+
+  String get visibleProvider =>
+      provider == 'عرب سيد' ? 'المصدر الأساسي' : provider;
 
   String get key =>
       '${isSeries ? 's' : 'm'}:${_cleanTitle(title)}:${year.trim()}';
@@ -793,6 +849,13 @@ class _CatalogPageState extends State<CatalogPage> {
     if (queryChanged) _resultsQuery = query;
     final path = _path;
     final tab = _tabId;
+    final allProviderCategory =
+        (tab == 'series' &&
+            _categoryId == 'all_series' &&
+            path.replaceAll(RegExp(r'^/+|/+$'), '') == 'series') ||
+        (tab == 'movies' &&
+            _categoryId == 'all_movies' &&
+            path.replaceAll(RegExp(r'^/+|/+$'), '') == 'movies');
     setState(() {
       _busy = true;
       _providersBusy = false;
@@ -821,8 +884,7 @@ class _CatalogPageState extends State<CatalogPage> {
     if (!mounted || request != _request) return;
     final hasProviderPass =
         query.isNotEmpty ||
-        tab == 'series' ||
-        tab == 'movies' ||
+        allProviderCategory ||
         (tab == 'home' && (path == 'main/' || path == 'main'));
     try {
       final fetched = query.isNotEmpty
@@ -839,7 +901,9 @@ class _CatalogPageState extends State<CatalogPage> {
       if (!mounted || request != _request) return;
       final rows = _unique(fetched.map(MediaItem.fromMap));
       if (rows.isNotEmpty) {
-        final merged = _unique([..._items, ...rows]);
+        final merged = reset && query.isEmpty
+            ? rows
+            : _unique([..._items, ...rows]);
         setState(() {
           _items = merged;
           _busy = false;
@@ -1259,25 +1323,26 @@ class _CatalogPageState extends State<CatalogPage> {
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _card,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _line),
-                  ),
-                  child: Text(
-                    '${_items.length} عمل',
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                if (!(_tabId == 'home' && _categoryId == 'all'))
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _card,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: _line),
+                    ),
+                    child: Text(
+                      '${_items.length} عمل',
+                      style: const TextStyle(
+                        color: _muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1973,10 +2038,12 @@ class _DetailPageState extends State<DetailPage> {
   List<Map<String, dynamic>> _serverRows = [];
   bool _loading = true;
   bool _serversLoading = true;
+  bool _seasonsLoading = true;
   String? _error;
   int _seasonIndex = 0, _request = 0;
   int? _manualSeasonNumber;
   String? _downloadingMediaUrl;
+  final Set<String> _refreshingSeasonPages = <String>{};
 
   @override
   void initState() {
@@ -1984,14 +2051,15 @@ class _DetailPageState extends State<DetailPage> {
     unawaited(_load());
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
     final request = ++_request;
     setState(() {
       _loading = true;
       _serversLoading = true;
+      _seasonsLoading = true;
       _error = null;
     });
-    final args = {'item': widget.item.toMap()};
+    final args = {'item': widget.item.toMap(), 'force': force};
     try {
       final cached = await Future.wait([
         NativeBridge.map('media.detail.cached', args),
@@ -2002,7 +2070,9 @@ class _DetailPageState extends State<DetailPage> {
         _detail = cached[0];
         _bundle = cached[1];
         _serverRows = _maps(cached[0]?['servers']);
-        _loading = false;
+        _loading = _detail == null;
+        _serversLoading = _serverRows.isEmpty;
+        _seasonsLoading = _bundle == null;
         if (_bundle != null) {
           _seasonIndex = _seasonIndexFor(
             _bundle!,
@@ -2012,26 +2082,30 @@ class _DetailPageState extends State<DetailPage> {
       });
     } catch (_) {}
     if (!mounted || request != _request) return;
-    final requests = <Future<void>>[
-      _refreshStory(request, args),
-      _loadServers(request),
-      _refreshSeasons(request, args),
-    ];
-    await Future.wait(requests);
-    if (mounted && request == _request) setState(() => _loading = false);
+    unawaited(_refreshStory(request, args));
+    unawaited(_loadServers(request));
+    unawaited(_refreshSeasons(request, args));
   }
 
   Future<void> _refreshStory(int request, Map<String, Object?> args) async {
     try {
       final story = await NativeBridge.map('media.story.fetch', args);
-      if (!mounted || request != _request || story == null) return;
-      setState(() {
-        _detail = {...?_detail, ...story, 'servers': _servers};
-        _error = null;
-      });
+      if (!mounted || request != _request) return;
+      if (story != null) {
+        setState(() {
+          _detail = {...?_detail, ...story, 'servers': _servers};
+          _error = null;
+        });
+      }
     } catch (error) {
-      if (mounted && request == _request && _detail == null) {
-        setState(() => _error = '$error');
+      if (mounted && request == _request) {
+        setState(() {
+          if (_detail == null) _error = '$error';
+        });
+      }
+    } finally {
+      if (mounted && request == _request) {
+        setState(() => _loading = false);
       }
     }
   }
@@ -2039,23 +2113,131 @@ class _DetailPageState extends State<DetailPage> {
   Future<void> _refreshSeasons(int request, Map<String, Object?> args) async {
     try {
       final bundle = await NativeBridge.map('media.seasons.fetch', args);
-      if (!mounted || request != _request || bundle == null) return;
+      if (!mounted || request != _request) return;
+      if (bundle == null) {
+        setState(() => _seasonsLoading = false);
+        return;
+      }
       final hasEpisodes = _maps(bundle['seasons'])
           .any((season) => _maps(season['episodes']).isNotEmpty);
       final hasParts = _maps(bundle['relatedParts']).isNotEmpty;
-      if (!hasEpisodes && !hasParts) return;
-      final mergedBundle = _mergeSeasonBundles(_bundle, bundle);
+      final backgroundRefreshing = bundle['backgroundRefreshing'] == true;
       setState(() {
-        _bundle = mergedBundle;
-        _seasonIndex = _seasonIndexFor(
-          mergedBundle,
-          preferredNumber: _manualSeasonNumber,
-        );
+        if (hasEpisodes || hasParts) {
+          _bundle = _mergeSeasonBundles(_bundle, bundle);
+          _seasonIndex = _seasonIndexFor(
+            _bundle!,
+            preferredNumber: _manualSeasonNumber,
+          );
+        }
+        _seasonsLoading = backgroundRefreshing;
       });
-    } catch (error) {
-      if (mounted && request == _request && _bundle == null) {
-        setState(() => _error ??= '$error');
+      _refreshCurrentSeasonIfSparse();
+      if (backgroundRefreshing) {
+        unawaited(_pollSeasonCache(request, args));
       }
+    } catch (error) {
+      if (mounted && request == _request) {
+        setState(() {
+          if (_bundle == null) _error ??= '$error';
+          _seasonsLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _pollSeasonCache(
+    int request,
+    Map<String, Object?> args,
+  ) async {
+    try {
+      for (var attempt = 0; attempt < 20; attempt++) {
+        await Future<void>.delayed(const Duration(seconds: 1));
+        if (!mounted || request != _request) return;
+        final cached = await NativeBridge.map('media.seasons.cached', args);
+        if (cached != null) {
+          final hasEpisodes = _maps(cached['seasons'])
+              .any((season) => _maps(season['episodes']).isNotEmpty);
+          final hasParts = _maps(cached['relatedParts']).isNotEmpty;
+          if (hasEpisodes || hasParts) {
+            final merged = _mergeSeasonBundles(_bundle, cached);
+            if (_seasonBundleSignature(merged) !=
+                _seasonBundleSignature(_bundle)) {
+              setState(() {
+                _bundle = merged;
+                _seasonIndex = _seasonIndexFor(
+                  merged,
+                  preferredNumber: _manualSeasonNumber,
+                );
+              });
+              _refreshCurrentSeasonIfSparse();
+            }
+          }
+        }
+        final status = await NativeBridge.map('media.seasons.status', args);
+        if (status?['backgroundRefreshing'] != true) break;
+      }
+    } catch (_) {
+      // Keep already loaded detail data visible if background enrichment fails.
+    } finally {
+      if (mounted && request == _request) {
+        setState(() => _seasonsLoading = false);
+      }
+    }
+  }
+
+  String _seasonBundleSignature(Map<String, dynamic>? bundle) {
+    if (bundle == null) return '';
+    final seasons = _maps(bundle['seasons'])
+      ..sort((a, b) => _integer(a['number']).compareTo(_integer(b['number'])));
+    return seasons.map((season) {
+      final episodes = _maps(season['episodes'])
+        ..sort((a, b) => _episodeNumber(a).compareTo(_episodeNumber(b)));
+      return '${_integer(season['number'])}:'
+          '${episodes.map(_episodeNumber).join(',')}';
+    }).join('|');
+  }
+
+  Future<void> _refreshSeasonPage(Map<String, dynamic> season) async {
+    final seasonUrl = _text(season['pageUrl']).trim();
+    final seasonNumber = _integer(season['number']);
+    if (seasonUrl.isEmpty || seasonNumber <= 0 ||
+        !seasonUrl.startsWith('http') ||
+        !_refreshingSeasonPages.add(seasonUrl)) {
+      return;
+    }
+    final request = _request;
+    if (mounted) setState(() {});
+    try {
+      final fresh = await NativeBridge.map('media.season.page.fetch', {
+        'item': widget.item.toMap(),
+        'seasonUrl': seasonUrl,
+        'seasonNumber': seasonNumber,
+      });
+      if (!mounted || request != _request || fresh == null) return;
+      final merged = _mergeSeasonBundles(_bundle, fresh);
+      if (_seasonBundleSignature(merged) != _seasonBundleSignature(_bundle)) {
+        setState(() {
+          _bundle = merged;
+          _seasonIndex = _seasonIndexFor(
+            merged,
+            preferredNumber: seasonNumber,
+          );
+        });
+      }
+    } catch (_) {
+      // Keep the episodes already shown if an individual season page is unavailable.
+    } finally {
+      _refreshingSeasonPages.remove(seasonUrl);
+      if (mounted && request == _request) setState(() {});
+    }
+  }
+
+  void _refreshCurrentSeasonIfSparse() {
+    if (_seasons.isEmpty) return;
+    final selected = _seasons[_seasonIndex.clamp(0, _seasons.length - 1)];
+    if (_maps(selected['episodes']).length <= 1) {
+      unawaited(_refreshSeasonPage(selected));
     }
   }
 
@@ -2100,13 +2282,11 @@ class _DetailPageState extends State<DetailPage> {
   List<Map<String, dynamic>> get _servers =>
       _serverRows.isNotEmpty ? _serverRows : _maps(_detail?['servers']);
 
-  String get _seriesTitle =>
-      widget.item.parentSeriesTitle?.trim().isNotEmpty == true
-      ? widget.item.parentSeriesTitle!.trim()
+  String get _seriesTitle => widget.item.parentSeriesTitle.trim().isNotEmpty
+      ? widget.item.parentSeriesTitle.trim()
       : widget.item.title;
 
-  bool get _isEpisodeCard =>
-      widget.item.parentSeriesPageUrl?.trim().isNotEmpty == true;
+  bool get _isEpisodeCard => widget.item.parentSeriesPageUrl.trim().isNotEmpty;
 
   int _seasonIndexFor(Map<String, dynamic> bundle, {int? preferredNumber}) {
     final seasons = _maps(bundle['seasons']);
@@ -2183,6 +2363,28 @@ class _DetailPageState extends State<DetailPage> {
     return index >= 0 ? index : null;
   }
 
+  Map<String, dynamic>? _episodeForCurrentPage(
+    List<Map<String, dynamic>> episodes,
+  ) {
+    if (!_isEpisodeCard) return episodes.isEmpty ? null : episodes.last;
+    final currentUrl = _normalizedMediaUrl(widget.item.pageUrl);
+    return episodes
+            .where(
+              (episode) =>
+                  _normalizedMediaUrl(_text(episode['pageUrl'])) == currentUrl,
+            )
+            .firstOrNull ??
+        {
+          'title': widget.item.title,
+          'number':
+              _episodeNumberFrom(
+                '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
+              ) ??
+              0,
+          'pageUrl': widget.item.pageUrl,
+        };
+  }
+
   @override
   Widget build(BuildContext context) {
     final overview = _text(_detail?['overview']).ifEmpty(widget.item.overview);
@@ -2195,21 +2397,21 @@ class _DetailPageState extends State<DetailPage> {
     final season = _seasons.isNotEmpty && _seasonIndex < _seasons.length
         ? _seasons[_seasonIndex]
         : null;
-    final episodes = _maps(season?['episodes'])
-      ..sort((a, b) => _episodeNumber(a).compareTo(_episodeNumber(b)));
+    final episodes = _orderedEpisodes(season?['episodes']);
+    final downloadEpisode = _episodeForCurrentPage(episodes);
     return Scaffold(
       appBar: AppBar(
         title: Text(_seriesTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           IconButton(
-            onPressed: _loading ? null : _load,
+            onPressed: _loading ? null : () => _load(force: true),
             icon: const Icon(Icons.refresh_rounded, color: _brick),
           ),
         ],
       ),
       body: RefreshIndicator(
         color: _brick,
-        onRefresh: _load,
+        onRefresh: () => _load(force: true),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 26),
           children: [
@@ -2268,9 +2470,9 @@ class _DetailPageState extends State<DetailPage> {
             ],
             if (widget.item.isSeries) ...[
               if (_isEpisodeCard) ...[
-                if (episodes.isNotEmpty) ...[
+                if (downloadEpisode != null) ...[
                   const SizedBox(height: 12),
-                  _downloadEpisodeCard(episodes.last, season),
+                  _downloadEpisodeCard(downloadEpisode, season),
                 ],
                 const SizedBox(height: 13),
                 _serverSection(
@@ -2295,9 +2497,9 @@ class _DetailPageState extends State<DetailPage> {
             ],
             if (widget.item.isSeries &&
                 !_isEpisodeCard &&
-                episodes.isNotEmpty) ...[
+                downloadEpisode != null) ...[
               const SizedBox(height: 12),
-              _downloadEpisodeCard(episodes.last, season),
+              _downloadEpisodeCard(downloadEpisode, season),
             ],
             if (_parts.isNotEmpty) ...[
               const SizedBox(height: 13),
@@ -2391,19 +2593,53 @@ class _DetailPageState extends State<DetailPage> {
                   side: BorderSide(
                     color: index == _seasonIndex ? _brick : _line,
                   ),
-                  onSelected: (_) => setState(() {
-                    _seasonIndex = index;
-                    _manualSeasonNumber = _integer(season['number']);
-                  }),
+                  onSelected: (_) {
+                    final seasonEpisodes = _maps(season['episodes']);
+                    setState(() {
+                      _seasonIndex = index;
+                      _manualSeasonNumber = _integer(season['number']);
+                    });
+                    if (seasonEpisodes.length <= 1) {
+                      unawaited(_refreshSeasonPage(season));
+                    }
+                  },
                 );
               },
             ),
           ),
           const SizedBox(height: 12),
         ],
+        if ((_seasonsLoading && episodes.isNotEmpty) ||
+            (_refreshingSeasonPages.contains(_text(selected?['pageUrl'])) &&
+                episodes.isNotEmpty))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _brick,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _refreshingSeasonPages.contains(_text(selected?['pageUrl']))
+                        ? 'بنجلب حلقات هذا الموسم من صفحته مباشرة…'
+                        : 'بنكمّل البحث عن المواسم والحلقات من المصادر الأخرى…',
+                    style: const TextStyle(color: _muted, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (episodes.isEmpty)
           Text(
-            _loading
+            (_seasonsLoading ||
+                    _refreshingSeasonPages.contains(_text(selected?['pageUrl'])))
                 ? 'بنحمّل الحلقات في الخلفية…'
                 : 'المصدر لم يرجع حلقات لهذا الجزء.',
             style: const TextStyle(color: _muted),
@@ -2630,22 +2866,11 @@ class _DetailPageState extends State<DetailPage> {
         return;
       }
       final server = servers.firstWhere(
-        (row) => _text(row['directStreamUrl']).isNotEmpty,
+        (row) => _isUsablePlaybackUrl(_text(row['directStreamUrl'])),
         orElse: () => servers.first,
       );
-      var streamUrl = _text(server['directStreamUrl']);
-      if (streamUrl.isEmpty) {
-        final embedUrl = _text(server['embedUrl']);
-        if (embedUrl.isNotEmpty) {
-          try {
-            streamUrl = _text(
-              await _native.invokeMethod<String>('media.resolve', {
-                'url': embedUrl,
-              }),
-            );
-          } catch (_) {}
-        }
-      }
+      final streamUrl = await _resolveServerStream(server);
+      if (!mounted) return;
       if (streamUrl.isEmpty) {
         _message(context, 'المصدر لم يوفر رابط تنزيل مباشر لهذا الفيلم.');
         return;
@@ -2691,7 +2916,7 @@ class _DetailPageState extends State<DetailPage> {
       if (servers.isEmpty) {
         servers = await NativeBridge.list('media.servers', {
           'url': url,
-          'provider': widget.item.provider,
+          'provider': _text(episode['providerName']).ifEmpty(widget.item.provider),
         });
         if (servers.isNotEmpty) {
           unawaited(NativeBridge.writeCache(cacheKey, jsonEncode(servers)));
@@ -2703,18 +2928,11 @@ class _DetailPageState extends State<DetailPage> {
         return;
       }
       final server = servers.firstWhere(
-        (row) => _text(row['directStreamUrl']).isNotEmpty,
+        (row) => _isUsablePlaybackUrl(_text(row['directStreamUrl'])),
         orElse: () => servers.first,
       );
-      var streamUrl = _text(server['directStreamUrl']);
-      if (streamUrl.isEmpty) {
-        final embed = _text(server['embedUrl']);
-        try {
-          streamUrl = _text(
-            await _native.invokeMethod<String>('media.resolve', {'url': embed}),
-          );
-        } catch (_) {}
-      }
+      final streamUrl = await _resolveServerStream(server);
+      if (!mounted) return;
       if (streamUrl.isEmpty) {
         _message(context, 'المصدر لم يوفر رابط تنزيل مباشر لهذه الحلقة.');
         return;
@@ -2754,7 +2972,7 @@ class _DetailPageState extends State<DetailPage> {
       MaterialPageRoute(
         builder: (_) => EpisodePage(
           seriesTitle: _seriesTitle,
-          provider: widget.item.provider,
+          provider: _text(episodes[index]['providerName']).ifEmpty(widget.item.provider),
           seasonTitle: _text(season?['title'])
               .ifEmpty('الموسم ${_text(season?['number'])}'),
           episodes: episodes,
@@ -2796,8 +3014,7 @@ class _DetailPageState extends State<DetailPage> {
       final season = _seasons.isEmpty
           ? null
           : _seasons[_seasonIndex.clamp(0, _seasons.length - 1)];
-      final episodes = _maps(season?['episodes'])
-        ..sort((a, b) => _episodeNumber(a).compareTo(_episodeNumber(b)));
+      final episodes = _orderedEpisodes(season?['episodes']);
       if (episodes.isEmpty) {
         _message(context, 'لا توجد حلقات جاهزة للتشغيل بعد.');
         return;
@@ -2817,22 +3034,13 @@ class _DetailPageState extends State<DetailPage> {
     String title,
     String referer,
   ) async {
-    var url = _text(server['directStreamUrl']);
-    final embed = _text(server['embedUrl']);
-    if (url.isEmpty && embed.isNotEmpty) {
-      try {
-        url = _text(
-          await _native.invokeMethod<String>('media.resolve', {'url': embed}),
-        );
-      } catch (_) {}
+    final url = await _resolveServerStream(server);
+    if (!mounted) return;
+    if (url.isEmpty) {
+      _message(context, 'السيرفر لم يوفر رابط فيديو مباشر. جرّب سيرفرًا آخر.');
+      return;
     }
-    if (url.isEmpty) url = embed;
-    await _launchPlayer(
-      context,
-      _absolute(url, referer),
-      title,
-      referer: referer,
-    );
+    await _launchPlayer(context, url, title, referer: referer);
   }
 }
 
@@ -2859,8 +3067,8 @@ class _DetailHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                item.parentSeriesTitle?.trim().isNotEmpty == true
-                    ? item.parentSeriesTitle!.trim()
+                item.parentSeriesTitle.trim().isNotEmpty
+                    ? item.parentSeriesTitle.trim()
                     : item.title,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
@@ -2871,7 +3079,7 @@ class _DetailHeader extends StatelessWidget {
                   height: 1.3,
                 ),
               ),
-              if (item.parentSeriesTitle?.trim().isNotEmpty == true &&
+              if (item.parentSeriesTitle.trim().isNotEmpty &&
                   item.title != item.parentSeriesTitle) ...[
                 const SizedBox(height: 4),
                 Text(
@@ -2887,7 +3095,7 @@ class _DetailHeader extends StatelessWidget {
                   if (item.year.isNotEmpty) item.year,
                   if (item.quality.isNotEmpty) item.quality,
                   item.isSeries ? 'مسلسل' : 'فيلم',
-                  item.provider,
+                  item.visibleProvider,
                 ].join(' · '),
                 style: const TextStyle(
                   color: _muted,
@@ -3039,11 +3247,12 @@ class EpisodePage extends StatefulWidget {
 
 class _EpisodePageState extends State<EpisodePage> {
   late int _index;
+  late final List<Map<String, dynamic>> _episodes;
   List<Map<String, dynamic>> _servers = [];
   bool _loading = true;
   String? _error;
   int _request = 0;
-  Map<String, dynamic> get _episode => widget.episodes[_index];
+  Map<String, dynamic> get _episode => _episodes[_index];
   int get _number => _episodeNumber(_episode);
   String get _episodeTitle =>
       _text(_episode['title']).ifEmpty('الحلقة $_number');
@@ -3053,7 +3262,10 @@ class _EpisodePageState extends State<EpisodePage> {
   @override
   void initState() {
     super.initState();
-    _index = widget.index;
+    _episodes = _orderedEpisodes(widget.episodes);
+    _index = _episodes.isEmpty
+        ? 0
+        : widget.index.clamp(0, _episodes.length - 1).toInt();
     unawaited(_loadServers());
   }
 
@@ -3080,7 +3292,7 @@ class _EpisodePageState extends State<EpisodePage> {
     try {
       final rows = await NativeBridge.list('media.servers', {
         'url': url,
-        'provider': widget.provider,
+        'provider': _text(_episode['providerName']).ifEmpty(widget.provider),
       });
       if (!mounted || request != _request) return;
       setState(() {
@@ -3100,15 +3312,12 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   int _adjacent(int delta) {
-    final target = _number + delta;
-    if (target <= 0) return -1;
-    return widget.episodes.indexWhere(
-      (episode) => _episodeNumber(episode) == target,
-    );
+    final target = _index + delta;
+    return target >= 0 && target < _episodes.length ? target : -1;
   }
 
   void _moveTo(int next) {
-    if (next < 0 || next >= widget.episodes.length) return;
+    if (next < 0 || next >= _episodes.length) return;
     setState(() {
       _index = next;
       _servers = [];
@@ -3176,7 +3385,7 @@ class _EpisodePageState extends State<EpisodePage> {
                       icon: const Icon(Icons.arrow_forward_rounded),
                       label: Text(
                         previous >= 0
-                            ? 'السابق · الحلقة ${_episodeNumber(widget.episodes[previous])}'
+                            ? 'السابق · الحلقة ${_episodeNumber(_episodes[previous])}'
                             : 'لا توجد حلقة سابقة',
                       ),
                     ),
@@ -3188,7 +3397,7 @@ class _EpisodePageState extends State<EpisodePage> {
                       icon: const Icon(Icons.arrow_back_rounded),
                       label: Text(
                         next >= 0
-                            ? 'التالي · الحلقة ${_episodeNumber(widget.episodes[next])}'
+                            ? 'التالي · الحلقة ${_episodeNumber(_episodes[next])}'
                             : 'لا توجد حلقة تالية',
                       ),
                     ),
@@ -3238,14 +3447,14 @@ class _EpisodePageState extends State<EpisodePage> {
             title: 'حلقات هذا الجزء / الموسم',
             icon: '📺',
             trailing: Text(
-              '${widget.episodes.length} حلقة',
+              '${_episodes.length} حلقة',
               style: const TextStyle(color: _muted, fontSize: 12),
             ),
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: List.generate(widget.episodes.length, (index) {
-                final number = _episodeNumber(widget.episodes[index]);
+              children: List.generate(_episodes.length, (index) {
+                final number = _episodeNumber(_episodes[index]);
                 return ChoiceChip(
                   label: Text('الحلقة $number'),
                   selected: index == _index,
@@ -3327,18 +3536,11 @@ class _EpisodePageState extends State<EpisodePage> {
 
   Future<void> _startDownload() async {
     final server = _servers.firstWhere(
-      (row) => _text(row['directStreamUrl']).isNotEmpty,
+      (row) => _isUsablePlaybackUrl(_text(row['directStreamUrl'])),
       orElse: () => _servers.first,
     );
-    var url = _text(server['directStreamUrl']);
-    if (url.isEmpty) {
-      final embed = _text(server['embedUrl']);
-      try {
-        url = _text(
-          await _native.invokeMethod<String>('media.resolve', {'url': embed}),
-        );
-      } catch (_) {}
-    }
+    final url = await _resolveServerStream(server);
+    if (!mounted) return;
     if (url.isEmpty) {
       _message(context, 'المصدر لم يوفر رابط تنزيل مباشر لهذه الحلقة.');
       return;
@@ -3363,16 +3565,12 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   Future<void> _openServer(Map<String, dynamic> server) async {
-    var url = _text(server['directStreamUrl']);
-    final embed = _text(server['embedUrl']);
-    if (url.isEmpty && embed.isNotEmpty) {
-      try {
-        url = _text(
-          await _native.invokeMethod<String>('media.resolve', {'url': embed}),
-        );
-      } catch (_) {}
+    final url = await _resolveServerStream(server);
+    if (!mounted) return;
+    if (url.isEmpty) {
+      _message(context, 'السيرفر لم يوفر رابط فيديو مباشر. جرّب سيرفرًا آخر.');
+      return;
     }
-    if (url.isEmpty) url = embed;
     final headers = server['headers'] is Map
         ? Map<String, String>.from(
             (server['headers'] as Map).map((k, v) => MapEntry('$k', '$v')),
@@ -3380,7 +3578,7 @@ class _EpisodePageState extends State<EpisodePage> {
         : <String, String>{};
     await _launchPlayer(
       context,
-      _absolute(url, _text(_episode['pageUrl'])),
+      url,
       _fullTitle,
       referer: _text(_episode['pageUrl']),
       headers: headers,
@@ -3391,14 +3589,51 @@ class _EpisodePageState extends State<EpisodePage> {
 int _episodeNumber(Map<String, dynamic> row) {
   final direct = int.tryParse(_text(row['number']));
   if (direct != null && direct > 0) return direct;
-  final value = _text(row['title']);
-  const digits = '٠١٢٣٤٥٦٧٨٩';
-  var normalized = value;
-  for (var i = 0; i < digits.length; i++) {
-    normalized = normalized.replaceAll(digits[i], '$i');
+  final value = '${_text(row['title'])} ${_text(row['pageUrl'])}';
+  final labeled = _episodeNumberFrom(value);
+  if (labeled != null) return labeled;
+  const digitSets = ['٠١٢٣٤٥٦٧٨٩', '۰۱۲۳۴۵۶۷۸۹'];
+  var numericTitle = _text(row['title']);
+  for (final digits in digitSets) {
+    for (var i = 0; i < digits.length; i++) {
+      numericTitle = numericTitle.replaceAll(digits[i], '$i');
+    }
   }
-  return int.tryParse(RegExp(r'\d+').firstMatch(normalized)?.group(0) ?? '') ??
-      0;
+  return int.tryParse(numericTitle.trim()) ?? 0;
+}
+
+bool _isUsablePlaybackUrl(String value) {
+  final uri = Uri.tryParse(value.trim());
+  if (uri == null ||
+      !uri.hasAuthority ||
+      (uri.scheme != 'http' && uri.scheme != 'https')) {
+    return false;
+  }
+  final host = uri.host.toLowerCase();
+  const redirectHosts = <String>[
+    'google.com',
+    'googleadservices.com',
+    'doubleclick.net',
+    'googlesyndication.com',
+  ];
+  return !redirectHosts.any(
+    (domain) => host == domain || host.endsWith('.$domain'),
+  );
+}
+
+Future<String> _resolveServerStream(Map<String, dynamic> server) async {
+  final direct = _text(server['directStreamUrl']).trim();
+  if (_isUsablePlaybackUrl(direct)) return direct;
+  final embed = _text(server['embedUrl']).trim();
+  if (!_isUsablePlaybackUrl(embed)) return '';
+  try {
+    final resolved = _text(
+      await _native.invokeMethod<String>('media.resolve', {'url': embed}),
+    ).trim();
+    return _isUsablePlaybackUrl(resolved) ? resolved : '';
+  } catch (_) {
+    return '';
+  }
 }
 
 int _integer(dynamic value) =>
@@ -3413,13 +3648,14 @@ String _normalizedMediaUrl(String value) => (() {
 })();
 
 int? _seasonNumberFrom(String value) {
-  const digits = '٠١٢٣٤٥٦٧٨٩';
   var text = value
       .toLowerCase()
       .replaceAll(RegExp('[أإآ]'), 'ا')
       .replaceAll('ة', 'ه');
-  for (var i = 0; i < digits.length; i++) {
-    text = text.replaceAll(digits[i], '$i');
+  for (final digits in ['٠١٢٣٤٥٦٧٨٩', '۰۱۲۳۴۵۶۷۸۹']) {
+    for (var i = 0; i < digits.length; i++) {
+      text = text.replaceAll(digits[i], '$i');
+    }
   }
   final ordinalNumbers = <String, int>{
     'الاول': 1,
@@ -3463,10 +3699,11 @@ int? _seasonNumberFrom(String value) {
 }
 
 int? _episodeNumberFrom(String value) {
-  const digits = '٠١٢٣٤٥٦٧٨٩';
   var text = value.toLowerCase();
-  for (var i = 0; i < digits.length; i++) {
-    text = text.replaceAll(digits[i], '$i');
+  for (final digits in ['٠١٢٣٤٥٦٧٨٩', '۰۱۲۳۴۵۶۷۸۹']) {
+    for (var i = 0; i < digits.length; i++) {
+      text = text.replaceAll(digits[i], '$i');
+    }
   }
   final match = RegExp(
     r'(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)[\s._#=/:-]*(\d{1,4})(?!\d)',
@@ -4151,9 +4388,7 @@ Future<void> _launchPlayer(
     return;
   }
   final uri = Uri.tryParse(url);
-  if (uri == null ||
-      !uri.hasAuthority ||
-      (uri.scheme != 'http' && uri.scheme != 'https')) {
+  if (uri == null || !_isUsablePlaybackUrl(url)) {
     _message(context, 'رابط التشغيل غير صالح.');
     return;
   }
