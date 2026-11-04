@@ -447,7 +447,7 @@ object ArabseedRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonBundleCache[pageUrl]?.let { return it }
-        val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v7:" + pageUrl) ?: return null
+        val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v8:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(cached.value)
         seasonBundleCache[pageUrl] = normalized
         seasonBundleCacheAt[pageUrl] = cached.savedAt
@@ -620,33 +620,6 @@ object ArabseedRepository {
         try {
             val watchHtml = fetchHtml(watchUrl)
             servers = parseServersFast(watchHtml)
-
-            // Resolve MySeed direct MP4 via vids.php -> player-gateway.php
-            try {
-                val vidsServer = servers.firstOrNull { it.embedUrl.contains("vids.php") }
-                val vidsSrc = vidsServer?.embedUrl ?: run {
-                    val wDoc = Jsoup.parse(watchHtml, BASE_URL)
-                    wDoc.selectFirst("iframe[src*='vids.php'], [data-link*='vids.php']")?.let {
-                        val s = it.attr("abs:src").ifBlank { it.attr("src").ifBlank { it.attr("data-link") } }.trim()
-                        if (s.startsWith("/")) "$BASE_URL$s" else s
-                    }
-                }
-                if (!vidsSrc.isNullOrBlank()) {
-                    val fullVids = if (vidsSrc.startsWith("/")) "$BASE_URL$vidsSrc" else vidsSrc
-                    val vHtml = fetchHtmlWithReferer(fullVids, "$BASE_URL/")
-                    val gwMatch = Regex("""src=["'](https?://[^"']*player-gateway\.php[^"']*)["']""").find(vHtml)
-                    val gwUrl = gwMatch?.groupValues?.get(1)?.replace("&amp;", "&")
-                    if (!gwUrl.isNullOrBlank()) {
-                        val gwHtml = fetchHtmlWithReferer(gwUrl, "$BASE_URL/")
-                        val directMatch = Regex("""<source\s+[^>]*src=["']([^"']+\.(?:mp4|m3u8)[^"']*)["']""", RegexOption.IGNORE_CASE).find(gwHtml)
-                        val directStream = directMatch?.groupValues?.get(1)
-                        if (!directStream.isNullOrBlank()) {
-                            val topServer = ArabseedServer("سيرفر ماي سيد (فائق السرعة ⚡)", fullVids, directStreamUrl = directStream)
-                            servers = listOf(topServer) + servers.filterNot { it.embedUrl.contains("vids.php") }
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
 
             if (servers.isEmpty()) servers = parseServersFast(fetchHtml(cleanUrl))
         } catch (_: Exception) {
@@ -823,7 +796,14 @@ object ArabseedRepository {
                                     url = href,
                                     allowNumericTitle = hasEpisodeListParent,
                                 )
-                                val seasonNumber = SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
+                                val explicitSeason = SeriesCatalogParser.seasonNumber(txt, href)
+                                val requestedSeason = seasonNumbersOnly?.singleOrNull()?.takeIf {
+                                    SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) == it
+                                }
+                                val seasonNumber = explicitSeason ?: requestedSeason
+                                    ?: if (seasonNumbersOnly == null) {
+                                        SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
+                                    } else null
 
                                 if (episodeNumber != null) {
                                     val key = SeriesCatalogParser.normalizedUrl(href)
@@ -973,7 +953,7 @@ object ArabseedRepository {
                         seasonNumber to collectEpisodes(seasonDoc)
                     })
                 }
-                val seasonPageWaitSeconds = 7L
+                val seasonPageWaitSeconds = 2L
                 val seasonPageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seasonPageWaitSeconds)
                 val seasonPageAssignments = mutableSetOf<String>()
                 var unfinishedSeasonPages = seasonPageFutures.size
@@ -989,11 +969,13 @@ object ArabseedRepository {
                     unfinishedSeasonPages--
                     val result = runCatching { finished.get() }.getOrNull() ?: continue
                     val (linkedSeasonNumber, linkedEpisodes) = result
-                    for ((title, url, domSeason) in linkedEpisodes) {
+                    for ((title, url, _) in linkedEpisodes) {
                         val episodeNumber = SeriesCatalogParser.episodeNumber(title, url) ?: continue
                         val urlKey = SeriesCatalogParser.normalizedUrl(url)
                         val explicitSeason = SeriesCatalogParser.seasonNumber(title, url)
-                        val resolvedSeason = explicitSeason ?: domSeason ?: linkedSeasonNumber
+                        // The tab we followed is stronger context than a broad DOM ancestor;
+                        // those ancestors can still carry the currently selected season.
+                        val resolvedSeason = explicitSeason ?: linkedSeasonNumber
                         val existingIndex = rawEpisodes.indexOfFirst {
                             SeriesCatalogParser.normalizedUrl(it.second) == urlKey
                         }
@@ -1028,6 +1010,7 @@ object ArabseedRepository {
                     val inferredSeasonNumber = when {
                         labelledSeasons.size > 1 -> null
                         labelledSeasons.size == 1 -> labelledSeasons.single()
+                        seasonNumbersOnly != null && seasonNumbersOnly.size > 1 -> null
                         expectedSeasonNumber != null -> expectedSeasonNumber
                         !isEpisodePage -> 1
                         else -> 1
@@ -1166,7 +1149,7 @@ object ArabseedRepository {
                 if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                     seasonBundleCache[item.pageUrl] = bundle
                     seasonBundleCacheAt[item.pageUrl] = System.currentTimeMillis()
-                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v7:" + item.pageUrl, bundle)
+                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v8:" + item.pageUrl, bundle)
                 }
 
                 bundle

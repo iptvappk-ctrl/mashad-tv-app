@@ -255,32 +255,30 @@ class FlutterMediaBridge(context: Context) {
 
     private fun fetchSeasons(item: ArabseedItem, forceRefresh: Boolean): ArabseedSeasonBundle {
         val cached = MultiProviderRepository.loadCachedMergedSeasonBundle(item.pageUrl)
-        val refreshIncompleteCache = !forceRefresh &&
-            MultiProviderRepository.shouldRefreshSeasonBundle(item)
-        if (cached != null && !forceRefresh && !refreshIncompleteCache) return cached
-        val shouldForceRefresh = forceRefresh || refreshIncompleteCache
-        val seasonsToRepair = if (refreshIncompleteCache) {
-            MultiProviderRepository.seasonNumbersNeedingRepair(
-                cached ?: loadCachedSeasons(item),
-            ).takeIf { it.isNotEmpty() }
-        } else null
+        // Keep the page responsive: show the saved list immediately and let the
+        // background aggregator repair every linked season without blocking Flutter.
+        if (cached != null && !forceRefresh) {
+            return MultiProviderRepository.fetchSeasonBundleWithBackgroundMerge(
+                item,
+                cached,
+                forceRefresh = false,
+            )
+        }
         val primary = if (item.providerName == "عرب سيد") {
             ArabseedRepository.fetchSeasonsAndEpisodes(
                 item,
-                shouldForceRefresh,
-                seasonNumbersOnly = seasonsToRepair,
+                forceRefresh,
             )
         } else {
             MultiProviderRepository.fetchSeasonsAndEpisodes(
                 item,
-                shouldForceRefresh,
-                seasonNumbersOnly = seasonsToRepair,
+                forceRefresh,
             )
         }
         return MultiProviderRepository.fetchSeasonBundleWithBackgroundMerge(
             item,
             primary,
-            shouldForceRefresh,
+            forceRefresh,
         )
     }
 }

@@ -116,7 +116,7 @@ class _StartupIntroState extends State<_StartupIntro> {
   @override
   void initState() {
     super.initState();
-    _timer = Timer(const Duration(milliseconds: 950), _dismissIntro);
+    _timer = Timer(const Duration(milliseconds: 1250), _dismissIntro);
   }
 
   void _dismissIntro() {
@@ -147,7 +147,7 @@ class _StartupIntroState extends State<_StartupIntro> {
             ignoring: !_visible,
             child: AnimatedOpacity(
               opacity: _visible ? 1 : 0,
-              duration: const Duration(milliseconds: 300),
+              duration: const Duration(milliseconds: 350),
               curve: Curves.easeOutCubic,
               onEnd: _removeIntro,
               child: _ZaqzoukaIntroScreen(onSkip: _dismissIntro),
@@ -228,8 +228,18 @@ class _ZaqzoukaIntroScreen extends StatelessWidget {
                           tween: Tween(begin: .78, end: 1),
                           duration: const Duration(milliseconds: 760),
                           curve: Curves.easeOutBack,
-                          builder: (context, scale, child) =>
-                              Transform.scale(scale: scale, child: child),
+                          builder: (context, scale, child) => Opacity(
+                            opacity: ((scale - .78) / .22)
+                                .clamp(0.0, 1.0)
+                                .toDouble(),
+                            child: Transform.rotate(
+                              angle: (1 - scale) * .6,
+                              child: Transform.scale(
+                                scale: scale,
+                                child: child,
+                              ),
+                            ),
+                          ),
                           child: Container(
                             width: 226,
                             height: 226,
@@ -2146,10 +2156,7 @@ class _DetailPageState extends State<DetailPage> {
     }
   }
 
-  Future<void> _pollSeasonCache(
-    int request,
-    Map<String, Object?> args,
-  ) async {
+  Future<void> _pollSeasonCache(int request, Map<String, Object?> args) async {
     try {
       for (var attempt = 0; attempt < 20; attempt++) {
         await Future<void>.delayed(const Duration(seconds: 1));
@@ -2190,18 +2197,21 @@ class _DetailPageState extends State<DetailPage> {
     if (bundle == null) return '';
     final seasons = _maps(bundle['seasons'])
       ..sort((a, b) => _integer(a['number']).compareTo(_integer(b['number'])));
-    return seasons.map((season) {
-      final episodes = _maps(season['episodes'])
-        ..sort((a, b) => _episodeNumber(a).compareTo(_episodeNumber(b)));
-      return '${_integer(season['number'])}:'
-          '${episodes.map(_episodeNumber).join(',')}';
-    }).join('|');
+    return seasons
+        .map((season) {
+          final episodes = _maps(season['episodes'])
+            ..sort((a, b) => _episodeNumber(a).compareTo(_episodeNumber(b)));
+          return '${_integer(season['number'])}:'
+              '${episodes.map(_episodeNumber).join(',')}';
+        })
+        .join('|');
   }
 
   Future<void> _refreshSeasonPage(Map<String, dynamic> season) async {
     final seasonUrl = _text(season['pageUrl']).trim();
     final seasonNumber = _integer(season['number']);
-    if (seasonUrl.isEmpty || seasonNumber <= 0 ||
+    if (seasonUrl.isEmpty ||
+        seasonNumber <= 0 ||
         !seasonUrl.startsWith('http') ||
         !_refreshingSeasonPages.add(seasonUrl)) {
       return;
@@ -2219,10 +2229,7 @@ class _DetailPageState extends State<DetailPage> {
       if (_seasonBundleSignature(merged) != _seasonBundleSignature(_bundle)) {
         setState(() {
           _bundle = merged;
-          _seasonIndex = _seasonIndexFor(
-            merged,
-            preferredNumber: seasonNumber,
-          );
+          _seasonIndex = _seasonIndexFor(merged, preferredNumber: seasonNumber);
         });
       }
     } catch (_) {
@@ -2236,14 +2243,14 @@ class _DetailPageState extends State<DetailPage> {
   void _refreshCurrentSeasonIfSparse() {
     if (_seasons.isEmpty) return;
     final selected = _seasons[_seasonIndex.clamp(0, _seasons.length - 1)];
-    if (_maps(selected['episodes']).length <= 1) {
+    if (_maps(selected['episodes']).length < 12) {
       unawaited(_refreshSeasonPage(selected));
     }
   }
 
   Future<void> _loadServers(int request) async {
     final url = widget.item.pageUrl;
-    final key = 'media:servers:${widget.item.provider}:$url';
+    final key = 'episode:servers:$url';
     try {
       final cached = await NativeBridge.readCache(key);
       if (cached != null && mounted && request == _request) {
@@ -2599,7 +2606,7 @@ class _DetailPageState extends State<DetailPage> {
                       _seasonIndex = index;
                       _manualSeasonNumber = _integer(season['number']);
                     });
-                    if (seasonEpisodes.length <= 1) {
+                    if (seasonEpisodes.length < 12) {
                       unawaited(_refreshSeasonPage(season));
                     }
                   },
@@ -2639,7 +2646,9 @@ class _DetailPageState extends State<DetailPage> {
         if (episodes.isEmpty)
           Text(
             (_seasonsLoading ||
-                    _refreshingSeasonPages.contains(_text(selected?['pageUrl'])))
+                    _refreshingSeasonPages.contains(
+                      _text(selected?['pageUrl']),
+                    ))
                 ? 'بنحمّل الحلقات في الخلفية…'
                 : 'المصدر لم يرجع حلقات لهذا الجزء.',
             style: const TextStyle(color: _muted),
@@ -2844,7 +2853,7 @@ class _DetailPageState extends State<DetailPage> {
     try {
       var servers = _servers;
       if (servers.isEmpty) {
-        final cacheKey = 'media:servers:${widget.item.provider}:$pageUrl';
+        final cacheKey = 'episode:servers:$pageUrl';
         try {
           final cached = await NativeBridge.readCache(cacheKey);
           if (cached != null) servers = _maps(jsonDecode(cached));
@@ -2916,7 +2925,8 @@ class _DetailPageState extends State<DetailPage> {
       if (servers.isEmpty) {
         servers = await NativeBridge.list('media.servers', {
           'url': url,
-          'provider': _text(episode['providerName']).ifEmpty(widget.item.provider),
+          'provider': _text(episode['providerName'])
+              .ifEmpty(widget.item.provider),
         });
         if (servers.isNotEmpty) {
           unawaited(NativeBridge.writeCache(cacheKey, jsonEncode(servers)));
@@ -2972,7 +2982,8 @@ class _DetailPageState extends State<DetailPage> {
       MaterialPageRoute(
         builder: (_) => EpisodePage(
           seriesTitle: _seriesTitle,
-          provider: _text(episodes[index]['providerName']).ifEmpty(widget.item.provider),
+          provider: _text(episodes[index]['providerName'])
+              .ifEmpty(widget.item.provider),
           seasonTitle: _text(season?['title'])
               .ifEmpty('الموسم ${_text(season?['number'])}'),
           episodes: episodes,
@@ -3286,6 +3297,7 @@ class _EpisodePageState extends State<EpisodePage> {
             _servers = rows;
             _loading = false;
           });
+        if (rows.isNotEmpty) unawaited(_prefetchFirstServer(rows));
       } catch (_) {}
     }
     if (!mounted || request != _request) return;
@@ -3302,6 +3314,7 @@ class _EpisodePageState extends State<EpisodePage> {
       });
       if (rows.isNotEmpty)
         unawaited(NativeBridge.writeCache(key, jsonEncode(rows)));
+      if (rows.isNotEmpty) unawaited(_prefetchFirstServer(rows));
     } catch (error) {
       if (mounted && request == _request)
         setState(() {
@@ -3619,6 +3632,22 @@ bool _isUsablePlaybackUrl(String value) {
   return !redirectHosts.any(
     (domain) => host == domain || host.endsWith('.$domain'),
   );
+}
+
+Future<void> _prefetchFirstServer(List<Map<String, dynamic>> servers) async {
+  final candidate = servers.firstWhere(
+    (server) =>
+        _text(server['directStreamUrl']).trim().isNotEmpty ||
+        _text(server['embedUrl']).trim().isNotEmpty,
+    orElse: () => const <String, dynamic>{},
+  );
+  if (candidate.isEmpty ||
+      _text(candidate['directStreamUrl']).trim().isNotEmpty) {
+    return;
+  }
+  // Warm the native resolver after displaying server choices so a tap can use
+  // its in-memory result instead of waiting for the first resolver request.
+  await _resolveServerStream(candidate);
 }
 
 Future<String> _resolveServerStream(Map<String, dynamic> server) async {
