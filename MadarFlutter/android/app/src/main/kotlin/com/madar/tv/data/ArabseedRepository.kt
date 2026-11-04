@@ -447,7 +447,7 @@ object ArabseedRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonBundleCache[pageUrl]?.let { return it }
-        val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v8:" + pageUrl) ?: return null
+            val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v12:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(cached.value)
         seasonBundleCache[pageUrl] = normalized
         seasonBundleCacheAt[pageUrl] = cached.savedAt
@@ -754,6 +754,9 @@ object ArabseedRepository {
 
 
                 val rawEpisodes = mutableListOf<Triple<String, String, Int?>>()
+                val pageSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                val requestedSeasonPageNumber = seasonNumbersOnly?.singleOrNull()
+                    ?.takeIf { pageSeasonNumber == it }
                 val episodeSelectors = listOf(
                     "a.episode__item", ".episode__item a",
                     "a[href*='%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9']",
@@ -796,14 +799,14 @@ object ArabseedRepository {
                                     url = href,
                                     allowNumericTitle = hasEpisodeListParent,
                                 )
-                                val explicitSeason = SeriesCatalogParser.seasonNumber(txt, href)
-                                val requestedSeason = seasonNumbersOnly?.singleOrNull()?.takeIf {
-                                    SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) == it
-                                }
-                                val seasonNumber = explicitSeason ?: requestedSeason
-                                    ?: if (seasonNumbersOnly == null) {
-                                        SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
-                                    } else null
+                                val linkSeason = SeriesCatalogParser.seasonNumber(txt, href)
+                                    ?: SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
+                                if (seasonNumbersOnly != null && linkSeason != null &&
+                                    linkSeason !in seasonNumbersOnly
+                                ) continue
+                                // A nearby season container beats the page's season hint.
+                                // Provider pages can include links from another season in a sidebar.
+                                val seasonNumber = linkSeason ?: requestedSeasonPageNumber
 
                                 if (episodeNumber != null) {
                                     val key = SeriesCatalogParser.normalizedUrl(href)
@@ -827,6 +830,32 @@ object ArabseedRepository {
                         rawEpisodes += ep
                     } else if (rawEpisodes[existingIndex].third == null && ep.third != null) {
                         rawEpisodes[existingIndex] = ep
+                    }
+                }
+
+                val visibleEpisodeGroups = docEps.groupBy { (title, url, season) ->
+                    SeriesCatalogParser.seasonNumber(title, url) ?: season ?: requestedSeasonPageNumber
+                }
+                val hasSparseVisibleEpisodes = visibleEpisodeGroups.values.any { rows ->
+                    SeriesCatalogParser.needsEpisodeSequenceRepair(
+                        rows.mapNotNull { SeriesCatalogParser.episodeNumber(it.first, it.second) },
+                    )
+                }
+                if (hasSparseVisibleEpisodes && SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()) {
+                    val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                        firstDocument = doc,
+                        firstPageUrl = item.pageUrl,
+                        fetchDocument = { pageUrl ->
+                            fetchSeasonHtml(pageUrl).takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
+                        },
+                        parseEpisodes = ::collectEpisodes,
+                    )
+                    for (ep in paginated) {
+                        val existingIndex = rawEpisodes.indexOfFirst {
+                            SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(ep.second)
+                        }
+                        if (existingIndex < 0) rawEpisodes += ep
+                        else if (rawEpisodes[existingIndex].third == null && ep.third != null) rawEpisodes[existingIndex] = ep
                     }
                 }
 
@@ -933,16 +962,18 @@ object ArabseedRepository {
                     .distinctBy { it.first }
                 val seasonPageUrlByNumber = seasonPages.groupBy { it.first }
                     .mapValues { (_, rows) -> rows.first().second }
-                val visibleCounts = rawEpisodes.mapNotNull { (title, url, seasonNumber) ->
+                val visibleEpisodeNumbers = rawEpisodes.mapNotNull { (title, url, seasonNumber) ->
                     val episodeNumber = SeriesCatalogParser.episodeNumber(title, url) ?: return@mapNotNull null
                     val resolvedSeason = SeriesCatalogParser.seasonNumber(title, url)
                         ?: seasonNumber ?: return@mapNotNull null
                     resolvedSeason to episodeNumber
-                }.groupingBy { it.first }.eachCount()
+                }.groupBy({ it.first }, { it.second })
                 val seasonPagesToFetch = seasonPages
                     .filter { (number, _) ->
                         (seasonNumbersOnly == null || number in seasonNumbersOnly) &&
-                            (forceRefresh || (visibleCounts[number] ?: 0) < 2)
+                            (forceRefresh || SeriesCatalogParser.needsEpisodeSequenceRepair(
+                                visibleEpisodeNumbers[number].orEmpty(),
+                            ))
                     }
                     .take(30)
                 val seasonPageCompletion = ExecutorCompletionService<Pair<Int, List<Triple<String, String, Int?>>>>(seasonPagePool)
@@ -950,10 +981,22 @@ object ArabseedRepository {
                     seasonPageCompletion.submit(Callable {
                         val seasonDoc = Jsoup.parse(fetchSeasonHtml(seasonUrl), BASE_URL)
                         seasonDoc.select("footer, script, style").remove()
-                        seasonNumber to collectEpisodes(seasonDoc)
+                        val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                            firstDocument = seasonDoc,
+                            firstPageUrl = seasonUrl,
+                            fetchDocument = { pageUrl ->
+                                fetchSeasonHtml(pageUrl).takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
+                            },
+                            parseEpisodes = { page ->
+                                collectEpisodes(page).map { (title, url, number) ->
+                                    Triple(title, url, number ?: seasonNumber)
+                                }
+                            },
+                        )
+                        seasonNumber to paginated
                     })
                 }
-                val seasonPageWaitSeconds = 2L
+                val seasonPageWaitSeconds = 7L
                 val seasonPageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seasonPageWaitSeconds)
                 val seasonPageAssignments = mutableSetOf<String>()
                 var unfinishedSeasonPages = seasonPageFutures.size
@@ -969,12 +1012,11 @@ object ArabseedRepository {
                     unfinishedSeasonPages--
                     val result = runCatching { finished.get() }.getOrNull() ?: continue
                     val (linkedSeasonNumber, linkedEpisodes) = result
-                    for ((title, url, _) in linkedEpisodes) {
+                    for ((title, url, parsedSeason) in linkedEpisodes) {
                         val episodeNumber = SeriesCatalogParser.episodeNumber(title, url) ?: continue
                         val urlKey = SeriesCatalogParser.normalizedUrl(url)
-                        val explicitSeason = SeriesCatalogParser.seasonNumber(title, url)
-                        // The tab we followed is stronger context than a broad DOM ancestor;
-                        // those ancestors can still carry the currently selected season.
+                        val explicitSeason = SeriesCatalogParser.seasonNumber(title, url) ?: parsedSeason
+                        if (explicitSeason != null && explicitSeason != linkedSeasonNumber) continue
                         val resolvedSeason = explicitSeason ?: linkedSeasonNumber
                         val existingIndex = rawEpisodes.indexOfFirst {
                             SeriesCatalogParser.normalizedUrl(it.second) == urlKey
@@ -982,11 +1024,8 @@ object ArabseedRepository {
                         if (existingIndex < 0) {
                             rawEpisodes += Triple(title, url, resolvedSeason)
                             seasonPageAssignments += urlKey
-                        } else if (urlKey !in seasonPageAssignments && explicitSeason == null) {
+                        } else if (urlKey !in seasonPageAssignments) {
                             rawEpisodes[existingIndex] = Triple(title, url, resolvedSeason)
-                            seasonPageAssignments += urlKey
-                        } else if (explicitSeason != null) {
-                            rawEpisodes[existingIndex] = Triple(title, url, explicitSeason)
                             seasonPageAssignments += urlKey
                         }
                     }
@@ -998,8 +1037,10 @@ object ArabseedRepository {
                 // unlabeled sidebar/recommendation links are omitted instead of mixed in.
                 val seasons = mutableListOf<ArabseedSeason>()
                 if (rawEpisodes.isNotEmpty()) {
-                    val expectedSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
-                        ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+                    val expectedSeasonNumber = pageSeasonNumber
+                        ?: if (seasonNumbersOnly == null && (isEpisodePage || seasonPages.isEmpty())) {
+                            SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+                        } else null
                     val parsedEpisodes = rawEpisodes.mapNotNull { (title, url, domSeasonNumber) ->
                         val episodeNumber = SeriesCatalogParser.episodeNumber(title, url) ?: return@mapNotNull null
                         val seasonNumber = domSeasonNumber
@@ -1010,13 +1051,18 @@ object ArabseedRepository {
                     val inferredSeasonNumber = when {
                         labelledSeasons.size > 1 -> null
                         labelledSeasons.size == 1 -> labelledSeasons.single()
-                        seasonNumbersOnly != null && seasonNumbersOnly.size > 1 -> null
+                        requestedSeasonPageNumber != null -> requestedSeasonPageNumber
+                        seasonNumbersOnly != null -> null
                         expectedSeasonNumber != null -> expectedSeasonNumber
-                        !isEpisodePage -> 1
-                        else -> 1
+                        !isEpisodePage && seasonPages.isEmpty() -> 1
+                        else -> null
                     }
                     val numberedEpisodes = parsedEpisodes.mapNotNull { (seasonNumber, episodeNumber, url) ->
-                        (seasonNumber ?: inferredSeasonNumber)?.let { Triple(it, episodeNumber, url) }
+                        (seasonNumber ?: inferredSeasonNumber)?.takeIf { resolvedSeason ->
+                            (seasonNumbersOnly == null || resolvedSeason in seasonNumbersOnly) &&
+                                (seasonPages.isEmpty() || resolvedSeason in seasonPageUrlByNumber ||
+                                    pageSeasonNumber == resolvedSeason)
+                        }?.let { Triple(it, episodeNumber, url) }
                     }
 
                     numberedEpisodes.groupBy { it.first }.toSortedMap().forEach { (sNum, rows) ->
@@ -1149,7 +1195,7 @@ object ArabseedRepository {
                 if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                     seasonBundleCache[item.pageUrl] = bundle
                     seasonBundleCacheAt[item.pageUrl] = System.currentTimeMillis()
-                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v8:" + item.pageUrl, bundle)
+                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v12:" + item.pageUrl, bundle)
                 }
 
                 bundle

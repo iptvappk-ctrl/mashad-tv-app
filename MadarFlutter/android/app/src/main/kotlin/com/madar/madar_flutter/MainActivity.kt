@@ -1,13 +1,32 @@
 package com.madar.madar_flutter
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
+import com.madar.tv.notifications.NotificationCenter
+import com.madar.tv.notifications.NotificationWorkScheduler
 
 class MainActivity : FlutterActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        runCatching { NotificationCenter.createChannels(applicationContext) }
+            .onFailure { android.util.Log.e(STARTUP_TAG, "Notification channels unavailable", it) }
+        runCatching { NotificationWorkScheduler.schedule(applicationContext) }
+            .onFailure { android.util.Log.e(STARTUP_TAG, "Background notification scheduling unavailable", it) }
+        runCatching { requestNotificationPermissionOnce() }
+            .onFailure { android.util.Log.e(STARTUP_TAG, "Notification permission request failed", it) }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val mediaBridge = FlutterMediaBridge(applicationContext)
@@ -27,9 +46,43 @@ class MainActivity : FlutterActivity() {
                     "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), call.argument("backupSourcesJson"), call.argument<Boolean>("live") ?: false, result)
                     "player.store" -> openPlayerStore(result)
                     "download.start" -> startDownload(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), result)
+                    "notifications.status" -> result.success(
+                        mapOf("enabled" to runCatching {
+                            NotificationCenter.areNotificationsAllowed(this)
+                        }.getOrDefault(false)),
+                    )
+                    "notifications.settings" -> openNotificationSettings(result)
                     else -> if (!mediaBridge.handle(call, result)) result.notImplemented()
                 }
             }
+    }
+
+    private fun requestNotificationPermissionOnce() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) return
+
+        val prefs = getSharedPreferences("notification_permission", MODE_PRIVATE)
+        if (prefs.getBoolean("requested_v1", false)) return
+        prefs.edit().putBoolean("requested_v1", true).apply()
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_NOTIFICATIONS,
+        )
+    }
+
+    private fun openNotificationSettings(result: MethodChannel.Result) {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        }
+        runCatching { startActivity(intent) }
+            .onSuccess { result.success(true) }
+            .onFailure { result.success(false) }
     }
 
     private fun startDownload(url: String?, title: String?, userAgent: String?, referer: String?, result: MethodChannel.Result) {
@@ -105,5 +158,10 @@ class MainActivity : FlutterActivity() {
             }
         }
         result.success(true)
+    }
+
+    companion object {
+        private const val STARTUP_TAG = "ZaqzoukaStartup"
+        private const val REQUEST_NOTIFICATIONS = 7001
     }
 }

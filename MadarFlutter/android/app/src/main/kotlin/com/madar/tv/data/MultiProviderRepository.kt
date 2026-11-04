@@ -159,7 +159,7 @@ object MultiProviderRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonCache[pageUrl]?.let { return it }
-        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v8:" + pageUrl) ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v12:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
         seasonCache[pageUrl] = normalized
         seasonCacheAt[pageUrl] = snapshot.savedAt
@@ -167,7 +167,7 @@ object MultiProviderRepository {
     }
 
     fun loadCachedMergedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
-        val snapshot = CatalogDiskCache.loadSeasonBundle("combined:seasons:v6:$pageUrl") ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("combined:seasons:v11:$pageUrl") ?: return null
         if (System.currentTimeMillis() - snapshot.savedAt > SEASON_TTL) return null
         return SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
     }
@@ -179,11 +179,40 @@ object MultiProviderRepository {
         seasonBundle: ArabseedSeasonBundle,
     ) {
         val existing = loadCachedMergedSeasonBundle(seriesItem.pageUrl) ?: ArabseedSeasonBundle(emptyList())
-        val merged = mergeProviderSeasonBundles(
-            listOf(seasonItem to seasonBundle, seriesItem to existing),
-        )
+        val targetSeasonNumber = SeriesCatalogParser.seasonNumber(seasonItem.title, seasonItem.pageUrl)
+            ?: seasonBundle.seasons.singleOrNull()?.number
+        val correctedSeason = seasonBundle.seasons
+            .firstOrNull { it.number == targetSeasonNumber && it.episodes.isNotEmpty() }
+            ?.let { season ->
+                val previousEpisodes = existing.seasons
+                    .firstOrNull { it.number == season.number }
+                    ?.episodes
+                    .orEmpty()
+                val episodesByNumber = linkedMapOf<Int, ArabseedEpisode>()
+                previousEpisodes
+                    .filter { it.number > 0 && it.pageUrl.isNotBlank() }
+                    .forEach { episodesByNumber[it.number] = it.copy(seasonNumber = season.number) }
+                // Fresh page data wins duplicate numbers, while the union keeps
+                // episodes that a partial provider response omitted this time.
+                season.episodes
+                    .filter { it.number > 0 && it.pageUrl.isNotBlank() }
+                    .forEach { episodesByNumber[it.number] = it.copy(seasonNumber = season.number) }
+                season.copy(
+                    episodes = episodesByNumber.values
+                        .sortedBy { it.number },
+                )
+            }
+        val merged = if (targetSeasonNumber != null && correctedSeason != null) {
+            SeriesCatalogParser.normalizeSeasonBundle(
+                existing.copy(
+                    seasons = existing.seasons.filterNot { it.number == targetSeasonNumber } + correctedSeason,
+                ),
+            )
+        } else {
+            mergeProviderSeasonBundles(listOf(seasonItem to seasonBundle, seriesItem to existing))
+        }
         if (merged.seasons.isNotEmpty() || merged.relatedParts.isNotEmpty()) {
-            CatalogDiskCache.saveSeasonBundle("combined:seasons:v6:${seriesItem.pageUrl}", merged)
+            CatalogDiskCache.saveSeasonBundle("combined:seasons:v11:${seriesItem.pageUrl}", merged)
         }
     }
 
@@ -1332,6 +1361,9 @@ object MultiProviderRepository {
             doc.select("footer, script, style").remove()
 
             val rawEpisodes = mutableListOf<Triple<String, String, Int?>>()
+            val pageSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+            val requestedSeasonPageNumber = seasonNumbersOnly?.singleOrNull()
+                ?.takeIf { pageSeasonNumber == it }
             val selectors = listOf(
                 ".episodes-list a", ".EpisodesList li a", ".eplister li a",
                 ".eps-list li a", ".eps a", "a.episode__item", ".episode__item a", "a.ep-item",
@@ -1368,14 +1400,13 @@ object MultiProviderRepository {
                                 url = href,
                                 allowNumericTitle = hasEpisodeListParent,
                             )
-                            val explicitSeason = SeriesCatalogParser.seasonNumber(txt, href)
-                            val requestedSeason = seasonNumbersOnly?.singleOrNull()?.takeIf {
-                                SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) == it
-                            }
-                            val seasonNumber = explicitSeason ?: requestedSeason
-                                ?: if (seasonNumbersOnly == null) {
-                                    SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
-                                } else null
+                            val linkSeason = SeriesCatalogParser.seasonNumber(txt, href)
+                                ?: SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
+                            if (seasonNumbersOnly != null && linkSeason != null &&
+                                linkSeason !in seasonNumbersOnly
+                            ) continue
+                            // Prefer the episode's own season context over the fetched page hint.
+                            val seasonNumber = linkSeason ?: requestedSeasonPageNumber
                             if (href.startsWith("http") && episodeNumber != null) {
                                 val key = SeriesCatalogParser.normalizedUrl(href)
                                 val previous = collected[key]
@@ -1398,6 +1429,32 @@ object MultiProviderRepository {
                     rawEpisodes += ep
                 } else if (rawEpisodes[existingIndex].third == null && ep.third != null) {
                     rawEpisodes[existingIndex] = ep
+                }
+            }
+
+            val visibleEpisodeGroups = docEps.groupBy { (title, href, season) ->
+                SeriesCatalogParser.seasonNumber(title, href) ?: season ?: requestedSeasonPageNumber
+            }
+            val hasSparseVisibleEpisodes = visibleEpisodeGroups.values.any { rows ->
+                SeriesCatalogParser.needsEpisodeSequenceRepair(
+                    rows.mapNotNull { SeriesCatalogParser.episodeNumber(it.first, it.second) },
+                )
+            }
+            if (hasSparseVisibleEpisodes && SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()) {
+                val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                    firstDocument = doc,
+                    firstPageUrl = item.pageUrl,
+                    fetchDocument = { pageUrl ->
+                        fetchHtml(pageUrl, baseUrl).takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
+                    },
+                    parseEpisodes = ::collectEpisodes,
+                )
+                for (ep in paginated) {
+                    val existingIndex = rawEpisodes.indexOfFirst {
+                        SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(ep.second)
+                    }
+                    if (existingIndex < 0) rawEpisodes += ep
+                    else if (rawEpisodes[existingIndex].third == null && ep.third != null) rawEpisodes[existingIndex] = ep
                 }
             }
 
@@ -1502,16 +1559,18 @@ object MultiProviderRepository {
                 .distinctBy { it.first }
             val seasonPageUrlByNumber = seasonPages.groupBy { it.first }
                 .mapValues { (_, rows) -> rows.first().second }
-            val visibleCounts = rawEpisodes.mapNotNull { (title, href, seasonNumber) ->
+            val visibleEpisodeNumbers = rawEpisodes.mapNotNull { (title, href, seasonNumber) ->
                 val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: return@mapNotNull null
                 val resolvedSeason = SeriesCatalogParser.seasonNumber(title, href)
                     ?: seasonNumber ?: return@mapNotNull null
                 resolvedSeason to episodeNumber
-            }.groupingBy { it.first }.eachCount()
+            }.groupBy({ it.first }, { it.second })
             val seasonPagesToFetch = seasonPages
                 .filter { (number, _) ->
                     (seasonNumbersOnly == null || number in seasonNumbersOnly) &&
-                        (forceRefresh || (visibleCounts[number] ?: 0) < 2)
+                        (forceRefresh || SeriesCatalogParser.needsEpisodeSequenceRepair(
+                            visibleEpisodeNumbers[number].orEmpty(),
+                        ))
                 }
                 .take(30)
             val seasonPageCompletion = ExecutorCompletionService<Pair<Int, List<Triple<String, String, Int?>>>>(seasonPagePool)
@@ -1519,10 +1578,22 @@ object MultiProviderRepository {
                 seasonPageCompletion.submit(Callable {
                     val seasonDoc = Jsoup.parse(fetchHtml(seasonUrl, baseUrl), baseUrl)
                     seasonDoc.select("footer, script, style").remove()
-                    seasonNumber to collectEpisodes(seasonDoc)
+                    val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                        firstDocument = seasonDoc,
+                        firstPageUrl = seasonUrl,
+                        fetchDocument = { pageUrl ->
+                            fetchHtml(pageUrl, baseUrl).takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
+                        },
+                        parseEpisodes = { page ->
+                            collectEpisodes(page).map { (title, href, number) ->
+                                Triple(title, href, number ?: seasonNumber)
+                            }
+                        },
+                    )
+                    seasonNumber to paginated
                 })
             }
-            val seasonPageWaitSeconds = 2L
+            val seasonPageWaitSeconds = 7L
             val seasonPageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seasonPageWaitSeconds)
             val seasonPageAssignments = mutableSetOf<String>()
             var unfinishedSeasonPages = seasonPageFutures.size
@@ -1538,32 +1609,30 @@ object MultiProviderRepository {
                 unfinishedSeasonPages--
                 val result = runCatching { finished.get() }.getOrNull() ?: continue
                 val (linkedSeasonNumber, linkedEpisodes) = result
-                for ((title, href, _) in linkedEpisodes) {
+                for ((title, href, parsedSeason) in linkedEpisodes) {
                     val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: continue
                     val urlKey = SeriesCatalogParser.normalizedUrl(href)
-                    val explicitSeason = SeriesCatalogParser.seasonNumber(title, href)
-                        // The tab we followed is stronger context than a broad DOM ancestor;
-                        // those ancestors can still carry the currently selected season.
-                        val resolvedSeason = explicitSeason ?: linkedSeasonNumber
+                    val explicitSeason = SeriesCatalogParser.seasonNumber(title, href) ?: parsedSeason
+                    if (explicitSeason != null && explicitSeason != linkedSeasonNumber) continue
+                    val resolvedSeason = explicitSeason ?: linkedSeasonNumber
                     val existingIndex = rawEpisodes.indexOfFirst {
                         SeriesCatalogParser.normalizedUrl(it.second) == urlKey
                     }
                     if (existingIndex < 0) {
                         rawEpisodes += Triple(title, href, resolvedSeason)
                         seasonPageAssignments += urlKey
-                    } else if (urlKey !in seasonPageAssignments && explicitSeason == null) {
+                    } else if (urlKey !in seasonPageAssignments) {
                         rawEpisodes[existingIndex] = Triple(title, href, resolvedSeason)
-                        seasonPageAssignments += urlKey
-                    } else if (explicitSeason != null) {
-                        rawEpisodes[existingIndex] = Triple(title, href, explicitSeason)
                         seasonPageAssignments += urlKey
                     }
                 }
             }
             seasonPageFutures.forEach { if (!it.isDone) it.cancel(true) }
 
-            val expectedSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
-                ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+            val expectedSeasonNumber = pageSeasonNumber
+                ?: if (seasonNumbersOnly == null && (isEpisodePage || seasonPages.isEmpty())) {
+                    SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+                } else null
             val parsedEpisodes = rawEpisodes.mapNotNull { (title, href, domSeasonNumber) ->
                 val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: return@mapNotNull null
                 val seasonNumber = domSeasonNumber
@@ -1574,13 +1643,18 @@ object MultiProviderRepository {
             val inferredSeasonNumber = when {
                 labelledSeasons.size > 1 -> null
                 labelledSeasons.size == 1 -> labelledSeasons.single()
-                seasonNumbersOnly != null && seasonNumbersOnly.size > 1 -> null
+                requestedSeasonPageNumber != null -> requestedSeasonPageNumber
+                seasonNumbersOnly != null -> null
                 expectedSeasonNumber != null -> expectedSeasonNumber
-                !isEpisodePage -> 1
-                else -> 1
+                !isEpisodePage && seasonPages.isEmpty() -> 1
+                else -> null
             }
             val numberedEpisodes = parsedEpisodes.mapNotNull { (seasonNumber, episodeNumber, href) ->
-                (seasonNumber ?: inferredSeasonNumber)?.let { Triple(it, episodeNumber, href) }
+                (seasonNumber ?: inferredSeasonNumber)?.takeIf { resolvedSeason ->
+                    (seasonNumbersOnly == null || resolvedSeason in seasonNumbersOnly) &&
+                        (seasonPages.isEmpty() || resolvedSeason in seasonPageUrlByNumber ||
+                            pageSeasonNumber == resolvedSeason)
+                }?.let { Triple(it, episodeNumber, href) }
             }
             val seasons = numberedEpisodes.groupBy { it.first }.toSortedMap().map { (seasonNumber, rows) ->
                 val episodes = rows
@@ -1667,7 +1741,7 @@ object MultiProviderRepository {
             if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                 seasonCache[item.pageUrl] = bundle
                 seasonCacheAt[item.pageUrl] = System.currentTimeMillis()
-                CatalogDiskCache.saveSeasonBundle("providers:seasons:v8:" + item.pageUrl, bundle)
+                CatalogDiskCache.saveSeasonBundle("providers:seasons:v12:" + item.pageUrl, bundle)
             }
             bundle
         } catch (_: Exception) {
@@ -1683,7 +1757,7 @@ object MultiProviderRepository {
         primaryBundle: ArabseedSeasonBundle,
         forceRefresh: Boolean = false,
     ): ArabseedSeasonBundle {
-        val cacheKey = "combined:seasons:v6:${item.pageUrl}"
+        val cacheKey = "combined:seasons:v11:${item.pageUrl}"
         if (!forceRefresh) loadCachedMergedSeasonBundle(item.pageUrl)?.let { cached ->
             if (!needsSeasonEnrichment(item, cached) &&
                 (primaryBundle.seasons.isEmpty() ||
@@ -1711,11 +1785,12 @@ object MultiProviderRepository {
                         .filter { candidate ->
                             val exactTitleMatch = seriesIdentityKeys(candidate).any { it == titleKey }
                             val candidateYear = releaseYear(candidate)
-                            val compatibleYear = year.isBlank() || candidateYear.isBlank() || year == candidateYear
+                            val isSeasonPage = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl) != null
+                            val compatibleYear = year.isBlank() || candidateYear.isBlank() ||
+                                year == candidateYear || isSeasonPage
                             candidate.type == ArabseedType.SERIES &&
                                 !SeriesCatalogParser.isEpisode(candidate.title, candidate.pageUrl) &&
-                                matchesSeriesTitle(titleKey, candidate) &&
-                                (exactTitleMatch || compatibleYear)
+                                exactTitleMatch && compatibleYear
                         }
                         .distinctBy { SeriesCatalogParser.normalizedUrl(it.pageUrl) }
                         .toList()
@@ -1730,24 +1805,16 @@ object MultiProviderRepository {
         val candidates = selectSeriesPages(discovered)
             .filter { SeriesCatalogParser.normalizedUrl(it.pageUrl) != primaryUrl }
             .distinctBy { SeriesCatalogParser.normalizedUrl(it.pageUrl) }
-        val primaryEpisodeCounts = primaryBundle.seasons.associate { season ->
-            season.number to season.episodes.map { it.number }.distinct().size
-        }
+        val primarySeasonNumbers = primaryBundle.seasons.map { it.number }.filter { it > 0 }.distinct()
         val seasonPagesByNumber = candidates
             .mapNotNull { candidate ->
                 SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl)?.let { it to candidate }
             }
             .groupBy({ it.first }, { it.second })
-        // A season with a few visible episodes can still be severely truncated.
-        // Recheck every known season in the background and merge by season + episode number.
-        val knownSeasonNumbers = (primaryEpisodeCounts.keys + seasonPagesByNumber.keys)
-            .distinct()
-            .sorted()
-        val missingSeasonNumbers = if (knownSeasonNumbers.size > 1) {
-            (knownSeasonNumbers.first()..knownSeasonNumbers.last())
-                .filter { it !in knownSeasonNumbers }
-        } else emptyList()
-        val seasonsToRepair = (knownSeasonNumbers + missingSeasonNumbers).distinct().sorted()
+        // Recheck known seasons in the background; the merge routine keeps
+        // episode identity scoped to its season and number.
+        val knownSeasonNumbers = primarySeasonNumbers.sorted()
+        val seasonsToRepair = knownSeasonNumbers
         val localSeasonMirrors = primaryBundle.seasons
             .filter { it.number in seasonsToRepair && it.pageUrl.startsWith("http", ignoreCase = true) }
             .sortedBy { it.number }
@@ -1777,10 +1844,7 @@ object MultiProviderRepository {
             .values
             .mapNotNull { rows -> rows.maxByOrNull(::catalogMetadataScore) }
             .take(3)
-            .map {
-                val missingSeasons = seasonsToRepair.toSet()
-                it to missingSeasons.takeIf { numbers -> numbers.isNotEmpty() }
-            }
+            .map { it to null }
         val mirrors = (localSeasonMirrors + seasonPageMirrors + canonicalMirrors)
             .distinctBy { SeriesCatalogParser.normalizedUrl(it.first.pageUrl) }
             .take(16)
@@ -1824,7 +1888,9 @@ object MultiProviderRepository {
             .toSet()
         val newestSeason = merged.seasons.maxOfOrNull { it.number } ?: 0
         val unresolvedSparseEarlierSeason = merged.seasons.any {
-            it.number < newestSeason && it.episodes.size < 12
+            it.number < newestSeason && SeriesCatalogParser.needsEpisodeSequenceRepair(
+                it.episodes.map { episode -> episode.number },
+            )
         }
         if (seasonsToRepair.isNotEmpty() && repairedSeasons.containsAll(seasonsToRepair) &&
             !unresolvedSparseEarlierSeason
@@ -1892,23 +1958,20 @@ object MultiProviderRepository {
 
     fun seasonNumbersNeedingRepair(bundle: ArabseedSeasonBundle?): Set<Int> {
         if (bundle == null) return emptySet()
-        val seasonNumbers = bundle.seasons.map { it.number }.filter { it > 0 }.distinct().sorted()
-        val incomplete = bundle.seasons
-            .filter { it.number > 0 && (it.episodes.size < 12 || it.pageUrl.isNotBlank()) }
-            .mapTo(linkedSetOf()) { it.number }
-        if (seasonNumbers.size > 1) {
-            for (number in seasonNumbers.first()..seasonNumbers.last()) {
-                if (number !in seasonNumbers) incomplete += number
+        return bundle.seasons
+            .filter {
+                it.number > 0 && SeriesCatalogParser.needsEpisodeSequenceRepair(
+                    it.episodes.map { episode -> episode.number },
+                )
             }
-        }
-        return incomplete
+            .mapTo(linkedSetOf()) { it.number }
     }
 
     private fun seasonEnrichmentAttemptKey(pageUrl: String): String =
-        "combined:season-attempt:v2:$pageUrl"
+        "combined:season-attempt:v7:$pageUrl"
 
     private fun seasonEnrichmentCompleteKey(pageUrl: String): String =
-        "combined:season-complete:v1:$pageUrl"
+        "combined:season-complete:v6:$pageUrl"
 
     private fun needsSeasonEnrichment(item: ArabseedItem, bundle: ArabseedSeasonBundle): Boolean {
         if (item.type != ArabseedType.SERIES) return false
@@ -1919,12 +1982,14 @@ object MultiProviderRepository {
         ) return false
         if (bundle.seasons.isEmpty()) return true
         if (bundle.seasons.any { it.episodes.isEmpty() }) return true
+        if (bundle.seasons.any { it.pageUrl.isNotBlank() }) return true
         val numbers = bundle.seasons.map { it.number }.filter { it > 0 }.distinct().sorted()
-        if (numbers.size > 1 && numbers.last() - numbers.first() + 1 > numbers.size) return true
         val newestSeason = numbers.maxOrNull() ?: return false
         return bundle.seasons.any {
             it.number in numbers && it.number < newestSeason &&
-                it.episodes.size < 12
+                SeriesCatalogParser.needsEpisodeSequenceRepair(
+                    it.episodes.map { episode -> episode.number },
+                )
         }
     }
 
