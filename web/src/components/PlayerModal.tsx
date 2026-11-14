@@ -522,7 +522,7 @@ export default function PlayerModal({
       : "object-contain";
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center backdrop-blur-2xl animate-fadeIn p-0 sm:p-4">
+    <div className="player-modal fixed inset-0 z-50 bg-black/95 flex items-center justify-center backdrop-blur-2xl animate-fadeIn p-0 sm:p-4">
       <div
         ref={containerRef}
         onMouseMove={resetHideTimer}

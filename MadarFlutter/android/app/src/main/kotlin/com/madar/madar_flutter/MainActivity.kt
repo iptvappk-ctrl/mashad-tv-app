@@ -1,4 +1,4 @@
-package com.madar.madar_flutter
+﻿package com.madar.madar_flutter
 
 import android.Manifest
 import android.content.Intent
@@ -11,14 +11,18 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
 import com.madar.tv.notifications.NotificationCenter
 import com.madar.tv.notifications.NotificationWorkScheduler
 
 class MainActivity : FlutterActivity() {
+    private lateinit var inAppUpdateManager: InAppUpdateManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        inAppUpdateManager = InAppUpdateManager(this)
         runCatching { NotificationCenter.createChannels(applicationContext) }
             .onFailure { android.util.Log.e(STARTUP_TAG, "Notification channels unavailable", it) }
         runCatching { NotificationWorkScheduler.schedule(applicationContext) }
@@ -45,16 +49,39 @@ class MainActivity : FlutterActivity() {
                     }
                     "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), call.argument("backupSourcesJson"), call.argument<Boolean>("live") ?: false, result)
                     "player.store" -> openPlayerStore(result)
+                    "youtube.open" -> openYouTube(call.argument("videoId"), call.argument("watchUrl"), result)
                     "download.start" -> startDownload(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), result)
+                    "updates.check" -> inAppUpdateManager.checkForUpdate(result)
+                    "updates.install" -> inAppUpdateManager.downloadAndInstall(result)
                     "notifications.status" -> result.success(
                         mapOf("enabled" to runCatching {
                             NotificationCenter.areNotificationsAllowed(this)
                         }.getOrDefault(false)),
                     )
+                    "notifications.request" -> requestNotificationPermissionFromUser(result)
                     "notifications.settings" -> openNotificationSettings(result)
                     else -> if (!mediaBridge.handle(call, result)) result.notImplemented()
                 }
             }
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, "madar/updates/progress")
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    inAppUpdateManager.setProgressSink(events)
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    inAppUpdateManager.setProgressSink(null)
+                }
+            })
+    }
+
+    override fun onResume() {
+        super.onResume()
+    }
+
+    override fun onDestroy() {
+        if (::inAppUpdateManager.isInitialized) inAppUpdateManager.close()
+        super.onDestroy()
     }
 
     private fun requestNotificationPermissionOnce() {
@@ -64,13 +91,42 @@ class MainActivity : FlutterActivity() {
         ) return
 
         val prefs = getSharedPreferences("notification_permission", MODE_PRIVATE)
-        if (prefs.getBoolean("requested_v1", false)) return
-        prefs.edit().putBoolean("requested_v1", true).apply()
+        if (prefs.getBoolean("requested_v2", false)) return
+        prefs.edit().putBoolean("requested_v2", true).apply()
         ActivityCompat.requestPermissions(
             this,
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
             REQUEST_NOTIFICATIONS,
         )
+    }
+
+    private fun requestNotificationPermissionFromUser(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success(true)
+            return
+        }
+
+        val prefs = getSharedPreferences("notification_permission", MODE_PRIVATE)
+        val requestedBefore = prefs.getBoolean("requested_v2", false)
+        if (requestedBefore &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            )
+        ) {
+            openNotificationSettings(result)
+            return
+        }
+        prefs.edit().putBoolean("requested_v2", true).apply()
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_NOTIFICATIONS,
+        )
+        result.success(true)
     }
 
     private fun openNotificationSettings(result: MethodChannel.Result) {
@@ -146,6 +202,27 @@ class MainActivity : FlutterActivity() {
         return redirectDomains.none { host == it || host.endsWith(".$it") }
     }
 
+    private fun openYouTube(videoId: String?, watchUrl: String?, result: MethodChannel.Result) {
+        val id = videoId.orEmpty()
+        val fallback = watchUrl.orEmpty().ifBlank { "https://www.youtube.com/watch?v=$id" }
+        // 1. Try YouTube app via vnd.youtube URI
+        try {
+            val ytIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$id"))
+            ytIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(ytIntent)
+            result.success(true)
+            return
+        } catch (_: Exception) {}
+        // 2. Fall back to browser / Chrome
+        try {
+            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(fallback))
+            browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(browserIntent)
+            result.success(true)
+        } catch (e: Exception) {
+            result.success(false)
+        }
+    }
     private fun openPlayerStore(result: MethodChannel.Result) {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.madar.player")))

@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "زَقْزُوقَة TV | منصة السينما والبث المباشر",
-  description: "أقوى منصة لمشاهدة أحدث الأفلام والمسلسلات ومباريات كرة القدم الحية بجودة عالية وبدون إعلانات",
+  title: "زقزوقة | أفلام ومسلسلات ومباريات",
+  description: "اكتشف الأفلام والمسلسلات والمواسم والحلقات، وتابع نتائج ومواعيد المباريات من واجهة زقزوقة.",
   manifest: "/manifest.json",
   icons: {
     icon: "/logo.jpg",
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#090A0E",
+  themeColor: "#F2E6D7",
 };
 
 export default function RootLayout({
@@ -21,8 +21,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ar" dir="rtl" className="dark bg-[#090A0E]">
-      <body className="min-h-screen bg-[#090A0E] text-slate-100 antialiased selection:bg-amber-500/30 selection:text-amber-300">
+    <html lang="ar" dir="rtl">
+      <body className="min-h-screen bg-[#F2E6D7] text-[#342633] antialiased">
         {children}
       </body>
     </html>

@@ -1,0 +1,22 @@
+{
+  "hosting": {
+    "site": "madartv-updates",
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "/updates/android/latest.json",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, max-age=0"
+          }
+        ]
+      }
+    ]
+  }
+}

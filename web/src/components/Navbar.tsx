@@ -101,10 +101,9 @@ export default function Navbar({
 
           <div className="hidden min-w-48 flex-1 md:block lg:max-w-sm">{search}</div>
 
-          <span className="mr-auto hidden items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold text-amber-400 sm:inline-flex">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-            <span className="h-2 w-2 rounded-full bg-emerald-500 -mr-4" />
-            مكتبة متجددة لحظياً
+            <span className="mr-auto hidden items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1.5 text-[11px] font-bold text-amber-400 sm:inline-flex">
+            <span className="h-2 w-2 rounded-full bg-[#B94E3C]" />
+            سينما ورياضة في مكان واحد
           </span>
         </div>
         <div className="border-t border-amber-500/10 px-4 py-2.5 md:hidden">{search}</div>

@@ -19,6 +19,7 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.madar.madar_flutter.MainActivity
+import com.madar.madar_flutter.R
 import com.madar.tv.data.ArabseedRepository
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
@@ -141,7 +142,7 @@ class ZakzoukaDownloadService : Service() {
         )
 
         val initialNotification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done).setColor(0xFFD4AF37.toInt())
+            .setSmallIcon(R.drawable.ic_notification_brand).setColor(0xFFD4AF37.toInt())
             .setContentTitle("تنزيل: $cleanTitle")
             .setContentText("جاري الاتصال وتجهيز التحميل...")
             .setProgress(100, 0, false)
@@ -214,7 +215,7 @@ class ZakzoukaDownloadService : Service() {
                 lastProgress = current
                 lastNotifyTime = now
                 val notif = NotificationCompat.Builder(this@ZakzoukaDownloadService, CHANNEL_ID)
-                    .setSmallIcon(android.R.drawable.stat_sys_download_done).setColor(0xFFD4AF37.toInt())
+                    .setSmallIcon(R.drawable.ic_notification_brand).setColor(0xFFD4AF37.toInt())
                     .setContentTitle("تنزيل: $cleanTitle")
                     .setContentText("جاري التنزيل: $current%")
                     .setProgress(100, current, false)
@@ -555,7 +556,7 @@ class ZakzoukaDownloadService : Service() {
         )
 
         val completeNotif = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done).setColor(0xFFD4AF37.toInt())
+                    .setSmallIcon(R.drawable.ic_notification_brand).setColor(0xFFD4AF37.toInt())
             .setContentTitle("تم اكتمال التنزيل بنجاح ✔")
             .setContentText("$cleanTitle جاهز في مجلد التنزيلات (Downloads)")
             .setAutoCancel(true)
@@ -574,7 +575,7 @@ class ZakzoukaDownloadService : Service() {
     private fun showErrorNotification(downloadId: Int, cleanTitle: String, error: String) {
         val msg = if (error.isNotBlank() && error != "null") error else "حدث خطأ غير متوقع أثناء التنزيل"
         val errorNotif = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done).setColor(0xFFD4AF37.toInt())
+                    .setSmallIcon(R.drawable.ic_notification_brand).setColor(0xFFD4AF37.toInt())
             .setContentTitle("تعذر تنزيل: $cleanTitle")
             .setContentText(msg)
             .setAutoCancel(true)

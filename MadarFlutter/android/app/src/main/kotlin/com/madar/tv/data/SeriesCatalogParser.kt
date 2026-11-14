@@ -46,6 +46,9 @@ internal object SeriesCatalogParser {
     )
     private val episodeMarkerPattern = Regex("""(?i)(الحلقة|حلقة|episode|(?<![a-z])eps?(?:[\s._#=/:-]|[0-9]|$))""")
     private val partMarkerPattern = Regex("""(?i)(الجزء|جزء|(?<![a-z])part(?:[\s._#=/:-]|[0-9]|$))""")
+    private val unrelatedContentContainerPattern = Regex(
+        """(?i)(^|[\s_-])(related|recommend(?:ed|ation)?|suggest(?:ed|ions?)?|similar|sidebar|widget|popular|trending|also-watch|more-like|ads?|advert|banner|social|post-grid|movie-grid|series-grid|related-posts|you-may-like|search[\s_-]*(?:type[\s_-]*drop|res(?:ults?)?(?:[\s_-]*container)?|suggest(?:ions?)?|autocomplete|results?|live)|(?:top|most)[\s_-]*search|autocomplete|typeahead|instant-search|ajax-search|قد[\s_-]*يعجبك|مقترح(?:ات)?|مشابه(?:ة)?|ذات[\s_-]*صلة|اعلانات)([\s_-]|$)""",
+    )
 
     fun normalizeDigits(value: String): String = buildString(value.length) {
         value.forEach { char ->
@@ -63,6 +66,30 @@ internal object SeriesCatalogParser {
         .trim()
         .trimEnd('/')
         .lowercase()
+
+    /** Reject share, tracking, and other third-party links accidentally nested in episode lists. */
+    fun isProviderContentPageUrl(
+        candidateUrl: String,
+        referencePageUrl: String,
+        knownHostRoots: Collection<String>,
+    ): Boolean {
+        fun host(value: String): String = runCatching { java.net.URI(value.trim()).host.orEmpty() }
+            .getOrDefault("")
+            .lowercase()
+            .removePrefix("www.")
+
+        val candidateHost = host(candidateUrl)
+        if (candidateHost.isBlank()) return false
+        val referenceHost = host(referencePageUrl)
+        if (referenceHost.isNotBlank() &&
+            (candidateHost == referenceHost || candidateHost.endsWith(".$referenceHost"))
+        ) return true
+        return knownHostRoots.any { root ->
+            val normalizedRoot = root.lowercase().removePrefix("www.").trim('.')
+            normalizedRoot.isNotBlank() &&
+                (candidateHost == normalizedRoot || candidateHost.endsWith(".$normalizedRoot"))
+        }
+    }
 
     fun episodeNumber(title: String, url: String, allowNumericTitle: Boolean = false): Int? {
         val titleText = normalizeText(title)
@@ -119,10 +146,15 @@ internal object SeriesCatalogParser {
             val isSeasonContainer = seasonContainerMarker.containsMatchIn(marker) &&
                 !Regex("""(?i)(seasons|مواسم|season[-_ ]?(?:tabs|list)|season-tabs)""")
                     .containsMatchIn(marker)
-            val isEpisodeList = episodeContainerMarker.containsMatchIn(marker)
+            val isEpisodeList = node.tagName() !in setOf("a", "li", "button") &&
+                episodeContainerMarker.containsMatchIn(marker)
             val label = listOf(node.id(), node.className(), node.attr("title"), node.attr("aria-label"))
                 .joinToString(" ")
-            seasonNumber(label, "")?.let { return it }
+            // A season number found on an arbitrary ancestor (for example a
+            // recommendation wrapper or a page-wide season selector) is not
+            // enough to assign every episode beneath it. Only trust an
+            // explicitly season-scoped container.
+            if (isSeasonContainer) seasonNumber(label, "")?.let { return it }
             for (attribute in seasonAttributes) {
                 val value = node.attr(attribute).trim()
                 if (value.isNotBlank()) {
@@ -137,18 +169,6 @@ internal object SeriesCatalogParser {
                     .take(3)
                     .firstNotNullOfOrNull { seasonNumber(it.text().take(100), "") }
                     ?.let { return it }
-            }
-
-            val childSeasonNumbers = node.children()
-                .filter { child ->
-                    child.tagName() in setOf("h1", "h2", "h3", "h4", "h5", "button")
-                        || child.attr("role").equals("tab", ignoreCase = true)
-                }
-                .take(6)
-                .mapNotNull { seasonNumber(it.text().take(100), "") }
-                .distinct()
-            if (childSeasonNumbers.size == 1 && (isSeasonContainer || depth <= 2)) {
-                return childSeasonNumbers.single()
             }
 
             if (isEpisodeList || isSeasonContainer) {
@@ -174,12 +194,26 @@ internal object SeriesCatalogParser {
 
     /** Links explicitly labelled as a season, used to fetch each season page on sources
      * which only render the currently selected season's episode list in the page body. */
-    fun linkedSeasonPages(document: Document, currentPageUrl: String): List<Pair<Int, String>> {
+    fun linkedSeasonPages(
+        document: Document,
+        currentPageUrl: String,
+        isAllowedContentPage: (String) -> Boolean = { candidate ->
+            // Keep callers that only know the current page safe by default:
+            // accept same-origin season pages, and require an explicit provider
+            // allowlist before following any cross-origin content URL.
+            isProviderContentPageUrl(candidate, currentPageUrl, emptyList())
+        },
+    ): List<Pair<Int, String>> {
         val seasonContainerMarker = Regex("""(?i)(season|الموسم|مواسم)""")
         return document.select(
-            "a[href], [data-season][data-url], [data-season-number][data-url], " +
+            // MySeed renders season tabs as <li data-url="..."> rather than anchors.
+            // Include those entries so older seasons can be fetched instead of relying
+            // on the active season's partial episode list.
+            "a[href], li[data-url], li[data-href], [role=tab][data-url], [role=tab][data-href], " +
+                "[data-season][data-url], [data-season-number][data-url], " +
                 "[data-season][data-href], [data-season-number][data-href]",
         ).mapNotNull { link ->
+            if (isInsideUnrelatedContentContainer(link)) return@mapNotNull null
             val urlAttribute = listOf("href", "data-url", "data-href")
                 .firstOrNull { link.attr(it).isNotBlank() } ?: return@mapNotNull null
             val rawUrl = link.attr(urlAttribute).trim()
@@ -191,6 +225,7 @@ internal object SeriesCatalogParser {
                 .filter(String::isNotBlank)
                 .joinToString(" ")
             if (href.isBlank() || !href.startsWith("http", ignoreCase = true) ||
+                !isAllowedContentPage(href) ||
                 normalizedUrl(href) == normalizedUrl(currentPageUrl) || isEpisode(label, href)
             ) return@mapNotNull null
 
@@ -204,7 +239,9 @@ internal object SeriesCatalogParser {
             var inheritedSeasonNumber: Int? = null
             var seasonTabContext = link.tagName() == "button" ||
                 link.attr("role").equals("tab", ignoreCase = true) ||
-                Regex("""(?i)(season[-_ ]?tab|season-link|season-item)""")
+                listOf("data-season-number", "data-season", "data-season_num")
+                    .any { link.attr(it).isNotBlank() } ||
+                Regex("""(?i)(seasons?|season[-_ ]?(?:tabs?|list|link|item|menu))""")
                     .containsMatchIn("${link.className()} ${link.id()}")
             var node: Element? = link
             var depth = 0
@@ -218,7 +255,7 @@ internal object SeriesCatalogParser {
                 val isEpisodeContainer = Regex("""(?i)(episode|episodes|eplist|eps-list|episodios)""")
                     .containsMatchIn(marker)
                 if (node.tagName() == "nav" || node.attr("role").equals("tablist", ignoreCase = true) ||
-                    Regex("""(?i)(season[-_ ]?(?:tabs|list)|season-tabs)""").containsMatchIn(marker)
+                    Regex("""(?i)(seasons?|season[-_ ]?(?:tabs?|list|menu))""").containsMatchIn(marker)
                 ) seasonTabContext = true
                 if (inheritedSeasonNumber == null && isSeasonContainer && !isEpisodeContainer) {
                     inheritedSeasonNumber = seasonNumber(marker, "")
@@ -233,7 +270,13 @@ internal object SeriesCatalogParser {
             }
             val numericTab = normalizeDigits(label).trim().toIntOrNull()
                 ?.takeIf { seasonTabContext && it in 1..99 }
-            val number = explicitLabelNumber ?: explicitUrlNumber ?: dataSeason ?: inheritedSeasonNumber ?: numericTab
+            // Do not turn a season-looking recommendation URL into a season tab.
+            // A number is accepted only when it belongs to a season navigation
+            // context or is explicitly carried in a data-season attribute.
+            val explicitSeasonNumber = explicitLabelNumber ?: explicitUrlNumber
+            val number = dataSeason ?: inheritedSeasonNumber
+                ?: explicitSeasonNumber?.takeIf { seasonTabContext }
+                ?: numericTab
                 ?: return@mapNotNull null
             number to href
         }
@@ -253,7 +296,10 @@ internal object SeriesCatalogParser {
             "a[aria-label*=التالي][href]",
         ).joinToString(", ")
         val paginationMarker = Regex("""(?i)(pagination|page-numbers|paginate|pager|paging)""")
-        val pageParams = setOf("page", "paged", "pageno", "page_no", "ep_page", "episode_page")
+        val pageParams = setOf(
+            "page", "paged", "pageno", "page_no", "ep_page", "episode_page",
+            "episodes_page", "episodepage", "page_number", "p",
+        )
 
         fun hostKey(uri: java.net.URI): String = uri.host.orEmpty().lowercase().removePrefix("www.")
         fun family(uri: java.net.URI): String? {
@@ -271,8 +317,13 @@ internal object SeriesCatalogParser {
         }
 
         return document.select(paginationSelector).mapNotNull { link ->
+            if (isInsideUnrelatedContentContainer(link)) return@mapNotNull null
             val raw = link.attr("href").trim()
-            val candidate = runCatching { current.resolve(raw) }.getOrNull() ?: return@mapNotNull null
+            // java.net.URI.resolve("?page=2") drops the current path on some
+            // Android/JDK implementations. Preserve the episode-list path for
+            // query-only pagination links so page 2+ can actually be requested.
+            val reference = if (raw.startsWith("?")) current.rawPath.orEmpty() + raw else raw
+            val candidate = runCatching { current.resolve(reference) }.getOrNull() ?: return@mapNotNull null
             if (candidate.scheme !in setOf("http", "https") || hostKey(candidate) != hostKey(current)) {
                 return@mapNotNull null
             }
@@ -291,7 +342,10 @@ internal object SeriesCatalogParser {
                 family(candidate) != family(current)
             ) return@mapNotNull null
             candidate.toString()
-        }.distinctBy(::normalizedUrl).take(12)
+        // Some providers render a complete numbered pager and omit a "next"
+        // link. Keep the whole bounded pager; a 12-link cap silently dropped
+        // older episodes on long seasons.
+        }.distinctBy(::normalizedUrl).take(60)
     }
 
     /** Fetches numbered/next episode pages concurrently, with a strict time and page cap. */
@@ -300,8 +354,8 @@ internal object SeriesCatalogParser {
         firstPageUrl: String,
         fetchDocument: (String) -> Document?,
         parseEpisodes: (Document) -> List<Triple<String, String, Int?>>,
-        maxPages: Int = 12,
-        timeoutSeconds: Long = 6,
+        maxPages: Int = 60,
+        timeoutSeconds: Long = 24,
     ): List<Triple<String, String, Int?>> {
         val byUrl = linkedMapOf<String, Triple<String, String, Int?>>()
         fun merge(rows: List<Triple<String, String, Int?>>) {
@@ -370,6 +424,24 @@ internal object SeriesCatalogParser {
         return episodeMarkerPattern.containsMatchIn(combined) || episodeNumber(title, url) != null
     }
 
+    /** Excludes recommendation/sidebar cards that happen to contain season or episode links. */
+    fun isInsideUnrelatedContentContainer(element: Element): Boolean =
+        (listOf(element) + element.parents()).take(7).any { node ->
+            val markers = listOf(node.id(), node.className(), node.attr("role"), node.attr("aria-label"))
+                .joinToString(" ")
+            unrelatedContentContainerPattern.containsMatchIn(markers)
+        }
+
+    /** A title marked as a finale gives a trustworthy upper bound for that season. */
+    fun finalEpisodeNumber(title: String, url: String): Int? {
+        val combined = normalizeText("$title $url")
+        val finaleMarker = Regex(
+            """(?i)(?:والاخيرة|الاخيرة|والاخيره|الاخيره|والاخير|الاخير|النهائية|النهائيه|نهائي|finale|series[-\s]+finale|last[-\s]+episode)""",
+        )
+        if (!finaleMarker.containsMatchIn(combined)) return null
+        return episodeNumber(title, url)
+    }
+
     fun hasPartMarker(title: String, url: String): Boolean {
         val combined = "${normalizeText(title)} ${normalizeText(url)}"
         return partMarkerPattern.containsMatchIn(combined)
@@ -429,11 +501,22 @@ internal object SeriesCatalogParser {
             .sorted()
         val normalizedSeasons = seasonNumbers
             .map { seasonNumber ->
-                val episodes = episodesBySeason[seasonNumber].orEmpty().asSequence()
+                val episodes = episodesBySeason[seasonNumber].orEmpty()
                     .map { it.second }
-                    .distinctBy { it.number }
-                    .sortedBy { it.number }
-                    .toList()
+                    .groupBy { it.number }
+                    .toSortedMap()
+                    .map { (_, variants) ->
+                        val preferred = variants.first()
+                        val allPages = variants.flatMap { episode ->
+                            listOf(episode.pageUrl) + episode.alternatePageUrls
+                        }.filter { it.startsWith("http", ignoreCase = true) }
+                            .distinctBy(::normalizedUrl)
+                        preferred.copy(
+                            alternatePageUrls = (preferred.alternatePageUrls + allPages)
+                                .filter { normalizedUrl(it) != normalizedUrl(preferred.pageUrl) }
+                                .distinctBy(::normalizedUrl),
+                        )
+                    }
                 val seasonPageUrl = bundle.seasons
                     .firstOrNull { it.number == seasonNumber && it.pageUrl.isNotBlank() }
                     ?.pageUrl

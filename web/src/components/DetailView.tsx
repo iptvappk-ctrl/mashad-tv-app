@@ -445,7 +445,7 @@ export default function DetailView({
               <article
                 key={rec.id}
                 onClick={() => onSelectRecommendation(rec)}
-                className="group cursor-pointer overflow-hidden rounded-[20px] border border-amber-500/15 bg-[#12131D] shadow-sm transition hover:-translate-y-1 hover:border-amber-400/60"
+                className="media-poster-card group cursor-pointer overflow-hidden rounded-[20px] border border-amber-500/15 bg-[#12131D] shadow-sm transition hover:-translate-y-1 hover:border-amber-400/60"
               >
                 <div className="relative aspect-[0.72] overflow-hidden bg-[#0A0B10]">
                   <img

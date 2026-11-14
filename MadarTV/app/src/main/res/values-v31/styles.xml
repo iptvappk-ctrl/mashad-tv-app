@@ -1,0 +1,14 @@
+<resources>
+    <style name="Theme.Madar" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#167A66</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">#F5F7F7</item>
+        <item name="android:navigationBarColor">#F5F7F7</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowSplashScreenBackground">@color/zakzouka_splash_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/zakzouka_splash_mark</item>
+        <item name="android:windowBackground">@color/zakzouka_splash_bg</item>
+    </style>
+</resources>

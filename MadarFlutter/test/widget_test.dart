@@ -17,6 +17,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 350));
 
     expect(find.text('أفلام ومسلسلات'), findsOneWidget);
+    expect(find.text('ملخصات'), findsOneWidget);
     expect(find.text('بثات الكورة'), findsOneWidget);
     expect(find.text('المفضلة'), findsOneWidget);
   });

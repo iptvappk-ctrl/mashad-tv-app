@@ -50,6 +50,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
+    testImplementation("junit:junit:4.13.2")
 }
 
 kotlin {

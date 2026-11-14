@@ -117,7 +117,7 @@ fun ZakzoukaIntroScreen(onFinish: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
-                    Modifier.size(166.dp).clip(CircleShape)
+                    Modifier.size(166.dp).clip(RoundedCornerShape(38.dp))
                         .border(
                             2.dp,
                             Brush.sweepGradient(
@@ -128,20 +128,20 @@ fun ZakzoukaIntroScreen(onFinish: () -> Unit) {
                                     ZakzoukaColors.Gold,
                                 ),
                             ),
-                            CircleShape,
+                            RoundedCornerShape(38.dp),
                         ),
                 )
                 Box(
-                    Modifier.size(148.dp).clip(CircleShape)
+                    Modifier.size(148.dp).clip(RoundedCornerShape(32.dp))
                         .background(ZakzoukaColors.Surface)
-                        .border(1.dp, ZakzoukaColors.GoldBorder, CircleShape),
+                        .border(1.dp, ZakzoukaColors.GoldBorder, RoundedCornerShape(32.dp)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Image(
                         painter = painterResource(R.drawable.zakzouka_logo),
                         contentDescription = "شعار زقزوقة",
-                        modifier = Modifier.size(132.dp).clip(CircleShape),
-                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(136.dp).clip(RoundedCornerShape(28.dp)),
+                        contentScale = ContentScale.Fit,
                     )
                 }
                 Box(

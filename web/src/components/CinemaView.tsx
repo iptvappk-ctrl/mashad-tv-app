@@ -83,13 +83,14 @@ function PosterCard({
   return (
     <article
       onClick={onOpen}
-      className="group relative min-w-0 cursor-pointer overflow-hidden rounded-[22px] border border-amber-500/15 bg-[#12131D] shadow-[0_8px_25px_rgba(0,0,0,0.5)] transition duration-300 hover:-translate-y-1.5 hover:border-amber-400/60 hover:shadow-[0_12px_32px_rgba(212,175,55,0.22)]"
+      className="media-poster-card group relative min-w-0 cursor-pointer overflow-hidden rounded-[22px] border border-amber-500/15 bg-[#12131D] shadow-[0_8px_25px_rgba(0,0,0,0.5)] transition duration-300 hover:-translate-y-1.5 hover:border-amber-400/60 hover:shadow-[0_12px_32px_rgba(212,175,55,0.22)]"
     >
       <div className="relative aspect-[0.72] overflow-hidden bg-[#0A0B10]">
         <img
           src={(item.poster?.startsWith("//") ? "https:" + item.poster : item.poster) || "/logo.jpg"}
           alt={item.title}
           loading="lazy"
+          decoding="async"
           className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
           onError={(event) => { event.currentTarget.src = "/logo.jpg"; }}
         />
@@ -203,19 +204,24 @@ export default function CinemaView({
         }
 
         if (activeTab === "home" && filter === "all") {
-          const [movieResponse, seriesResponse] = await Promise.all([
-            fetch(`/api/cinema/movies?page=${page}`, { signal: controller.signal }),
-            fetch(`/api/cinema/series?page=${page}`, { signal: controller.signal }),
-          ]);
-          const [movieResult, seriesResult] = await Promise.all([movieResponse.json(), seriesResponse.json()]);
-          if (!cancelled) {
-            const movies = movieResult.success && Array.isArray(movieResult.data) ? movieResult.data : [];
-            const series = seriesResult.success && Array.isArray(seriesResult.data) ? seriesResult.data : [];
+          let movies: ArabseedItem[] = [];
+          let series: ArabseedItem[] = [];
+          const publishAvailableItems = () => {
+            if (cancelled) return;
             setHomeMovies(movies);
             setHomeSeries(series);
             setItems([...movies, ...series]);
             setHasMore(movies.length >= 8 || series.length >= 8);
-          }
+          };
+          const readList = async (kind: "movies" | "series") => {
+            const response = await fetch(`/api/cinema/${kind}?page=${page}`, { signal: controller.signal });
+            const result = await response.json();
+            const list = result.success && Array.isArray(result.data) ? result.data : [];
+            if (kind === "movies") movies = list;
+            else series = list;
+            publishAvailableItems();
+          };
+          await Promise.allSettled([readList("movies"), readList("series")]);
           return;
         }
 
@@ -333,8 +339,8 @@ export default function CinemaView({
 
       {/* Featured Hero Banner */}
       {isHome && featured && (
-        <section className="relative overflow-hidden rounded-[30px] border border-amber-500/20 bg-[#12131D] shadow-[0_15px_40px_rgba(0,0,0,0.6)]">
-          <div className="absolute inset-0 z-0">
+        <section className="home-hero relative overflow-hidden rounded-[30px] border border-amber-500/20 bg-[#12131D] shadow-[0_15px_40px_rgba(0,0,0,0.6)]">
+          <div className="home-hero-backdrop absolute inset-0 z-0">
             <img
               src={featured.poster || "/logo.jpg"}
               alt=""
@@ -350,12 +356,14 @@ export default function CinemaView({
                 src={featured.poster || "/logo.jpg"}
                 alt={featured.title}
                 className="aspect-[0.72] w-full object-cover"
+                loading="eager"
+                fetchPriority="high"
               />
             </div>
             <div className="flex-1 text-center md:text-right space-y-3">
               <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
                 <span className="rounded-full border border-amber-500/30 bg-amber-500/15 px-3 py-1 text-[11px] font-black text-amber-300">
-                  مميز المشاهدة
+                  اختيار اليوم
                 </span>
                 <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-bold text-slate-300">
                   {featured.isSeries ? "مسلسل" : "فيلم"}
@@ -374,14 +382,14 @@ export default function CinemaView({
               <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white leading-tight">
                 {featured.title}
               </h2>
-              <p className="max-w-2xl text-xs sm:text-sm text-slate-300 leading-relaxed">
-                استمتع بالمشاهدة الحصرية بأعلى جودة مع نظام توفير النت فائق الذكاء وإمكانية التنزيل المباشر.
+              <p className="hero-description max-w-2xl text-xs sm:text-sm text-slate-300 leading-relaxed">
+                اعرف القصة، اختار الموسم والحلقة، وانتقل إلى سيرفر المشاهدة المتاح للعمل.
               </p>
               <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => onSelectItem(featured)}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95"
+                  className="hero-primary inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95"
                 >
                   <Play size={16} className="fill-current" />
                   مشاهدة الآن
@@ -389,7 +397,7 @@ export default function CinemaView({
                 <button
                   type="button"
                   onClick={() => onSelectItem(featured)}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-amber-500/30 bg-[#141524]/80 px-5 py-3 text-sm font-bold text-slate-200 transition hover:border-amber-400 hover:text-white"
+                  className="hero-secondary inline-flex items-center gap-2 rounded-2xl border border-amber-500/30 bg-[#141524]/80 px-5 py-3 text-sm font-bold text-slate-200 transition hover:border-amber-400 hover:text-white"
                 >
                   التفاصيل وسيرفرات التحميل
                 </button>

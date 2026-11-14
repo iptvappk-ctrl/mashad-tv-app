@@ -48,3 +48,23 @@ dashboard/credentials/
 *.swo
 *~
 .vscode/
+
+# Build Artefacts, Dumps & Temp Test Files
+*.class
+*.pyc
+__pycache__/
+*.jar
+*.html
+*.css
+scratch/
+scratch-ui.xml
+build_output.txt
+analysis_out.txt
+decoded_output.txt
+decoded_results.txt
+constants.txt
+*.png
+!MadarFlutter/android/app/src/main/res/**/*.png
+!MadarTV/app/src/main/res/**/*.png
+!MadarTV/madar-player/src/main/res/**/*.png
+!DOCUMENTATION/**/*.png

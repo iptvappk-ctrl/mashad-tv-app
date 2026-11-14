@@ -671,12 +671,15 @@ Future<void> _launchPlayer(
   List<Map<String, dynamic>> backupSources = const [],
   bool isLive = false,
 }) async {
-  if (url.trim().isEmpty) {
+  final cleanUrl = url.trim();
+  if (cleanUrl.isEmpty) {
     _message(context, 'رابط التشغيل غير متاح. اختر سيرفرًا آخر.');
     return;
   }
-  final uri = Uri.tryParse(url);
-  if (uri == null || !_isUsablePlaybackUrl(url)) {
+  final uri = Uri.tryParse(cleanUrl);
+  // قبل الرابط لو كان http/https صالح — حتى لو embed page (WebView سيتعامل معها)
+  if (uri == null || uri.host.isEmpty ||
+      (uri.scheme != 'http' && uri.scheme != 'https')) {
     _message(context, 'رابط التشغيل غير صالح.');
     return;
   }

@@ -163,9 +163,17 @@ export class MultiProviderAggregator {
     }
 
     const merged = Array.from(seen.values());
-    const enriched = await enrichFromSource(merged);
-    searchCache.set(cacheKey, { items: enriched, time: Date.now() });
-    return enriched;
+    const cachedAt = Date.now();
+    if (merged.length > 0) searchCache.set(cacheKey, { items: merged, time: cachedAt });
+    // Poster repair is opportunistic; never hold search results while opening
+    // up to twelve unrelated detail pages just to find missing artwork.
+    void enrichFromSource(merged).then((enriched) => {
+      const current = searchCache.get(cacheKey);
+      if (enriched.length > 0 && current?.time === cachedAt) {
+        searchCache.set(cacheKey, { items: enriched, time: cachedAt });
+      }
+    }).catch(() => {});
+    return merged;
   }
 
   async getCategory(slug: string, page = 1, timeoutMs = 3500): Promise<UnifiedMediaItem[]> {
@@ -216,9 +224,17 @@ export class MultiProviderAggregator {
       deduplicated.push(it);
     }
 
-    const enriched = await enrichFromSource(deduplicated);
-    categoryCache.set(cacheKey, { items: enriched, time: Date.now() });
-    return enriched;
+    const cachedAt = Date.now();
+    if (deduplicated.length > 0) categoryCache.set(cacheKey, { items: deduplicated, time: cachedAt });
+    // Return the catalog immediately. Fetching og:image is a slow, optional
+    // repair path and must not delay the first screen or the API response.
+    void enrichFromSource(deduplicated).then((enriched) => {
+      const current = categoryCache.get(cacheKey);
+      if (enriched.length > 0 && current?.time === cachedAt) {
+        categoryCache.set(cacheKey, { items: enriched, time: cachedAt });
+      }
+    }).catch(() => {});
+    return deduplicated;
   }
 
   async getDetail(pageUrl: string): Promise<UnifiedMediaDetail | null> {

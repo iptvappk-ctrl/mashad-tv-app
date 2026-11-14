@@ -11,6 +11,7 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
   final Map<String, MediaItem> _favorites = {};
   final Map<String, MediaItem> _seenItems = {};
   bool _sportsBuilt = false;
+  bool _recapsBuilt = false;
   bool _notificationStatusLoaded = false;
   bool _notificationsDisabled = false;
   bool _notificationBannerDismissed = false;
@@ -54,7 +55,10 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
 
   Future<void> _openNotificationSettings() async {
     await NativeBridge.openNotificationSettings();
-    if (mounted) setState(() => _notificationBannerDismissed = true);
+  }
+
+  Future<void> _requestNotificationPermission() async {
+    await NativeBridge.requestNotificationPermission();
   }
 
   Future<void> _restoreFavorites() async {
@@ -131,6 +135,11 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
         onToggle: _toggle,
         onItems: _remember,
       ),
+      _recapsBuilt
+          ? const RecapsPage(key: PageStorageKey<String>('recaps-tab'))
+          : const SizedBox.shrink(
+              key: PageStorageKey<String>('recaps-placeholder'),
+            ),
       _sportsBuilt
           ? const SportsPage(key: PageStorageKey<String>('sports-tab'))
           : const SizedBox.shrink(
@@ -159,13 +168,16 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
                 ),
                 actions: [
                   TextButton(
-                    onPressed: _openNotificationSettings,
-                    child: const Text('فتح الإعدادات'),
+                    onPressed: _requestNotificationPermission,
+                    child: const Text('طلب الإذن'),
                   ),
                   TextButton(
-                    onPressed: () => setState(
-                      () => _notificationBannerDismissed = true,
-                    ),
+                    onPressed: _openNotificationSettings,
+                    child: const Text('الإعدادات'),
+                  ),
+                  TextButton(
+                    onPressed: () =>
+                        setState(() => _notificationBannerDismissed = true),
                     child: const Text('لاحقًا'),
                   ),
                 ],
@@ -205,12 +217,17 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
         height: 72,
         onDestinationSelected: (index) => setState(() {
           _tab = index;
-          if (index == 1) _sportsBuilt = true;
+          if (index == 1) _recapsBuilt = true;
+          if (index == 2) _sportsBuilt = true;
         }),
         destinations: const [
           NavigationDestination(
             icon: Text('🎬', style: TextStyle(fontSize: 21)),
             label: 'أفلام ومسلسلات',
+          ),
+          NavigationDestination(
+            icon: Text('🍿', style: TextStyle(fontSize: 21)),
+            label: 'ملخصات',
           ),
           NavigationDestination(
             icon: Text('⚽', style: TextStyle(fontSize: 21)),
@@ -248,6 +265,8 @@ class _CatalogPageState extends State<CatalogPage> {
   List<Map<String, dynamic>> _tabs = [];
   List<Map<String, dynamic>> _subcategories = [];
   List<MediaItem> _items = [];
+  final Map<String, List<MediaItem>> _tabSnapshots =
+      <String, List<MediaItem>>{};
   String _tabId = 'home', _path = 'main/', _categoryId = 'all';
   String _resultsQuery = '';
   bool _searchOpen = false,
@@ -261,7 +280,6 @@ class _CatalogPageState extends State<CatalogPage> {
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(_onScroll);
     unawaited(_initialize());
   }
 
@@ -296,39 +314,133 @@ class _CatalogPageState extends State<CatalogPage> {
     });
   }
 
-  void _onScroll() {
-    if (_scroll.hasClients &&
-        _scroll.position.pixels > _scroll.position.maxScrollExtent - 520) {
-      unawaited(_loadMore());
+  String _snapshotKey({
+    String? tab,
+    String? path,
+    String? categoryId,
+    String? query,
+  }) =>
+      '${tab ?? _tabId}|${path ?? _path}|${categoryId ?? _categoryId}|${(query ?? _search.text).trim().toLowerCase()}';
+
+  void _rememberSnapshot(List<MediaItem> rows) {
+    if (rows.isEmpty) return;
+    final key = _snapshotKey();
+    _tabSnapshots[key] = List<MediaItem>.unmodifiable(rows);
+    while (_tabSnapshots.length > 24) {
+      _tabSnapshots.remove(_tabSnapshots.keys.first);
     }
   }
 
   void _selectTab(Map<String, dynamic> tab) {
-    if (_tabId == _text(tab['id'])) return;
-    _tabId = _text(tab['id']);
-    _items = [];
-    _page = 1;
-    _setSubcategories(tab);
-    unawaited(_load(reset: true));
-  }
-
-  void _selectCategory(Map<String, dynamic> category) {
-    if (_categoryId == _text(category['id'])) return;
+    final nextTab = _text(tab['id']);
+    if (_tabId == nextTab) return;
+    final rows = _maps(tab['subcategories']);
+    final first = rows.isEmpty ? <String, dynamic>{} : rows.first;
+    final nextCategory = _text(first['id']).ifEmpty('all');
+    final nextPath = _text(first['path'])
+        .ifEmpty(_text(tab['path']).ifEmpty('main/'));
+    final cached =
+        _tabSnapshots[_snapshotKey(
+          tab: nextTab,
+          path: nextPath,
+          categoryId: nextCategory,
+          query: '',
+        )];
     setState(() {
-      _categoryId = _text(category['id']);
-      _path = _text(category['path']);
-      _items = [];
+      _tabId = nextTab;
+      _subcategories = rows;
+      _categoryId = nextCategory;
+      _path = nextPath;
+      _items = cached ?? const <MediaItem>[];
+      _busy = cached == null;
+      _providersBusy = false;
+      _error = null;
       _page = 1;
       _hasMore = true;
     });
     unawaited(_load(reset: true));
   }
 
+  void _selectCategory(Map<String, dynamic> category) {
+    if (_categoryId == _text(category['id'])) return;
+    final nextCategory = _text(category['id']);
+    final nextPath = _text(category['path']);
+    final cached =
+        _tabSnapshots[_snapshotKey(
+          path: nextPath,
+          categoryId: nextCategory,
+          query: '',
+        )];
+    setState(() {
+      _categoryId = nextCategory;
+      _path = nextPath;
+      _items = cached ?? const <MediaItem>[];
+      _busy = cached == null;
+      _providersBusy = false;
+      _error = null;
+      _page = 1;
+      _hasMore = true;
+    });
+    unawaited(_load(reset: true));
+  }
+
+  /// فلترة client-side للبحث — تضمن إن النتايج مطابقة للـ query
+  List<MediaItem> _filterByQuery(List<MediaItem> rows, String query) {
+    if (query.trim().isEmpty) return rows;
+    final q = _normalizeSearchQuery(query);
+    if (q.length < 2) return rows;
+    return rows.where((item) {
+      final title = _normalizeSearchQuery(item.title);
+      final parent = _normalizeSearchQuery(item.parentSeriesTitle);
+      // تطابق كلي
+      if (title.contains(q) || parent.contains(q)) return true;
+      // تطابق كلمات منفصلة (الكلمات الأكثر من 2 حرف)
+      final words = q.split(RegExp(r'\s+')).where((w) => w.length > 2).toList();
+      if (words.isEmpty) return title.contains(q);
+      return words.every((w) => title.contains(w) || parent.contains(w));
+    }).toList();
+  }
+
+  String _normalizeSearchQuery(String text) {
+    var t = text.toLowerCase().trim();
+    // تطبيع الأرقام العربية
+    const arabicDigits = '٠١٢٣٤٥٦٧٨٩';
+    for (var i = 0; i < arabicDigits.length; i++) {
+      t = t.replaceAll(arabicDigits[i], '$i');
+    }
+    // تطبيع الحروف العربية
+    t = t.replaceAll(RegExp('[أإآ]'), 'ا');
+    t = t.replaceAll('ة', 'ه');
+    t = t.replaceAll('ى', 'ي');
+    // شيل التشكيل
+    t = t.replaceAll(RegExp('[\u064B-\u065F]'), '');
+    return t;
+  }
+
   List<MediaItem> _unique(Iterable<MediaItem> rows) {
     final unique = <String, MediaItem>{};
     for (final row in rows) {
       if (row.title.trim().isEmpty || row.pageUrl.isEmpty) continue;
-      unique.putIfAbsent(row.key, () => row);
+      final existing = unique[row.key];
+      if (existing == null) {
+        unique[row.key] = row;
+        continue;
+      }
+      String normalizeUrl(String value) =>
+          value.trim().replaceFirst(RegExp(r'/+$'), '').toLowerCase();
+      final primaryUrl = normalizeUrl(existing.pageUrl);
+      final alternatives =
+          <String>{
+                ...existing.alternatePageUrls,
+                row.pageUrl,
+                ...row.alternatePageUrls,
+              }
+              .where(
+                (url) =>
+                    url.startsWith('http') && normalizeUrl(url) != primaryUrl,
+              )
+              .toList(growable: false);
+      unique[row.key] = existing.copyWith(alternatePageUrls: alternatives);
     }
     return unique.values.toList(growable: false);
   }
@@ -353,6 +465,11 @@ class _CatalogPageState extends State<CatalogPage> {
         (tab == 'movies' &&
             _categoryId == 'all_movies' &&
             path.replaceAll(RegExp(r'^/+|/+$'), '') == 'movies');
+    final categoryUsesProviderCatalog =
+        tab == 'series' ||
+        tab == 'movies' ||
+        tab == 'anime' ||
+        tab == 'ramadan';
     setState(() {
       _busy = true;
       _providersBusy = false;
@@ -365,23 +482,33 @@ class _CatalogPageState extends State<CatalogPage> {
           : await NativeBridge.list('catalog.cached', {
               'path': path,
               'tab': tab,
+              'categoryId': _categoryId,
               'page': 1,
             });
       if (!mounted || request != _request) return;
       if (cached.isNotEmpty) {
-        final rows = _unique(cached.map(MediaItem.fromMap));
-        setState(() {
-          _items = rows;
-          _busy = false;
-          _error = null;
-        });
-        widget.onItems(rows);
+        final allCached = cached.map(MediaItem.fromMap).toList();
+        // ── فلتر الكاش بالبحث أيضاً ──────────────────────────────────────
+        final filteredCached = query.isNotEmpty
+            ? _filterByQuery(allCached, query)
+            : allCached;
+        final rows = _unique(filteredCached);
+        if (rows.isNotEmpty) {
+          setState(() {
+            _items = rows;
+            _busy = false;
+            _error = null;
+          });
+          if (query.isEmpty) _rememberSnapshot(rows);
+          widget.onItems(rows);
+        }
       }
     } catch (_) {}
     if (!mounted || request != _request) return;
     final hasProviderPass =
         query.isNotEmpty ||
         allProviderCategory ||
+        categoryUsesProviderCatalog ||
         (tab == 'home' && (path == 'main/' || path == 'main'));
     try {
       final fetched = query.isNotEmpty
@@ -392,14 +519,23 @@ class _CatalogPageState extends State<CatalogPage> {
           : await NativeBridge.list('catalog.primary.fetch', {
               'path': path,
               'tab': tab,
+              'categoryId': _categoryId,
               'page': 1,
               'force': force,
             });
       if (!mounted || request != _request) return;
-      final rows = _unique(fetched.map(MediaItem.fromMap));
+      // ── فلترة client-side للبحث ──────────────────────────────────────────
+      final allRows = fetched.map(MediaItem.fromMap).toList();
+      final filteredRows = query.isNotEmpty
+          ? _filterByQuery(allRows, query)
+          : allRows;
+      final rows = _unique(filteredRows);
       if (rows.isNotEmpty) {
-        final merged = reset && query.isEmpty
+        // للبحث: استبدل النتايج بالكامل (متدمجش مع items قديمة)
+        final merged = query.isNotEmpty
             ? rows
+            : reset && query.isEmpty
+            ? _unique([...rows, ..._items])
             : _unique([..._items, ...rows]);
         setState(() {
           _items = merged;
@@ -408,6 +544,7 @@ class _CatalogPageState extends State<CatalogPage> {
           _hasMore = true;
           _providersBusy = hasProviderPass;
         });
+        if (query.isEmpty) _rememberSnapshot(merged);
         widget.onItems(merged);
       } else {
         setState(() {
@@ -419,7 +556,9 @@ class _CatalogPageState extends State<CatalogPage> {
         });
       }
       if (hasProviderPass)
-        unawaited(_loadProviderPass(request, path, tab, query, force));
+        unawaited(
+          _loadProviderPass(request, path, tab, _categoryId, query, force),
+        );
     } catch (error) {
       if (!mounted || request != _request) return;
       setState(() {
@@ -428,7 +567,9 @@ class _CatalogPageState extends State<CatalogPage> {
         _error = _items.isEmpty && !hasProviderPass ? '$error' : null;
       });
       if (hasProviderPass)
-        unawaited(_loadProviderPass(request, path, tab, query, force));
+        unawaited(
+          _loadProviderPass(request, path, tab, _categoryId, query, force),
+        );
     }
   }
 
@@ -436,23 +577,27 @@ class _CatalogPageState extends State<CatalogPage> {
     int request,
     String path,
     String tab,
+    String categoryId,
     String query,
     bool force,
   ) async {
     try {
       final fetched = query.isNotEmpty
-          ? await NativeBridge.list('catalog.search.providers', {
-              'query': query,
-              'force': force,
-            })
-          : await NativeBridge.list('catalog.providers.fetch', {
-              'path': path,
-              'tab': tab,
-              'page': 1,
-              'force': force,
-            });
+          ? await _nativeScraper.searchAllProviders(query, forceRefresh: force)
+          : await _nativeScraper.fetchProviderCatalog(
+              path: path,
+              tab: tab,
+              categoryId: categoryId,
+              page: 1,
+              forceRefresh: force,
+            );
       if (!mounted || request != _request) return;
-      final merged = _unique([..._items, ...fetched.map(MediaItem.fromMap)]);
+      // ── فلترة client-side: تضمن إن النتايج مطابقة للـ query ──────────────
+      final allFetched = fetched.map(MediaItem.fromMap).toList();
+      final filtered = query.isNotEmpty
+          ? _filterByQuery(allFetched, query)
+          : allFetched;
+      final merged = _unique([..._items, ...filtered]);
       setState(() {
         _items = merged;
         _providersBusy = false;
@@ -462,6 +607,7 @@ class _CatalogPageState extends State<CatalogPage> {
               : 'المصادر لم ترجع محتوى لهذه القائمة الآن.';
         }
       });
+      if (query.isEmpty) _rememberSnapshot(merged);
       if (merged.isNotEmpty) widget.onItems(merged);
     } catch (error) {
       if (mounted && request == _request)
@@ -491,19 +637,22 @@ class _CatalogPageState extends State<CatalogPage> {
       final fetched = await NativeBridge.list('catalog.fetch', {
         'path': _path,
         'tab': _tabId,
+        'categoryId': _categoryId,
         'page': next,
       });
       if (!mounted || request != _request) return;
       final rows = _unique(fetched.map(MediaItem.fromMap));
       final merged = _unique([..._items, ...rows]);
       final added = merged.length - _items.length;
+      final hasPageData = fetched.isNotEmpty;
       setState(() {
         if (added > 0) {
           _items = merged;
-          _page = next;
-        } else {
-          _hasMore = false;
         }
+        // A page may only add duplicates from overlapping sources. Advance
+        // past it, and stop only when every source returned an empty page.
+        if (hasPageData) _page = next;
+        _hasMore = hasPageData;
       });
       if (added > 0) widget.onItems(merged);
     } catch (_) {
@@ -820,26 +969,6 @@ class _CatalogPageState extends State<CatalogPage> {
                     ],
                   ),
                 ),
-                if (!(_tabId == 'home' && _categoryId == 'all'))
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _card,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: _line),
-                    ),
-                    child: Text(
-                      '${_items.length} عمل',
-                      style: const TextStyle(
-                        color: _muted,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -866,18 +995,38 @@ class _CatalogPageState extends State<CatalogPage> {
             },
           ),
         ),
-        if (_moreBusy)
+        if (_search.text.trim().isEmpty && _hasMore)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 26),
+              child: Center(
+                child: OutlinedButton.icon(
+                  onPressed: _moreBusy ? null : _loadMore,
+                  icon: _moreBusy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _brick,
+                          ),
+                        )
+                      : const Icon(Icons.expand_more_rounded),
+                  label: Text(
+                    _moreBusy ? 'بنحمّل أعمال أكتر…' : 'تحميل المزيد',
+                  ),
+                ),
+              ),
+            ),
+          )
+        else if (_search.text.trim().isEmpty && _items.isNotEmpty)
           const SliverToBoxAdapter(
             child: Padding(
-              padding: EdgeInsets.only(bottom: 18),
+              padding: EdgeInsets.only(bottom: 26),
               child: Center(
-                child: SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: _brick,
-                  ),
+                child: Text(
+                  'وصلت لنهاية النتائج المتاحة حالياً',
+                  style: TextStyle(color: _muted, fontSize: 12),
                 ),
               ),
             ),

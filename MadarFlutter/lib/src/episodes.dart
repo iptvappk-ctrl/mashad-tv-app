@@ -23,6 +23,7 @@ class _EpisodePageState extends State<EpisodePage> {
   bool _loading = true;
   String? _error;
   int _request = 0;
+  Future<List<Map<String, dynamic>>>? _alternateServerFuture;
   Map<String, dynamic> get _episode => _episodes[_index];
   int get _number => _episodeNumber(_episode);
   String get _episodeTitle =>
@@ -43,15 +44,36 @@ class _EpisodePageState extends State<EpisodePage> {
   Future<void> _loadServers() async {
     final request = ++_request;
     final url = _text(_episode['pageUrl']);
-    final key = 'episode:servers:$url';
+    final key = _serverCacheKey(url);
+    final provider = _text(_episode['providerName']).ifEmpty(widget.provider);
+    final alternatePages = (_episode['alternatePageUrls'] as List? ?? const [])
+        .map(_text)
+        .where((page) => page.trim() != url.trim())
+        .take(24)
+        .toList(growable: false);
+    _alternateServerFuture = alternatePages.isEmpty
+        ? null
+        : _fetchAlternativeServerRows(
+            pageUrls: alternatePages,
+            provider: provider,
+          );
     setState(() {
       _loading = true;
       _error = null;
     });
+    if (url.isEmpty || !url.startsWith('http')) {
+      if (mounted && request == _request) {
+        setState(() {
+          _loading = false;
+          _error = 'رابط صفحة الحلقة غير متاح من المصدر.';
+        });
+      }
+      return;
+    }
     final cached = await NativeBridge.readCache(key);
     if (cached != null && mounted && request == _request) {
       try {
-        final rows = _maps(jsonDecode(cached));
+        final rows = _tagServerRows(_maps(jsonDecode(cached)), url, provider);
         if (rows.isNotEmpty)
           setState(() {
             _servers = rows;
@@ -61,26 +83,37 @@ class _EpisodePageState extends State<EpisodePage> {
       } catch (_) {}
     }
     if (!mounted || request != _request) return;
-    try {
-      final rows = await NativeBridge.list('media.servers', {
-        'url': url,
-        'provider': _text(_episode['providerName']).ifEmpty(widget.provider),
-      });
-      if (!mounted || request != _request) return;
-      setState(() {
-        if (rows.isNotEmpty) _servers = rows;
-        _loading = false;
-        _error = null;
-      });
-      if (rows.isNotEmpty)
-        unawaited(NativeBridge.writeCache(key, jsonEncode(rows)));
-      if (rows.isNotEmpty) unawaited(_prefetchFirstServer(rows));
-    } catch (error) {
-      if (mounted && request == _request)
-        setState(() {
-          _loading = false;
-          _error = '$error';
-        });
+    var pendingLookups = 1 + (alternatePages.isNotEmpty ? 1 : 0);
+    Future<void> absorb(Future<List<Map<String, dynamic>>> future) async {
+      try {
+        final rows = await future;
+        if (!mounted || request != _request) return;
+        if (rows.isNotEmpty) {
+          setState(() {
+            _servers = _mergeServerRows([..._servers, ...rows]);
+            _loading = false;
+            _error = null;
+          });
+          unawaited(_prefetchFirstServer(rows));
+        }
+      } catch (_) {
+        // Keep other sources running when one provider is unavailable.
+      } finally {
+        if (mounted && request == _request) {
+          setState(() {
+            pendingLookups--;
+            if (_servers.isEmpty && pendingLookups == 0) {
+              _error = 'لم نجد سيرفرًا صالحًا في المصادر المتاحة لهذه الحلقة.';
+            }
+            _loading = _servers.isEmpty && pendingLookups > 0;
+          });
+        }
+      }
+    }
+
+    unawaited(absorb(_fetchServerRowsForPage(url, provider)));
+    if (alternatePages.isNotEmpty) {
+      unawaited(absorb(_alternateServerFuture!));
     }
   }
 
@@ -183,9 +216,24 @@ class _EpisodePageState extends State<EpisodePage> {
           _downloadCard(),
           const SizedBox(height: 14),
           if (_servers.isEmpty && _loading)
-            const Padding(
-              padding: EdgeInsets.all(25),
-              child: Center(child: CircularProgressIndicator(color: _brick)),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: _ShimmerLoading(
+                child: Column(
+                  children: List.generate(
+                    3,
+                    (_) => Container(
+                      height: 50,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEADBCB),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _line),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           if (_servers.isEmpty && !_loading)
             Center(
@@ -200,21 +248,13 @@ class _EpisodePageState extends State<EpisodePage> {
                 ),
               ),
             ),
-          if (_servers.isNotEmpty)
-            _SectionCard(
-              title: 'اختر سيرفر المشاهدة',
-              icon: '📡',
-              child: Column(
-                children: _servers
-                    .map(
-                      (server) => _ServerTile(
-                        server: server,
-                        onTap: () => _openServer(server),
-                      ),
-                    )
-                    .toList(),
-              ),
+          if (_servers.isNotEmpty) ...[
+            _SmartEpisodePlay(
+              servers: _servers,
+              onOpen: _openServer,
+              findWorking: _findWorkingEpisodeServer,
             ),
+          ],
           const SizedBox(height: 16),
           _SectionCard(
             title: 'حلقات هذا الجزء / الموسم',
@@ -308,12 +348,15 @@ class _EpisodePageState extends State<EpisodePage> {
   );
 
   Future<void> _startDownload() async {
-    final server = _servers.firstWhere(
-      (row) => _isUsablePlaybackUrl(_text(row['directStreamUrl'])),
-      orElse: () => _servers.first,
-    );
-    final url = await _resolveServerStream(server);
+    final server = await _findWorkingEpisodeServer(_servers);
     if (!mounted) return;
+    if (server == null) {
+      _message(context, 'لم يستجب أي رابط تنزيل صالح لهذه الحلقة.');
+      return;
+    }
+    final sourcePage = _text(server['sourcePageUrl'])
+        .ifEmpty(_text(_episode['pageUrl']));
+    final url = _text(server['directStreamUrl']).trim();
     if (url.isEmpty) {
       _message(context, 'المصدر لم يوفر رابط تنزيل مباشر لهذه الحلقة.');
       return;
@@ -324,7 +367,7 @@ class _EpisodePageState extends State<EpisodePage> {
           await _native.invokeMethod<bool>('download.start', {
             'url': _absolute(url, _text(_episode['pageUrl'])),
             'title': _fullTitle,
-            'referer': _text(_episode['pageUrl']),
+            'referer': _text(server['embedUrl']).ifEmpty(sourcePage),
           }) ??
           false;
     } catch (_) {}
@@ -338,24 +381,145 @@ class _EpisodePageState extends State<EpisodePage> {
   }
 
   Future<void> _openServer(Map<String, dynamic> server) async {
-    final url = await _resolveServerStream(server);
+    final direct = _text(server['directStreamUrl']).trim();
+    final embed = _text(server['embedUrl']).trim();
+    final sourcePage = _text(server['sourcePageUrl'])
+        .ifEmpty(_text(_episode['pageUrl']));
+
+    final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
+    final url =
+        server['playableVerified'] == true && _isUsablePlaybackUrl(direct)
+        ? direct
+        : await _resolveServerStream({
+            ...server,
+            'directStreamUrl': '',
+            'embedUrl': candidateUrl,
+          }, referer: sourcePage);
     if (!mounted) return;
-    if (url.isEmpty) {
-      _message(context, 'السيرفر لم يوفر رابط فيديو مباشر. جرّب سيرفرًا آخر.');
+    final playableUrl = _isUsablePlaybackUrl(url) ? url : '';
+    if (!_isUsablePlaybackUrl(playableUrl)) {
+      final failedUrl = candidateUrl;
+      final alternatives =
+          _mergeServerRows([..._servers, ..._maps(server['fallbackServers'])])
+              .where((candidate) {
+                final directUrl = _text(candidate['directStreamUrl']).trim();
+                final candidateKey = directUrl.isNotEmpty
+                    ? directUrl
+                    : _text(candidate['embedUrl']).trim();
+                return candidateKey.isNotEmpty && candidateKey != failedUrl;
+              })
+              .toList(growable: false);
+      final alternate = await _findWorkingEpisodeServer(alternatives);
+      if (!mounted) return;
+      if (alternate != null) {
+        await _openServer(alternate);
+        return;
+      }
+      _message(context, 'لم يتم التحقق من رابط فيديو صالح لهذه الحلقة.');
       return;
     }
-    final headers = server['headers'] is Map
-        ? Map<String, String>.from(
-            (server['headers'] as Map).map((k, v) => MapEntry('$k', '$v')),
-          )
-        : <String, String>{};
+    final playerReferer = embed.isNotEmpty ? embed : sourcePage;
+
+    if (!mounted) return;
+    final verifiedServer = {
+      ...server,
+      'directStreamUrl': playableUrl,
+      'playableVerified': true,
+    };
     await _launchPlayer(
       context,
-      url,
+      playableUrl,
       _fullTitle,
-      referer: _text(_episode['pageUrl']),
-      headers: headers,
+      referer: playerReferer,
+      backupSources: _playerFallbackSources(
+        servers: _mergeServerRows([
+          ..._servers,
+          ..._maps(server['fallbackServers']),
+        ]),
+        current: verifiedServer,
+        pageReferer: sourcePage,
+      ),
     );
+  }
+
+  Future<Map<String, dynamic>?> _findWorkingEpisodeServer(
+    List<Map<String, dynamic>> servers, {
+    bool retryAlternateSources = true,
+  }) async {
+    var candidates = _mergeServerRows(servers);
+    final alternateFuture = _alternateServerFuture;
+    if (candidates.isEmpty) return null;
+    final verified = <Map<String, dynamic>>[];
+    final firstPlayable = Completer<Map<String, dynamic>?>();
+    var completed = 0;
+    final probes = <Future<void>>[];
+    final probeCandidates = prioritizeServerRowsForProbe(candidates)
+        .take(24)
+        .toList(growable: false);
+    for (final server in probeCandidates) {
+      probes.add(() async {
+        try {
+          final direct = _text(server['directStreamUrl']).trim();
+          final embed = _text(server['embedUrl']).trim();
+          final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
+          if (!_isUsablePlaybackUrl(candidateUrl)) return;
+          final stream = _text(
+            await _native
+                .invokeMethod<String>('media.resolve', {
+                  'url': candidateUrl,
+                  'referer': _text(server['sourcePageUrl'])
+                      .ifEmpty(_text(_episode['pageUrl'])),
+                })
+                .timeout(const Duration(seconds: 8)),
+          ).trim();
+          if (!_isUsablePlaybackUrl(stream)) return;
+          final row = {
+            ...server,
+            'directStreamUrl': stream,
+            'playableVerified': true,
+          };
+          verified.add(row);
+          if (!firstPlayable.isCompleted) firstPlayable.complete(row);
+        } catch (_) {
+          // Continue probing the other servers in parallel.
+        } finally {
+          completed++;
+          if (completed == probeCandidates.length &&
+              !firstPlayable.isCompleted) {
+            firstPlayable.complete(null);
+          }
+        }
+      }());
+    }
+    final selected = await firstPlayable.future.timeout(
+      const Duration(seconds: 9),
+      onTimeout: () => null,
+    );
+    if (selected == null) {
+      if (retryAlternateSources && alternateFuture != null) {
+        try {
+          final expanded = _mergeServerRows([
+            ...candidates,
+            ...await alternateFuture.timeout(const Duration(seconds: 6)),
+          ]);
+          if (expanded.length > candidates.length) {
+            return await _findWorkingEpisodeServer(
+              expanded,
+              retryAlternateSources: false,
+            );
+          }
+        } catch (_) {}
+      }
+      return null;
+    }
+    await Future.any([
+      Future.wait(probes),
+      Future<void>.delayed(const Duration(seconds: 2)),
+    ]);
+    return {
+      ...selected,
+      'fallbackServers': _mergeServerRows([...verified, ...candidates]),
+    };
   }
 }
 
@@ -383,6 +547,10 @@ bool _isUsablePlaybackUrl(String value) {
     return false;
   }
   final host = uri.host.toLowerCase();
+  final path = uri.path.toLowerCase();
+  if (RegExp(r'\.(apng|avif|bmp|gif|jpe?g|png|svg|webp)$').hasMatch(path)) {
+    return false;
+  }
   const redirectHosts = <String>[
     'google.com',
     'googleadservices.com',
@@ -410,14 +578,28 @@ Future<void> _prefetchFirstServer(List<Map<String, dynamic>> servers) async {
   await _resolveServerStream(candidate);
 }
 
-Future<String> _resolveServerStream(Map<String, dynamic> server) async {
+Future<String> _resolveServerStream(
+  Map<String, dynamic> server, {
+  String referer = '',
+}) async {
   final direct = _text(server['directStreamUrl']).trim();
-  if (_isUsablePlaybackUrl(direct)) return direct;
   final embed = _text(server['embedUrl']).trim();
-  if (!_isUsablePlaybackUrl(embed)) return '';
+  final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
+  final candidateUri = Uri.tryParse(candidateUrl);
+  if (candidateUrl.isEmpty ||
+      candidateUri == null ||
+      candidateUri.host.isEmpty ||
+      (candidateUri.scheme != 'http' && candidateUri.scheme != 'https')) {
+    return '';
+  }
   try {
     final resolved = _text(
-      await _native.invokeMethod<String>('media.resolve', {'url': embed}),
+      await _native
+          .invokeMethod<String>('media.resolve', {
+            'url': candidateUrl,
+            'referer': referer,
+          })
+          .timeout(const Duration(seconds: 7)),
     ).trim();
     return _isUsablePlaybackUrl(resolved) ? resolved : '';
   } catch (_) {
@@ -499,4 +681,136 @@ int? _episodeNumberFrom(String value) {
   ).firstMatch(text);
   final number = int.tryParse(match?.group(1) ?? '');
   return number != null && number > 0 ? number : null;
+}
+
+// ── Smart Play Button للحلقات (يختار أول سيرفر شغال) ────────────────────────
+class _SmartEpisodePlay extends StatefulWidget {
+  const _SmartEpisodePlay({
+    required this.servers,
+    required this.onOpen,
+    required this.findWorking,
+  });
+  final List<Map<String, dynamic>> servers;
+  final Future<void> Function(Map<String, dynamic>) onOpen;
+  final Future<Map<String, dynamic>?> Function(List<Map<String, dynamic>>)
+  findWorking;
+
+  @override
+  State<_SmartEpisodePlay> createState() => _SmartEpisodePlayState();
+}
+
+class _SmartEpisodePlayState extends State<_SmartEpisodePlay> {
+  bool _resolving = false;
+
+  Future<void> _play() async {
+    if (_resolving || widget.servers.isEmpty) return;
+    setState(() => _resolving = true);
+    Map<String, dynamic>? selected;
+    try {
+      selected = await widget.findWorking(widget.servers);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _resolving = false);
+    if (selected != null) {
+      await widget.onOpen(selected);
+    } else {
+      _message(context, 'لم يستجب أي رابط فيديو صالح لهذه الحلقة.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: _brick,
+    borderRadius: BorderRadius.circular(16),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: _resolving ? null : _play,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (_resolving)
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              )
+            else
+              const Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _resolving ? 'جاري فحص رابط المشاهدة…' : 'شاهد الآن',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+// ── قائمة السيرفرات البديلة (مطوية) للحلقات ─────────────────────────────────
+class _EpisodeAltServers extends StatefulWidget {
+  const _EpisodeAltServers({required this.servers, required this.onTap});
+  final List<Map<String, dynamic>> servers;
+  final void Function(Map<String, dynamic>) onTap;
+
+  @override
+  State<_EpisodeAltServers> createState() => _EpisodeAltServersState();
+}
+
+class _EpisodeAltServersState extends State<_EpisodeAltServers> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      GestureDetector(
+        onTap: () => setState(() => _expanded = !_expanded),
+        child: Row(
+          children: [
+            Icon(
+              _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+              color: _muted,
+              size: 18,
+            ),
+            const SizedBox(width: 4),
+            Text(
+              _expanded
+                  ? 'إخفاء السيرفرات'
+                  : 'تغيير السيرفر (${widget.servers.length})',
+              style: const TextStyle(
+                color: _muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+      if (_expanded) ...[
+        const SizedBox(height: 8),
+        ...widget.servers.map(
+          (server) =>
+              _ServerTile(server: server, onTap: () => widget.onTap(server)),
+        ),
+      ],
+    ],
+  );
 }

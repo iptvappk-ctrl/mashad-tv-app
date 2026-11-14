@@ -7,6 +7,6 @@
         <item name="android:statusBarColor">#F5F7F7</item>
         <item name="android:navigationBarColor">#F5F7F7</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowBackground">#F5F7F7</item>
+        <item name="android:windowBackground">@color/zakzouka_splash_bg</item>
     </style>
 </resources>

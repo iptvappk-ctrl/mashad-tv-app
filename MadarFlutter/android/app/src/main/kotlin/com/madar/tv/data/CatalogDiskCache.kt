@@ -106,6 +106,13 @@ object CatalogDiskCache {
                                 pageUrl = url,
                                 seasonNumber = episode.optInt("seasonNumber", season.optInt("number", 1)),
                                 providerName = episode.optString("providerName"),
+                                alternatePageUrls = episode.optJSONArray("alternatePageUrls")?.let { urls ->
+                                    buildList(urls.length()) {
+                                        for (urlIndex in 0 until urls.length()) {
+                                            urls.optString(urlIndex).takeIf(String::isNotBlank)?.let(::add)
+                                        }
+                                    }
+                                }.orEmpty(),
                             ),
                         )
                     }
@@ -138,7 +145,8 @@ object CatalogDiskCache {
                                 .put("title", episode.title)
                                 .put("pageUrl", episode.pageUrl)
                                 .put("seasonNumber", episode.seasonNumber)
-                                .put("providerName", episode.providerName),
+                                .put("providerName", episode.providerName)
+                                .put("alternatePageUrls", JSONArray(episode.alternatePageUrls)),
                         )
                     }
                 }
@@ -234,6 +242,7 @@ object CatalogDiskCache {
         .put("parentSeriesTitle", parentSeriesTitle ?: JSONObject.NULL)
         .put("parentSeriesPageUrl", parentSeriesPageUrl ?: JSONObject.NULL)
         .put("latestEpisodeLabel", latestEpisodeLabel)
+        .put("alternatePageUrls", JSONArray(alternatePageUrls))
 
     private fun JSONObject.toArabseedItem(): ArabseedItem? {
         val pageUrl = optString("pageUrl")
@@ -256,6 +265,13 @@ object CatalogDiskCache {
             parentSeriesTitle = nullableString("parentSeriesTitle"),
             parentSeriesPageUrl = nullableString("parentSeriesPageUrl"),
             latestEpisodeLabel = optString("latestEpisodeLabel"),
+            alternatePageUrls = optJSONArray("alternatePageUrls")?.let { urls ->
+                buildList(urls.length()) {
+                    for (index in 0 until urls.length()) {
+                        urls.optString(index).takeIf(String::isNotBlank)?.let(::add)
+                    }
+                }
+            }.orEmpty(),
         )
     }
 

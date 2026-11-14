@@ -86,6 +86,255 @@ class NativeBridge {
       return false;
     }
   }
+
+  static Future<bool> requestNotificationPermission() async {
+    try {
+      return await _native.invokeMethod<bool>('notifications.request') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+List<Map<String, dynamic>> _playerFallbackSources({
+  required List<Map<String, dynamic>> servers,
+  required Map<String, dynamic> current,
+  required String pageReferer,
+}) {
+  final currentDirect = _text(current['directStreamUrl']).trim();
+  final currentUrl = _isUsablePlaybackUrl(currentDirect) ? currentDirect : '';
+  final seen = <String>{currentUrl};
+  final backups = <Map<String, dynamic>>[];
+
+  // Rows with the same visible server label can point to different mirrors
+  // (often because the source rotates query tokens). Keep one row in the UI,
+  // but still pass every underlying URL to the player as an automatic backup.
+  final expandedServers = <Map<String, dynamic>>[];
+  for (final server in servers) {
+    expandedServers.add(server);
+    expandedServers.addAll(_maps(server['fallbackServers']));
+  }
+
+  // Only pass streams that were resolved and checked by the native media
+  // verifier. An embed/page URL can return HTML, ads, or a 404; treating it as
+  // a video backup caused the player to open a blank/error page.
+  for (final server in expandedServers) {
+    if (server['playableVerified'] != true) continue;
+    final url = _text(server['directStreamUrl']).trim();
+    final urlUri = Uri.tryParse(url);
+    if (url.isEmpty ||
+        urlUri == null ||
+        urlUri.host.isEmpty ||
+        (urlUri.scheme != 'http' && urlUri.scheme != 'https') ||
+        !_isUsablePlaybackUrl(url) ||
+        !seen.add(url)) {
+      continue;
+    }
+
+    final embed = _text(server['embedUrl']).trim();
+    final serverPage = _text(server['sourcePageUrl']).trim();
+    backups.add({
+      'url': url,
+      'referer': embed.isNotEmpty
+          ? embed
+          : serverPage.isNotEmpty
+          ? serverPage
+          : pageReferer,
+    });
+    if (backups.length >= 48) return backups;
+  }
+
+  return backups;
+}
+
+String _serverCacheKey(String pageUrl) => 'episode:servers:v6:$pageUrl';
+
+List<Map<String, dynamic>> _tagServerRows(
+  List<Map<String, dynamic>> rows,
+  String sourcePageUrl,
+  String provider,
+) => rows
+    .map(
+      (row) => {
+        ...row,
+        'sourcePageUrl': _text(row['sourcePageUrl']).ifEmpty(sourcePageUrl),
+        'sourceProviderName': _text(row['sourceProviderName'])
+            .ifEmpty(provider),
+      },
+    )
+    .toList(growable: false);
+
+Future<List<Map<String, dynamic>>> _fetchServerRowsForPage(
+  String pageUrl,
+  String provider,
+) async {
+  final url = pageUrl.trim();
+  if (!url.startsWith('http')) return const [];
+  final key = _serverCacheKey(url);
+  List<Map<String, dynamic>> cachedRows = const [];
+  try {
+    final encoded = await NativeBridge.readCache(key);
+    if (encoded != null) {
+      cachedRows = _tagServerRows(_maps(jsonDecode(encoded)), url, provider);
+    }
+  } catch (_) {}
+  try {
+    final rows = await _nativeScraper.fetchServerCandidates(
+      pageUrl: url,
+      provider: provider,
+    );
+    if (rows.isNotEmpty) {
+      final tagged = _tagServerRows(rows, url, provider);
+      unawaited(NativeBridge.writeCache(key, jsonEncode(tagged)));
+      return tagged;
+    }
+  } catch (_) {}
+  return cachedRows;
+}
+
+Future<List<Map<String, dynamic>>> _fetchAlternativeServerRows({
+  required List<String> pageUrls,
+  required String provider,
+  int maximumPages = 24,
+}) async {
+  final seen = <String>{};
+  final candidates = pageUrls
+      .map((url) => url.trim())
+      .where((url) => url.startsWith('http'))
+      .where(
+        (url) => seen.add(url.replaceFirst(RegExp(r'/+$'), '').toLowerCase()),
+      )
+      .take(maximumPages)
+      .toList(growable: false);
+  if (candidates.isEmpty) return const [];
+  final results = await Future.wait(
+    candidates.map((url) => _fetchServerRowsForPage(url, provider)),
+    eagerError: false,
+  );
+  return _mergeServerRows(results.expand((rows) => rows));
+}
+
+Future<List<Map<String, dynamic>>> _fetchProviderBackupServerRows({
+  required String title,
+  required String pageUrl,
+  required bool isSeries,
+  String year = '',
+}) async {
+  final cleanTitle = title.trim();
+  final cleanUrl = pageUrl.trim();
+  if (cleanTitle.isEmpty || !cleanUrl.startsWith('http')) return const [];
+  try {
+    final rows = await _nativeScraper.findServerCandidatesAcrossProviders(
+      title: cleanTitle,
+      pageUrl: cleanUrl,
+      isSeries: isSeries,
+      year: year.trim(),
+    );
+    return _mergeServerRows(_tagServerRows(rows, cleanUrl, 'مصدر بديل'));
+  } catch (_) {
+    return const [];
+  }
+}
+
+List<Map<String, dynamic>> _mergeServerRows(
+  Iterable<Map<String, dynamic>> rows,
+) {
+  final groups = <String, List<Map<String, dynamic>>>{};
+  final seenPlaybackUrls = <String>{};
+  final flattenedRows = <Map<String, dynamic>>[];
+  for (final row in rows) {
+    flattenedRows.add(row);
+    flattenedRows.addAll(_maps(row['fallbackServers']));
+  }
+
+  for (final row in flattenedRows) {
+    final direct = _text(row['directStreamUrl']).trim();
+    final embed = _text(row['embedUrl']).trim();
+    final playback = _isUsablePlaybackUrl(direct) ? direct : embed;
+    // قبل أي URL صالح — سواء direct stream أو embed page (للـ WebView)
+    final playbackUri = Uri.tryParse(playback);
+    if (playback.isEmpty ||
+        playbackUri == null ||
+        playbackUri.host.isEmpty ||
+        (playbackUri.scheme != 'http' && playbackUri.scheme != 'https'))
+      continue;
+    final urlKey = playback.replaceFirst(RegExp(r'/+$'), '').toLowerCase();
+    if (!seenPlaybackUrls.add(urlKey)) continue;
+
+    final rawName = _text(row['name']).trim();
+    final normalizedName = rawName
+        .toLowerCase()
+        .replaceAll('⚡', ' ')
+        .replaceAll(RegExp(r'سيرفر|server'), ' ')
+        .replaceAll(RegExp(r'فائق\s*السرعة|سريع|سريعة|fast'), ' ')
+        .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final pageHost =
+        Uri.tryParse(_text(row['sourcePageUrl']).trim())?.host
+            .toLowerCase()
+            .replaceFirst(RegExp(r'^www\.'), '') ??
+        '';
+    final playbackHost =
+        Uri.tryParse(playback)?.host
+            .toLowerCase()
+            .replaceFirst(RegExp(r'^www\.'), '') ??
+        '';
+    final identity = normalizedName.isEmpty
+        ? 'url:$urlKey'
+        : '${pageHost.isEmpty ? playbackHost : pageHost}|$normalizedName';
+    groups.putIfAbsent(identity, () => <Map<String, dynamic>>[]).add(row);
+  }
+
+  return groups.values
+      .map((group) {
+        final primary = Map<String, dynamic>.from(group.first);
+        if (group.length > 1) {
+          primary['fallbackServers'] = group.skip(1).toList(growable: false);
+        } else {
+          primary.remove('fallbackServers');
+        }
+        return primary;
+      })
+      .toList(growable: false);
+}
+
+/// Interleave source pages before playback probing so one site with many
+/// mirrors cannot consume the probe window before other configured sources.
+List<Map<String, dynamic>> prioritizeServerRowsForProbe(
+  Iterable<Map<String, dynamic>> rows,
+) {
+  final groups = <String, List<Map<String, dynamic>>>{};
+  final order = <String>[];
+  for (final row in rows) {
+    final source = _text(row['sourceProviderName']).trim();
+    final page = _text(row['sourcePageUrl']).trim();
+    final host = Uri.tryParse(page)?.host.toLowerCase() ?? '';
+    final key = source.isNotEmpty ? source.toLowerCase() : host;
+    final groupKey = key.isEmpty ? 'unknown' : key;
+    groups
+        .putIfAbsent(groupKey, () {
+          order.add(groupKey);
+          return <Map<String, dynamic>>[];
+        })
+        .add(row);
+  }
+
+  final prioritized = <Map<String, dynamic>>[];
+  var index = 0;
+  while (true) {
+    var added = false;
+    for (final key in order) {
+      final group = groups[key]!;
+      if (index < group.length) {
+        prioritized.add(group[index]);
+        added = true;
+      }
+    }
+    if (!added) break;
+    index++;
+  }
+  return prioritized;
 }
 
 String _text(dynamic value) => value == null ? '' : '$value';
@@ -226,6 +475,7 @@ class MediaItem {
     this.parentSeriesTitle = '',
     this.parentSeriesPageUrl = '',
     this.latestEpisodeLabel = '',
+    this.alternatePageUrls = const [],
   });
 
   final String id,
@@ -238,7 +488,25 @@ class MediaItem {
       provider,
       overview;
   final String parentSeriesTitle, parentSeriesPageUrl, latestEpisodeLabel;
+  final List<String> alternatePageUrls;
   final bool isSeries;
+
+  MediaItem copyWith({List<String>? alternatePageUrls}) => MediaItem(
+    id: id,
+    title: title,
+    pageUrl: pageUrl,
+    isSeries: isSeries,
+    poster: poster,
+    year: year,
+    quality: quality,
+    rating: rating,
+    provider: provider,
+    overview: overview,
+    parentSeriesTitle: parentSeriesTitle,
+    parentSeriesPageUrl: parentSeriesPageUrl,
+    latestEpisodeLabel: latestEpisodeLabel,
+    alternatePageUrls: alternatePageUrls ?? this.alternatePageUrls,
+  );
 
   String get visibleProvider =>
       provider == 'عرب سيد' ? 'المصدر الأساسي' : provider;
@@ -266,6 +534,13 @@ class MediaItem {
     parentSeriesTitle: _text(row['parentSeriesTitle']),
     parentSeriesPageUrl: _text(row['parentSeriesPageUrl']),
     latestEpisodeLabel: _text(row['latestEpisodeLabel']),
+    alternatePageUrls: row['alternatePageUrls'] is List
+        ? (row['alternatePageUrls'] as List)
+              .map((value) => _text(value).trim())
+              .where((value) => value.startsWith('http'))
+              .toSet()
+              .toList(growable: false)
+        : const [],
   );
 
   Map<String, dynamic> toMap() => {
@@ -286,6 +561,7 @@ class MediaItem {
     'parentSeriesTitle': parentSeriesTitle,
     'parentSeriesPageUrl': parentSeriesPageUrl,
     'latestEpisodeLabel': latestEpisodeLabel,
+    'alternatePageUrls': alternatePageUrls,
   };
 }
 

@@ -21,6 +21,9 @@
 | [10_ANDROID_FREEZE_AND_PLAYER_REPAIR.md](./10_ANDROID_FREEZE_AND_PLAYER_REPAIR.md) | **إصلاح بطء تحميل الواجهة وفشل تشغيل المشغّل** | التحميل التدريجي، تقليل تركيب الشاشات المتزامنة، تصنيف روابط الفيديو، الرجوع للسيرفر البديل، وبناء APK مع حدود التحقق على الجهاز. |
 | [11_OPERATIONAL_SOURCE_PLAYER_AUDIT.md](./11_OPERATIONAL_SOURCE_PLAYER_AUDIT.md) | **تدقيق تشغيل المصادر والمشغّل والتنزيل والسعة** | نتائج الوصول ومحددات القوائم، إصلاحات التحديث الحالي، وحدود الإثبات الواقعي للإعلانات والبث والضغط. |
 | [12_FLUTTER_PORT_AND_FAST_START.md](./12_FLUTTER_PORT_AND_FAST_START.md) | **نسخة Flutter، بدء الواجهة سريعًا ومنطق الحلقات** | الكاش، التحميل بالخلفية، ترتيب المواسم والحلقات، إعداد API، وربط مشغل Android المستقل. |
+| [13_UNIFIED_SCRAPERS_SUITE.md](./13_UNIFIED_SCRAPERS_SUITE.md) | **المنظومة الشاملة لسحب وفك تشفير الأفلام والمسلسلات (24 منصة)** | محرك السكرابر الموحد في بايثون، البحث المتوازي، فك تشفير سيرفرات البث، واجهة سطر الأوامر (CLI)، وسيرفر FastAPI REST API. |
+| [14_FULL_ECOSYSTEM_SCRAPERS_AND_INTEGRATION_GUIDE.md](./14_FULL_ECOSYSTEM_SCRAPERS_AND_INTEGRATION_GUIDE.md) | **دليل المنظومة الشامل: المحركات، السكرابرات، المشغل، والدمج من الألف إلى الياء** | مرجع هندسي شامل للمشروع، مزودات الـ 23+، تجاوز الإعلانات، قنوات الربط Flutter ↔ Android Native، مشغل Video Player الموحد، وتقنية YouTube Cinema-Pure Mode. |
+| [AD_BYPASS_DOCUMENTATION.md](./AD_BYPASS_DOCUMENTATION.md) | **توثيق محرك تجاوز الإعلانات واستخراج السيرفرات المباشرة** | فك Packed JS، جلب روابط التدفق المباشرة من DoodStream و StreamWish و VidBom وغيرها. |
 
 ---
 

@@ -31,6 +31,7 @@ export default function HomePage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [resolvingServer, setResolvingServer] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<ArabseedItem[]>([]);
+  const recommendationsRequested = useRef(false);
   const detailRequestId = useRef(0);
   const [playerState, setPlayerState] = useState<{
     isOpen: boolean;
@@ -65,19 +66,23 @@ export default function HomePage() {
   };
 
   useEffect(() => {
+    if (!selectedDetailItem || loadingDetail || recommendations.length || recommendationsRequested.current) return;
     let cancelled = false;
-    async function fetchRecommendations() {
+    const timer = window.setTimeout(async () => {
+      recommendationsRequested.current = true;
       try {
-        const response = await fetch("/api/cinema/movies?page=1");
+        const response = await fetch("/api/cinema/movies?page=1", { priority: "low" });
         const result = await response.json();
         if (!cancelled && result.success && Array.isArray(result.data)) setRecommendations(result.data.slice(0, 10));
-      } catch {}
-    }
-    void fetchRecommendations();
-    return () => { cancelled = true; };
-  }, []);
+      } catch {
+        recommendationsRequested.current = false;
+      }
+    }, 500);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [selectedDetailItem, loadingDetail, recommendations.length]);
 
   useEffect(() => {
+    if (activeTab !== "matches") return;
     let cancelled = false;
     async function fetchMatchesCount() {
       try {
@@ -91,7 +96,7 @@ export default function HomePage() {
     void fetchMatchesCount();
     const interval = setInterval(fetchMatchesCount, 45000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, []);
+  }, [activeTab]);
 
   const fetchDetail = async (item: ArabseedItem, requestId: number) => {
     try {
@@ -259,7 +264,7 @@ export default function HomePage() {
   };
 
   return (
-    <div dir="rtl" className="min-h-screen bg-[#090A0E] font-sans text-slate-100 selection:bg-amber-500/30 selection:text-amber-300">
+    <div dir="rtl" className="site-shell min-h-screen bg-[#090A0E] font-sans text-slate-100 selection:bg-amber-500/30 selection:text-amber-300">
       <Navbar
         activeTab={activeTab}
         onTabChange={changeTab}
@@ -336,7 +341,7 @@ export default function HomePage() {
                   <article
                     key={item.id}
                     onClick={() => { void handleSelectItem(item); }}
-                    className="group cursor-pointer overflow-hidden rounded-[22px] border border-amber-500/15 bg-[#12131D] shadow-md transition duration-300 hover:-translate-y-1 hover:border-amber-400/60"
+                    className="media-poster-card group cursor-pointer overflow-hidden rounded-[22px] border border-amber-500/15 bg-[#12131D] shadow-md transition duration-300 hover:-translate-y-1 hover:border-amber-400/60"
                   >
                     <div className="relative aspect-[0.72] overflow-hidden bg-[#0A0B10]">
                       <img
@@ -356,7 +361,7 @@ export default function HomePage() {
                       >
                         <Trash2 size={13} />
                       </button>
-                      <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#090A0E] via-[#090A0E]/60 to-transparent p-3 pt-8 text-xs font-extrabold text-white group-hover:text-amber-300">
+                      <span className="poster-copy absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#090A0E] via-[#090A0E]/60 to-transparent p-3 pt-8 text-xs font-extrabold text-white group-hover:text-amber-300">
                         {item.title}
                       </span>
                     </div>

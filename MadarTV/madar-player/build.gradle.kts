@@ -14,8 +14,8 @@ android {
         applicationId = "com.madar.player"
         minSdk = 23
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.1.3"
+        versionCode = 16
+        versionName = "1.1.14"
     }
 
     buildTypes {

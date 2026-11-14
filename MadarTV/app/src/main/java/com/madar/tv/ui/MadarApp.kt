@@ -40,16 +40,12 @@ private val navItems = listOf(
 @Composable
 fun MadarApp() {
     val context = LocalContext.current
-    val introPreferences = remember(context) {
-        context.getSharedPreferences("madar_ui", android.content.Context.MODE_PRIVATE)
-    }
-    var showIntro by remember { mutableStateOf(!introPreferences.getBoolean("intro_seen", false)) }
+    var showIntro by remember { mutableStateOf(true) }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var isDeepScreen by rememberSaveable { mutableStateOf(false) }
-    val finishIntro: () -> Unit = remember(introPreferences) {
+    val finishIntro: () -> Unit = remember {
         {
             showIntro = false
-            introPreferences.edit().putBoolean("intro_seen", true).apply()
             Unit
         }
     }

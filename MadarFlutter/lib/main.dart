@@ -1,17 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import 'services/native_scraper_service.dart';
 part 'src/app_shared.dart';
 part 'src/catalog.dart';
 part 'src/catalog_widgets.dart';
 part 'src/details.dart';
 part 'src/episodes.dart';
+part 'src/recaps.dart';
 part 'src/sports.dart';
 
 const _native = MethodChannel('madar/native');
+const _nativeScraper = NativeScraperService();
+const _updateProgress = EventChannel('madar/updates/progress');
 const _ink = Color(0xFF342633);
 const _brick = Color(0xFFB94E3C);
 const _paper = Color(0xFFF2E6D7);
@@ -101,8 +107,190 @@ class ZakzoukaFlutterApp extends StatelessWidget {
       textDirection: TextDirection.rtl,
       child: child ?? const SizedBox.shrink(),
     ),
-    home: const _StartupIntro(child: RootTabs()),
+    home: const _UpdatePromptGate(child: _StartupIntro(child: RootTabs())),
   );
+}
+
+/// Checks the public release manifest without delaying the first screen.
+class _UpdatePromptGate extends StatefulWidget {
+  const _UpdatePromptGate({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_UpdatePromptGate> createState() => _UpdatePromptGateState();
+}
+
+class _UpdatePromptGateState extends State<_UpdatePromptGate> {
+  Timer? _checkTimer;
+  int? _shownVersionCode;
+
+  @override
+  void initState() {
+    super.initState();
+    // Let the first screen render before making a short HTTPS request.
+    _checkTimer = Timer(const Duration(seconds: 2), _checkForUpdate);
+  }
+
+  Future<void> _checkForUpdate() async {
+    try {
+      final update = await _native.invokeMapMethod<String, dynamic>(
+        'updates.check',
+      );
+      if (!mounted || update?['available'] != true) return;
+      final code = (update?['versionCode'] as num?)?.toInt();
+      if (code == null || code <= 0 || code == _shownVersionCode) return;
+      _shownVersionCode = code;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showUpdateDialog(Map<String, dynamic>.from(update!));
+      });
+    } on PlatformException catch (_) {
+      // Update checks are optional; an unavailable network must not block use.
+    } catch (_) {
+      // Malformed or unreachable update metadata is ignored safely.
+    }
+  }
+
+  Future<void> _showUpdateDialog(Map<String, dynamic> update) async {
+    var busy = false;
+    var hint = '';
+    double? downloadProgress;
+    StreamSubscription<dynamic>? progressSubscription;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            icon: const Icon(Icons.system_update_alt_rounded, color: _brick),
+            title: const Text('يوجد تحديث جديد'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('الإصدار ${update['versionName'] ?? ''}'),
+                if ((update['releaseNotes'] as String? ?? '')
+                    .trim()
+                    .isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    (update['releaseNotes'] as String).trim(),
+                    style: const TextStyle(color: _muted),
+                  ),
+                ],
+                if (hint.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(hint, style: const TextStyle(color: _brick)),
+                ],
+                if (busy && downloadProgress != null) ...[
+                  const SizedBox(height: 14),
+                  LinearProgressIndicator(value: downloadProgress),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => Navigator.of(dialogContext).pop(),
+                child: const Text('لاحقاً'),
+              ),
+              FilledButton.icon(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        setDialogState(() {
+                          busy = true;
+                          hint = '';
+                        });
+                        Map<String, dynamic>? response;
+                        try {
+                          progressSubscription ??= _updateProgress
+                              .receiveBroadcastStream()
+                              .listen((event) {
+                                if (event is! Map) return;
+                                final downloaded =
+                                    (event['downloadedBytes'] as num?)
+                                        ?.toInt() ??
+                                    -1;
+                                final total =
+                                    (event['totalBytes'] as num?)?.toInt() ??
+                                    -1;
+                                if (!dialogContext.mounted) return;
+                                setDialogState(() {
+                                  if (total > 0 && downloaded >= 0) {
+                                    downloadProgress = (downloaded / total)
+                                        .clamp(0, 1);
+                                  }
+                                  final status = event['status'];
+                                  if (status == 'downloading') {
+                                    hint = 'جاري تنزيل التحديث...';
+                                  }
+                                });
+                              });
+                          response = await _native
+                              .invokeMapMethod<String, dynamic>(
+                                'updates.install',
+                              );
+                        } catch (_) {
+                          response = null;
+                        }
+                        if (!dialogContext.mounted) return;
+                        final status = response?['status'];
+                        if (status == 'install_started') {
+                          await progressSubscription?.cancel();
+                          progressSubscription = null;
+                          Navigator.of(dialogContext).pop();
+                          if (mounted) {
+                            ScaffoldMessenger.maybeOf(this.context)
+                                ?.showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'اكتمل تنزيل التحديث؛ أكمل التثبيت في نافذة Android.',
+                                    ),
+                                  ),
+                                );
+                          }
+                        } else {
+                          await progressSubscription?.cancel();
+                          progressSubscription = null;
+                          setDialogState(() {
+                            busy = false;
+                            hint = status == 'permission_required'
+                                ? 'اسمح للتطبيق بتثبيت التحديث من شاشة Android التي فتحت، ثم اضغط «تحديث الآن» مرة أخرى.'
+                                : status == 'permission_unavailable'
+                                ? 'تعذر فتح إعداد التثبيت. افتح إعدادات التطبيق واسمح بتثبيت التطبيقات.'
+                                : status == 'no_update'
+                                ? 'لا يتوفر تحديث أحدث الآن.'
+                                : 'تعذر تنزيل التحديث والتحقق منه. تأكد من الاتصال بالإنترنت ثم حاول مرة أخرى.';
+                          });
+                        }
+                      },
+                icon: busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download_rounded),
+                label: const Text('تحديث الآن'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    await progressSubscription?.cancel();
+  }
+
+  @override
+  void dispose() {
+    _checkTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _StartupIntro extends StatefulWidget {
@@ -297,7 +485,7 @@ class _ZaqzoukaIntroScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 7),
                         const Text(
-                          'أفلام • مسلسلات • مباريات مباشرة',
+                          'أفلام • مسلسلات • ملخصات • مباريات مباشرة',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: _muted, fontSize: 13),
                         ),

@@ -24,6 +24,7 @@ data class ArabseedItem(
     val parentSeriesTitle: String? = null,
     val parentSeriesPageUrl: String? = null,
     val latestEpisodeLabel: String = "",
+    val alternatePageUrls: List<String> = emptyList(),
 ) {
     override fun toString(): String = id
 }
@@ -43,6 +44,8 @@ data class ArabseedServer(
     val name: String,
     val embedUrl: String,
     val directStreamUrl: String? = null,
+    val sourcePageUrl: String = "",
+    val sourceProviderName: String = "",
 ) {
     override fun toString(): String = name
 }
@@ -55,6 +58,7 @@ data class ArabseedEpisode(
     val pageUrl: String,
     val seasonNumber: Int = 1,
     val providerName: String = "",
+    val alternatePageUrls: List<String> = emptyList(),
 )
 
 data class ArabseedSeason(
