@@ -1466,7 +1466,7 @@ class _DetailPageState extends State<DetailPage> {
     // backups ready if the fastest valid stream fails during startup.
     await Future.any([
       Future.wait(probes),
-      Future<void>.delayed(const Duration(seconds: 2)),
+      Future<void>.delayed(const Duration(milliseconds: 3500)),
     ]);
     return {
       ...selected,

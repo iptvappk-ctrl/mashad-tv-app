@@ -144,6 +144,36 @@ List<Map<String, dynamic>> _playerFallbackSources({
     if (backups.length >= 48) return backups;
   }
 
+  // Second pass: if verified backups are scarce, include remaining server candidates
+  // so the player always has multiple fallbacks rather than a dead error screen.
+  if (backups.length < 4) {
+    for (final server in expandedServers) {
+      final direct = _text(server['directStreamUrl']).trim();
+      final embed = _text(server['embedUrl']).trim();
+      final url = direct.isNotEmpty ? direct : embed;
+      final urlUri = Uri.tryParse(url);
+      if (url.isEmpty ||
+          urlUri == null ||
+          urlUri.host.isEmpty ||
+          (urlUri.scheme != 'http' && urlUri.scheme != 'https') ||
+          !_isUsablePlaybackUrl(url) ||
+          !seen.add(url)) {
+        continue;
+      }
+
+      final serverPage = _text(server['sourcePageUrl']).trim();
+      backups.add({
+        'url': url,
+        'referer': embed.isNotEmpty
+            ? embed
+            : serverPage.isNotEmpty
+            ? serverPage
+            : pageReferer,
+      });
+      if (backups.length >= 48) return backups;
+    }
+  }
+
   return backups;
 }
 

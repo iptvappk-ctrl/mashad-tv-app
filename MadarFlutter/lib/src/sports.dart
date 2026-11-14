@@ -35,10 +35,10 @@ class _SportsPageState extends State<SportsPage> {
           _footballMatches = cached[2];
           _loading = false;
           _categoryId ??= _categories.isEmpty
-              ? null
+              ? 'bein_sports'
               : _text(_categories.first['id']);
         });
-      if (_categoryId != null) unawaited(_loadChannels(_categoryId!));
+      unawaited(_loadChannels(_categoryId ?? 'bein_sports'));
     } catch (_) {}
     await _refresh(force: false);
   }
@@ -189,7 +189,12 @@ class _SportsPageState extends State<SportsPage> {
     showCheckmark: false,
     labelStyle: TextStyle(color: _section == value ? Colors.white : _muted),
     side: BorderSide(color: _section == value ? _brick : _line),
-    onSelected: (_) => setState(() => _section = value),
+    onSelected: (_) => setState(() {
+      _section = value;
+      if (value == 'channels' && _channels.isEmpty) {
+        _loadChannels(_categoryId ?? 'bein_sports');
+      }
+    }),
   );
 
   Widget _eventsList() {

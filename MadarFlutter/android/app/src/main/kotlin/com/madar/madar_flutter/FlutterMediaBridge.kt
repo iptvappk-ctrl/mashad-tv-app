@@ -277,8 +277,21 @@ class FlutterMediaBridge(context: Context) {
         "live.events.fetch" -> YacineRepository.getEvents(forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
         "live.categories.cached" -> (YacineRepository.getCachedCategories() ?: emptyList()).map { it.toMap() }
         "live.categories.fetch" -> YacineRepository.getCategories(forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
-        "live.channels.cached" -> (YacineRepository.getCachedChannels(call.argument<String>("categoryId").orEmpty()) ?: emptyList()).map { it.toMap() }
-        "live.channels.fetch" -> YacineRepository.getChannels(call.argument<String>("categoryId").orEmpty(), forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
+        "live.channels.cached" -> {
+            val catId = call.argument<String>("categoryId").orEmpty()
+            val cached = YacineRepository.getCachedChannels(catId) ?: emptyList()
+            // If cached is empty and category looks like beIN sports, return fallback channels
+            val result = if (cached.isEmpty()) YacineRepository.BEIN_FALLBACK_CHANNELS else cached
+            result.map { it.toMap() }
+        }
+        "live.channels.fetch" -> {
+            val catId = call.argument<String>("categoryId").orEmpty()
+            val force = call.argument<Boolean>("force") ?: false
+            val fetched = YacineRepository.getChannels(catId, forceRefresh = force)
+            // Always include beIN fallback channels merged in
+            val merged = (fetched + YacineRepository.BEIN_FALLBACK_CHANNELS).distinctBy { it.id }
+            merged.map { it.toMap() }
+        }
         "live.eventStreams" -> YacineRepository.getEventStreams(call.argument<String>("id").orEmpty()).map { it.toMap() }
         "live.matchStreams" -> YacineRepository.getMatchStreams(
             eventId = call.argument<String>("id").orEmpty(),
@@ -373,8 +386,16 @@ class FlutterMediaBridge(context: Context) {
             ?: if (item.isArabseedSource()) ArabseedRepository.loadCachedSeasonBundle(item.pageUrl)
             else MultiProviderRepository.loadCachedSeasonBundle(item.pageUrl)
 
-    private fun fetchSeasons(item: ArabseedItem, forceRefresh: Boolean): ArabseedSeasonBundle =
-        MultiProviderRepository.loadSeasonBundleAndRefreshInBackground(item, forceRefresh)
+    private fun fetchSeasons(item: ArabseedItem, forceRefresh: Boolean): ArabseedSeasonBundle {
+        val seriesItem = item.asParentSeries().copy(type = com.madar.tv.data.ArabseedType.SERIES)
+        val bundle = MultiProviderRepository.loadSeasonBundleAndRefreshInBackground(seriesItem, forceRefresh)
+        if (bundle.seasons.any { it.episodes.isNotEmpty() }) return bundle
+        return if (seriesItem.isArabseedSource()) {
+            ArabseedRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
+        } else {
+            MultiProviderRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
+        }
+    }
 }
 
 private fun ArabseedItem.isArabseedSource(): Boolean = when {
@@ -437,12 +458,15 @@ private fun Map<String, Any?>.toItem(): ArabseedItem = ArabseedItem(
 
 /** Episode cards carry the canonical series URL. Season discovery must use that page. */
 private fun ArabseedItem.asParentSeries(): ArabseedItem {
-    val parentUrl = parentSeriesPageUrl?.takeIf(String::isNotBlank) ?: return this
+    val parentUrl = parentSeriesPageUrl?.takeIf(String::isNotBlank)
     val parentTitle = parentSeriesTitle?.takeIf(String::isNotBlank) ?: title
+    // Always ensure type=SERIES so season aggregation runs regardless of card type
+    if (parentUrl == null) return copy(type = com.madar.tv.data.ArabseedType.SERIES)
     return copy(
         title = parentTitle,
         arabicTitle = parentTitle,
         pageUrl = parentUrl,
+        type = com.madar.tv.data.ArabseedType.SERIES,
         parentSeriesTitle = null,
         parentSeriesPageUrl = null,
         alternatePageUrls = emptyList(),

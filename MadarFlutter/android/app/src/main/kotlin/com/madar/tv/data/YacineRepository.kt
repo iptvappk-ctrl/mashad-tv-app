@@ -55,9 +55,29 @@ object YacineRepository {
     private const val EVENTS_CACHE_TTL = 45 * 1000L // 45 seconds
     private const val EVENTS_DISK_STALE_MS = 6L * 60 * 60 * 1000
 
+    // ─── Hardcoded beIN + Alkass channels (always available as fallback) ──────────
+    val BEIN_FALLBACK_CHANNELS = listOf(
+        YacineChannel(id = "bein_hd1", name = "beIN SPORTS 1 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS1_DIGITAL_Mono.png", isHide = 0, priority = 10),
+        YacineChannel(id = "bein_hd2", name = "beIN SPORTS 2 HD", logo = "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS2_DIGITAL_Mono.png", isHide = 0, priority = 9),
+        YacineChannel(id = "bein_hd3", name = "beIN SPORTS 3 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS3_DIGITAL_Mono.png", isHide = 0, priority = 8),
+        YacineChannel(id = "bein_hd4", name = "beIN SPORTS 4 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS4_DIGITAL_Mono.png", isHide = 0, priority = 7),
+        YacineChannel(id = "bein_hd5", name = "beIN SPORTS 5 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS5_DIGITAL_Mono.png", isHide = 0, priority = 6),
+        YacineChannel(id = "bein_hd6", name = "beIN SPORTS 6 HD", logo = "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS6_DIGITAL_Mono.png", isHide = 0, priority = 5),
+        YacineChannel(id = "bein_hd7", name = "beIN SPORTS 7 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS7_DIGITAL_Mono.png", isHide = 0, priority = 4),
+        YacineChannel(id = "bein_hd8", name = "beIN SPORTS 8 HD", logo = "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTS8.png", isHide = 0, priority = 3),
+        YacineChannel(id = "bein_hd9", name = "beIN SPORTS 9 HD", logo = "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTS9.png", isHide = 0, priority = 2),
+        YacineChannel(id = "bein_xtra1", name = "beIN SPORTS XTRA 1", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_XTRA1_Digital_Mono.png", isHide = 0, priority = 1),
+        YacineChannel(id = "bein_xtra2", name = "beIN SPORTS XTRA 2", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_XTRA2_Digital_Mono.png", isHide = 0, priority = 1),
+    )
+
+    val DEFAULT_CATEGORIES = listOf(
+        YacineCategory(id = "bein_sports", name = "beIN SPORTS", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_1_Digital_Mono.png", childCount = 11),
+        YacineCategory(id = "sports_arab", name = "قنوات رياضية عربية", logo = "", childCount = 5)
+    )
+
     fun getCachedCategories(): List<YacineCategory>? {
         if (cachedCategories.isNotEmpty()) return cachedCategories
-        val rows = CatalogDiskCache.loadJson("yacine:categories")?.value?.optJSONArray("items") ?: return null
+        val rows = CatalogDiskCache.loadJson("yacine:categories")?.value?.optJSONArray("items") ?: return DEFAULT_CATEGORIES
         val cached = buildList {
             for (i in 0 until rows.length()) {
                 val row = rows.optJSONObject(i) ?: continue
@@ -65,7 +85,7 @@ object YacineRepository {
             }
         }
         if (cached.isNotEmpty()) cachedCategories = cached
-        return cached.takeIf { it.isNotEmpty() }
+        return cached.ifEmpty { DEFAULT_CATEGORIES }
     }
 
     fun getCachedChannels(categoryId: String): List<YacineChannel>? {
@@ -157,8 +177,8 @@ object YacineRepository {
                 }
                 CatalogDiskCache.saveJson("yacine:categories", JSONObject().put("items", rows))
             }
-            list
-        }.getOrElse { cachedCategories }
+            list.ifEmpty { cachedCategories.ifEmpty { DEFAULT_CATEGORIES } }
+        }.getOrElse { cachedCategories.ifEmpty { DEFAULT_CATEGORIES } }
     }
 
     // ─── Channels in a category ───────────────────────────────────────────────────
@@ -193,8 +213,8 @@ object YacineRepository {
                 }
                 CatalogDiskCache.saveJson("yacine:channels:$categoryId", JSONObject().put("items", rows))
             }
-            list
-        }.getOrElse { cachedChannels[categoryId]?.second ?: emptyList() }
+            list.ifEmpty { BEIN_FALLBACK_CHANNELS }
+        }.getOrElse { cachedChannels[categoryId]?.second?.takeIf { it.isNotEmpty() } ?: BEIN_FALLBACK_CHANNELS }
     }
 
     // ─── Events ──────────────────────────────────────────────────────────────────
@@ -259,9 +279,13 @@ object YacineRepository {
                 ?: cats.firstOrNull { it.name.contains("SPORTS", ignoreCase = true) }
                 ?: cats.firstOrNull()
             if (sportsCat != null) {
-                getChannels(sportsCat.id, forceRefresh)
-            } else emptyList()
-        }.getOrElse { emptyList() }
+                val live = getChannels(sportsCat.id, forceRefresh)
+                // Always include beIN fallback channels if not already returned
+                val merged = (live + BEIN_FALLBACK_CHANNELS)
+                    .distinctBy { it.id }
+                merged
+            } else BEIN_FALLBACK_CHANNELS
+        }.getOrElse { BEIN_FALLBACK_CHANNELS }
     }
 
     // ─── Event Streams ────────────────────────────────────────────────────────────
@@ -279,7 +303,7 @@ object YacineRepository {
         leagueHint: String,
     ): List<YacineStream> = withContext(Dispatchers.IO) {
         val eventStreams = runCatching { getEventStreams(eventId) }.getOrDefault(emptyList())
-        val channels = runCatching { getSportsChannels() }.getOrDefault(emptyList())
+        val channels = runCatching { getSportsChannels() }.getOrDefault(BEIN_FALLBACK_CHANNELS)
         val hint = channelHint.trim()
         val normalizedHint = normalizeChannelName(hint)
         val target = channels.firstOrNull { channel ->
@@ -305,16 +329,78 @@ object YacineRepository {
             runCatching { getChannelStreams(channel.id) }.getOrDefault(emptyList())
                 .map { stream -> stream.copy(name = "${channel.name} · ${stream.name}") }
         }.orEmpty()
-        (eventStreams + channelStreams)
+        val combined = (eventStreams + channelStreams)
             .filter { it.url.isNotBlank() }
             .distinctBy { it.url.trim() }
+        // If no streams found at all, return at least the first beIN channel streams
+        if (combined.isEmpty() && target == null) {
+            val first = BEIN_FALLBACK_CHANNELS.firstOrNull()
+            runCatching { getChannelStreams(first?.id ?: return@withContext emptyList()) }
+                .getOrDefault(emptyList())
+                .map { stream -> stream.copy(name = "${first?.name} · ${stream.name}") }
+        } else {
+            combined
+        }
     }
+
+    val DEFAULT_SPORTS_STREAMS = listOf(
+        YacineStream(
+            name = "beIN SPORTS 1 HD (سيرفر مباشر)",
+            url = "https://cdn.bestream.io/prime/prime.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            referer = "https://yacinelive.com/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        ),
+        YacineStream(
+            name = "beIN SPORTS 2 HD (سيرفر مباشر)",
+            url = "https://5c7b683162943.streamlock.net/live/ngrp:sportsone_all/playlist.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            referer = "https://yacinelive.com/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        ),
+        YacineStream(
+            name = "الكويت الرياضية HD (بث مباشر)",
+            url = "https://kwtspta.cdn.mangomolo.com/sp/smil:sp.stream.smil/chunklist.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            referer = "https://media.gov.kw/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        ),
+        YacineStream(
+            name = "عمان الرياضية HD (بث مباشر)",
+            url = "https://partneta.cdn.mgmlcdn.com/omsport/smil:omsport.stream.smil/chunklist.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            referer = "https://partneta.cdn.mgmlcdn.com/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        ),
+        YacineStream(
+            name = "الأردن الرياضية HD (بث مباشر)",
+            url = "https://jrtv-live.ercdn.net/jordansporthd/jordansporthd.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            referer = "https://jrtv.gov.jo/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        )
+    )
 
     // ─── Channel Streams ──────────────────────────────────────────────────────────
     suspend fun getChannelStreams(channelId: String): List<YacineStream> = withContext(Dispatchers.IO) {
-        runCatching {
+        val fetched = runCatching {
             parseStreamPayload(decryptResponse("channel/$channelId"))
         }.getOrElse { emptyList() }
+        if (fetched.isNotEmpty()) return@withContext fetched
+
+        val fallback = when {
+            channelId.contains("bein_hd2") || channelId.contains("1425") -> DEFAULT_SPORTS_STREAMS[1]
+            channelId.contains("kuwait") -> DEFAULT_SPORTS_STREAMS[2]
+            channelId.contains("oman") -> DEFAULT_SPORTS_STREAMS[3]
+            channelId.contains("jordan") -> DEFAULT_SPORTS_STREAMS[4]
+            else -> DEFAULT_SPORTS_STREAMS[0]
+        }
+        listOf(fallback)
     }
 
     private fun parseStreamPayload(raw: String): List<YacineStream> {

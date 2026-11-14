@@ -3083,7 +3083,6 @@ object MultiProviderRepository {
      * past the first several HTML pages.
      */
     fun fetchMoreSeasonEpisodes(
-        item: ArabseedItem,
         seasonUrl: String,
         cursorUrl: String,
         seasonNumber: Int,

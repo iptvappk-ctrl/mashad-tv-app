@@ -953,7 +953,7 @@ private fun PlayerScreen(
     ) {
         if (useWebViewFallback) {
             // Fullscreen hardware-accelerated WebView for supported embed pages.
-            key(effectiveStreamUrl) {
+            key(effectiveStreamUrl, exoRetryKey) {
                 val webViewActive = remember(effectiveStreamUrl) { AtomicBoolean(true) }
                 val pageProbeHandler = remember(effectiveStreamUrl) { Handler(Looper.getMainLooper()) }
                 AndroidView(
@@ -1106,6 +1106,14 @@ private fun PlayerScreen(
                                     val status = errorResponse?.statusCode ?: 0
                                     handleMainFrameFailure("تعذر فتح صفحة السيرفر (HTTP $status). جرّب مصدرًا آخر.")
                                 }
+                            }
+
+                            override fun onReceivedSslError(
+                                view: WebView?,
+                                handler: android.webkit.SslErrorHandler?,
+                                error: android.net.http.SslError?,
+                            ) {
+                                handler?.proceed()
                             }
 
                             override fun onReceivedError(
@@ -1607,6 +1615,7 @@ private fun PlayerScreen(
                             )
                         } else {
                             exoRetryKey++
+                            webViewRef?.reload()
                         }
                     }) {
                         Text("إعادة المحاولة")
