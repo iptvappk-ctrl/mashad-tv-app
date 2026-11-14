@@ -888,15 +888,9 @@ object ArabseedRepository {
                     }
                 }
 
-                val visibleEpisodeGroups = docEps.groupBy { (title, url, season) ->
-                    SeriesCatalogParser.seasonNumber(title, url) ?: season ?: requestedSeasonPageNumber
-                }
-                val hasSparseVisibleEpisodes = visibleEpisodeGroups.values.any { rows ->
-                    SeriesCatalogParser.needsEpisodeSequenceRepair(
-                        rows.mapNotNull { SeriesCatalogParser.episodeNumber(it.first, it.second) },
-                    )
-                }
-                if (hasSparseVisibleEpisodes && SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()) {
+                // A clean sequence on page 1 does not mean a long-running series
+                // has no later pages. Follow the provider's explicit pager.
+                if (SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()) {
                     val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
                         firstDocument = doc,
                         firstPageUrl = item.pageUrl,
@@ -904,6 +898,8 @@ object ArabseedRepository {
                             fetchSeasonHtml(pageUrl).takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
                         },
                         parseEpisodes = ::collectEpisodes,
+                        maxPages = if (forceRefresh) 8 else 4,
+                        timeoutSeconds = if (forceRefresh) 15 else 8,
                     )
                     for (ep in paginated) {
                         val existingIndex = rawEpisodes.indexOfFirst {

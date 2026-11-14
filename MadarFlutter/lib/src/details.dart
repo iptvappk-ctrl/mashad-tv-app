@@ -83,6 +83,87 @@ class _DetailPageState extends State<DetailPage> {
   String? _downloadingMediaUrl;
   Future<List<Map<String, dynamic>>>? _providerBackupFuture;
   final Set<String> _refreshingSeasonPages = <String>{};
+  final Map<int, String> _episodePageCursorBySeason = <int, String>{};
+  final Map<int, int> _visibleEpisodeCountBySeason = <int, int>{};
+  final Set<int> _loadingMoreEpisodeSeasons = <int>{};
+  final Set<int> _episodeSeasonsExhausted = <int>{};
+
+  Future<void> _loadMoreEpisodes(Map<String, dynamic> season) async {
+    final number = _integer(season['number']);
+    if (number <= 0 || !_loadingMoreEpisodeSeasons.add(number)) return;
+    final seasonUrl = _text(season['pageUrl'])
+        .trim()
+        .ifEmpty(widget.item.pageUrl);
+    if (seasonUrl.isEmpty || !seasonUrl.startsWith('http')) {
+      _loadingMoreEpisodeSeasons.remove(number);
+      return;
+    }
+    final existing = _orderedEpisodes(season['episodes']);
+    final visible = _visibleEpisodeCountBySeason[number] ?? 60;
+    if (visible < existing.length) {
+      setState(() {
+        _visibleEpisodeCountBySeason[number] = (visible + 60).clamp(
+          0,
+          existing.length,
+        );
+        _loadingMoreEpisodeSeasons.remove(number);
+      });
+      return;
+    }
+    if (_episodeSeasonsExhausted.contains(number)) {
+      _loadingMoreEpisodeSeasons.remove(number);
+      return;
+    }
+
+    final cursor = _episodePageCursorBySeason.putIfAbsent(
+      number,
+      () => seasonUrl,
+    );
+    final request = _request;
+    if (mounted) setState(() {});
+    try {
+      final fresh = await NativeBridge.map('media.season.episodes.more', {
+        'seasonUrl': seasonUrl,
+        'cursorUrl': cursor,
+        'seasonNumber': number,
+        'knownEpisodeUrls': existing
+            .map((episode) => _text(episode['pageUrl']))
+            .where((url) => url.startsWith('http'))
+            .toList(growable: false),
+      });
+      if (!mounted || request != _request || fresh == null) return;
+      final newEpisodes = _maps(fresh['seasons'])
+          .where((row) => _integer(row['number']) == number)
+          .expand((row) => _maps(row['episodes']))
+          .toList(growable: false);
+      final nextCursor = _text(fresh['nextPageUrl']).trim();
+      setState(() {
+        _bundle = _mergeSeasonBundles(_bundle, fresh);
+        if (nextCursor.isNotEmpty) {
+          _episodePageCursorBySeason[number] = nextCursor;
+        } else {
+          _episodeSeasonsExhausted.add(number);
+          _episodePageCursorBySeason.remove(number);
+        }
+        final loadedCount = _orderedEpisodes(
+          _seasons.firstWhere(
+            (row) => _integer(row['number']) == number,
+            orElse: () => const <String, dynamic>{},
+          )['episodes'],
+        ).length;
+        _visibleEpisodeCountBySeason[number] =
+            (visible + (newEpisodes.isEmpty ? 60 : newEpisodes.length)).clamp(
+              0,
+              loadedCount,
+            );
+      });
+    } catch (_) {
+      // Keep the already-loaded rows available and let the user retry this cursor.
+    } finally {
+      _loadingMoreEpisodeSeasons.remove(number);
+      if (mounted && request == _request) setState(() {});
+    }
+  }
 
   @override
   void initState() {
@@ -683,117 +764,157 @@ class _DetailPageState extends State<DetailPage> {
   Widget _seasonsSection(
     Map<String, dynamic>? selected,
     List<Map<String, dynamic>> episodes,
-  ) => _SectionCard(
-    title: 'حلقات هذا الجزء / الموسم',
-    icon: '📺',
-    trailing: Text(
-      '${episodes.length} حلقة',
-      style: const TextStyle(color: _muted, fontSize: 12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_seasons.isNotEmpty) ...[
-          SizedBox(
-            height: 42,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _seasons.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 7),
-              itemBuilder: (_, index) {
-                final season = _seasons[index];
-                final label = _text(season['title'])
-                    .ifEmpty('الموسم ${_text(season['number'])}');
-                return ChoiceChip(
-                  label: Text(label),
-                  selected: index == _seasonIndex,
-                  showCheckmark: false,
+  ) {
+    final seasonNumber = _integer(selected?['number']);
+    final visibleCount = _visibleEpisodeCountBySeason[seasonNumber] ?? 60;
+    final visibleEpisodes = episodes.take(visibleCount).toList(growable: false);
+    final hasLoadedMore = episodes.length > visibleEpisodes.length;
+    final canRequestMore =
+        selected != null &&
+        seasonNumber > 0 &&
+        !_episodeSeasonsExhausted.contains(seasonNumber);
+    return _SectionCard(
+      title: 'حلقات هذا الجزء / الموسم',
+      icon: '📺',
+      trailing: Text(
+        '${episodes.length} حلقة',
+        style: const TextStyle(color: _muted, fontSize: 12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_seasons.isNotEmpty) ...[
+            SizedBox(
+              height: 42,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _seasons.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 7),
+                itemBuilder: (_, index) {
+                  final season = _seasons[index];
+                  final label = _text(season['title'])
+                      .ifEmpty('الموسم ${_text(season['number'])}');
+                  return ChoiceChip(
+                    label: Text(label),
+                    selected: index == _seasonIndex,
+                    showCheckmark: false,
+                    labelStyle: TextStyle(
+                      color: index == _seasonIndex ? Colors.white : _muted,
+                      fontSize: 12,
+                    ),
+                    side: BorderSide(
+                      color: index == _seasonIndex ? _brick : _line,
+                    ),
+                    onSelected: (_) {
+                      final seasonEpisodes = _maps(season['episodes']);
+                      setState(() {
+                        _seasonIndex = index;
+                        _manualSeasonNumber = _integer(season['number']);
+                      });
+                      if (_seasonNeedsEnrichment(seasonEpisodes)) {
+                        unawaited(_refreshSeasonPage(season));
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if ((_seasonsLoading && episodes.isNotEmpty) ||
+              (_refreshingSeasonPages.contains(_text(selected?['pageUrl'])) &&
+                  episodes.isNotEmpty))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: _brick,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _refreshingSeasonPages.contains(
+                            _text(selected?['pageUrl']),
+                          )
+                          ? 'بنجلب حلقات هذا الموسم من صفحته مباشرة…'
+                          : 'بنكمّل البحث عن المواسم والحلقات من المصادر الأخرى…',
+                      style: const TextStyle(color: _muted, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (episodes.isEmpty)
+            (_seasonsLoading ||
+                    _refreshingSeasonPages.contains(
+                      _text(selected?['pageUrl']),
+                    ))
+                ? _seasonEpisodesSkeleton()
+                : const Text(
+                    'المصدر لم يرجع حلقات لهذا الجزء.',
+                    style: TextStyle(color: _muted),
+                  )
+          else ...[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: List.generate(visibleEpisodes.length, (index) {
+                final episode = visibleEpisodes[index];
+                final n = _episodeNumber(episode);
+                final isCurrent = _currentEpisodeIndex(episodes) == index;
+                return ActionChip(
+                  avatar: Icon(
+                    Icons.play_arrow_rounded,
+                    size: 16,
+                    color: isCurrent ? Colors.white : _brick,
+                  ),
+                  label: Text('الحلقة ${n > 0 ? n : index + 1}'),
+                  backgroundColor: isCurrent ? _brick : _paper,
                   labelStyle: TextStyle(
-                    color: index == _seasonIndex ? Colors.white : _muted,
-                    fontSize: 12,
+                    color: isCurrent ? Colors.white : _ink,
+                    fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w500,
                   ),
-                  side: BorderSide(
-                    color: index == _seasonIndex ? _brick : _line,
-                  ),
-                  onSelected: (_) {
-                    final seasonEpisodes = _maps(season['episodes']);
-                    setState(() {
-                      _seasonIndex = index;
-                      _manualSeasonNumber = _integer(season['number']);
-                    });
-                    if (_seasonNeedsEnrichment(seasonEpisodes)) {
-                      unawaited(_refreshSeasonPage(season));
-                    }
-                  },
+                  side: BorderSide(color: isCurrent ? _brick : _line),
+                  onPressed: () => _openEpisode(episodes, index, selected),
                 );
-              },
+              }),
             ),
-          ),
-          const SizedBox(height: 12),
+            if (hasLoadedMore || canRequestMore) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed:
+                    seasonNumber > 0 &&
+                        _loadingMoreEpisodeSeasons.contains(seasonNumber)
+                    ? null
+                    : () => _loadMoreEpisodes(selected!),
+                icon: _loadingMoreEpisodeSeasons.contains(seasonNumber)
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: _brick,
+                        ),
+                      )
+                    : const Icon(Icons.expand_more_rounded),
+                label: Text(
+                  hasLoadedMore
+                      ? 'عرض المزيد من الحلقات'
+                      : 'تحميل باقي الحلقات',
+                ),
+              ),
+            ],
+          ],
         ],
-        if ((_seasonsLoading && episodes.isNotEmpty) ||
-            (_refreshingSeasonPages.contains(_text(selected?['pageUrl'])) &&
-                episodes.isNotEmpty))
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              children: [
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: _brick,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _refreshingSeasonPages.contains(_text(selected?['pageUrl']))
-                        ? 'بنجلب حلقات هذا الموسم من صفحته مباشرة…'
-                        : 'بنكمّل البحث عن المواسم والحلقات من المصادر الأخرى…',
-                    style: const TextStyle(color: _muted, fontSize: 12),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        if (episodes.isEmpty)
-          (_seasonsLoading ||
-                  _refreshingSeasonPages.contains(_text(selected?['pageUrl'])))
-              ? _seasonEpisodesSkeleton()
-              : const Text(
-                  'المصدر لم يرجع حلقات لهذا الجزء.',
-                  style: TextStyle(color: _muted),
-                )
-        else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: List.generate(episodes.length, (index) {
-              final episode = episodes[index];
-              final n = _episodeNumber(episode);
-              final isCurrent = _currentEpisodeIndex(episodes) == index;
-              return ActionChip(
-                avatar: Icon(
-                  Icons.play_arrow_rounded,
-                  size: 16,
-                  color: isCurrent ? Colors.white : _brick,
-                ),
-                label: Text('الحلقة ${n > 0 ? n : index + 1}'),
-                backgroundColor: isCurrent ? _brick : _paper,
-                labelStyle: TextStyle(
-                  color: isCurrent ? Colors.white : _ink,
-                  fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w500,
-                ),
-                side: BorderSide(color: isCurrent ? _brick : _line),
-                onPressed: () => _openEpisode(episodes, index, selected),
-              );
-            }),
-          ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   Widget _detailLoadingSkeleton() => _ShimmerLoading(
     child: Column(

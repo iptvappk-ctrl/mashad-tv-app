@@ -20,8 +20,8 @@ import {
 } from "lucide-react";
 
 interface SidebarProps {
-  activeTab: "home" | "movies" | "series" | "anime" | "matches" | "favorites";
-  onTabChange: (tab: "home" | "movies" | "series" | "anime" | "matches" | "favorites") => void;
+  activeTab: "home" | "movies" | "series" | "anime" | "recaps" | "matches" | "favorites";
+  onTabChange: (tab: "home" | "movies" | "series" | "anime" | "recaps" | "matches" | "favorites") => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onSelectGenre?: (genre: string) => void;
@@ -127,6 +127,21 @@ export default function Sidebar({
             <span>أنمي وكرتون</span>
           </div>
           <ChevronLeft size={14} className={activeTab === "anime" ? "text-black" : "text-gray-500"} />
+        </button>
+
+        <button
+          onClick={() => onTabChange("recaps")}
+          className={`flex items-center justify-between px-4 py-3 rounded-2xl text-xs font-bold transition-all ${
+            activeTab === "recaps"
+              ? "bg-gradient-to-r from-[#E5B842] to-[#C69214] text-black shadow-gold font-black scale-[1.02]"
+              : "text-gray-300 hover:bg-[#161E2E] hover:text-white"
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Clapperboard size={18} className={activeTab === "recaps" ? "text-black" : "text-amber-400"} />
+            <span>ملخصات الأفلام</span>
+          </div>
+          <ChevronLeft size={14} className={activeTab === "recaps" ? "text-black" : "text-gray-500"} />
         </button>
 
         <button

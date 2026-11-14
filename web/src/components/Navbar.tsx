@@ -1,9 +1,9 @@
 "use client";
 
 import React from "react";
-import { Film, Heart, Home, Radio, Search, Sparkles, Tv } from "lucide-react";
+import { Clapperboard, Film, Heart, Home, Radio, Search, Sparkles, Tv } from "lucide-react";
 
-type Tab = "home" | "movies" | "series" | "anime" | "matches" | "favorites";
+type Tab = "home" | "movies" | "series" | "anime" | "recaps" | "matches" | "favorites";
 
 interface NavbarProps {
   activeTab: Tab;
@@ -18,6 +18,7 @@ const links: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: "movies", label: "أفلام", icon: Film },
   { id: "series", label: "مسلسلات", icon: Tv },
   { id: "anime", label: "أنمي", icon: Sparkles },
+  { id: "recaps", label: "ملخصات", icon: Clapperboard },
   { id: "matches", label: "مباشر", icon: Radio },
   { id: "favorites", label: "قائمتي", icon: Heart },
 ];
@@ -111,7 +112,7 @@ export default function Navbar({
 
       <nav
         aria-label="التنقل للموبايل"
-        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-amber-500/15 bg-[#090A0E]/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_30px_rgba(0,0,0,0.7)] backdrop-blur-xl lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-7 border-t border-amber-500/15 bg-[#090A0E]/95 px-1 pb-[max(6px,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_30px_rgba(0,0,0,0.7)] backdrop-blur-xl lg:hidden"
       >
         {links.map(({ id, label, icon: Icon }) => {
           const active = activeTab === id;

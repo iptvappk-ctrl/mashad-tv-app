@@ -247,7 +247,7 @@ function extractMixdrop(html: string, embedUrl: string): ExtractedStream | null 
       return { url, type: url.includes(".m3u8") ? "hls" : "mp4", referer: embedUrl };
     }
     // Fallback: scan for direct URLs in eval blocks
-    const evalMatch = html.match(/eval\(function[^)]+\)\s*\{([^}]{200,})\}/s);
+    const evalMatch = html.match(/eval\(function[^)]+\)\s*\{([^}]{200,})\}/);
     if (evalMatch) {
       const decoded = evalMatch[0];
       const m3u8 = findM3u8(decoded);
@@ -400,7 +400,7 @@ function extractTurboviplay(html: string, embedUrl: string): ExtractedStream | n
     const mp4 = findMp4(html);
     if (mp4) return { url: mp4, type: "mp4", referer: embedUrl };
     // Look for stream config object
-    const cfgMatch = html.match(/config\s*=\s*\{[^}]*["']?sources["']?\s*:\s*\[([^\]]+)\]/is);
+    const cfgMatch = html.match(/config\s*=\s*\{[\s\S]*?["']?sources["']?\s*:\s*\[([^\]]+)\]/i);
     if (cfgMatch) {
       const fileMatch = cfgMatch[1].match(/file\s*:\s*["']([^"']+)/i);
       if (fileMatch?.[1] && fileMatch[1].startsWith("http")) {
@@ -539,4 +539,13 @@ export async function extractStreamWithFallback(embedUrls: string[], referer?: s
     }
   }
   return null;
+}
+
+export function toProxiedUrl(url: string, referer?: string): string {
+  if (!url) return "";
+  if (url.startsWith("/api/proxy/")) return url;
+  if (url.includes(".m3u8")) {
+    return `/api/proxy/stream?url=${encodeURIComponent(url)}${referer ? `&ref=${encodeURIComponent(referer)}` : ""}`;
+  }
+  return url;
 }

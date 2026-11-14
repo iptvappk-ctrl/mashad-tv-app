@@ -2726,15 +2726,10 @@ object MultiProviderRepository {
                 }
             }
 
-            val visibleEpisodeGroups = docEps.groupBy { (title, href, season) ->
-                SeriesCatalogParser.seasonNumber(title, href) ?: season ?: requestedSeasonPageNumber
-            }
-            val hasSparseVisibleEpisodes = visibleEpisodeGroups.values.any { rows ->
-                SeriesCatalogParser.needsEpisodeSequenceRepair(
-                    rows.mapNotNull { SeriesCatalogParser.episodeNumber(it.first, it.second) },
-                )
-            }
-            if (hasSparseVisibleEpisodes && SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()) {
+            // A contiguous first page is not proof that the season is complete.
+            // Anime and long-running series commonly paginate cleanly (1, 2, 3…)
+            // while still having hundreds of later episodes.
+            if (SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()) {
                 val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
                     firstDocument = doc,
                     firstPageUrl = item.pageUrl,
@@ -2744,8 +2739,8 @@ object MultiProviderRepository {
                         pageHtml.takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
                     },
                     parseEpisodes = ::collectEpisodes,
-                    maxPages = if (forceRefresh) 48 else 24,
-                    timeoutSeconds = if (forceRefresh) 25 else 12,
+                    maxPages = if (forceRefresh) 8 else 4,
+                    timeoutSeconds = if (forceRefresh) 15 else 8,
                 )
                 for (ep in paginated) {
                     val existingIndex = rawEpisodes.indexOfFirst {
@@ -2900,8 +2895,8 @@ object MultiProviderRepository {
                                 Triple(title, href, number ?: seasonNumber)
                             }
                         },
-                        maxPages = if (forceRefresh) 48 else 24,
-                        timeoutSeconds = if (forceRefresh) 25 else 12,
+                        maxPages = if (forceRefresh) 8 else 4,
+                        timeoutSeconds = if (forceRefresh) 15 else 8,
                     )
                     seasonNumber to paginated
                 })
@@ -3080,6 +3075,94 @@ object MultiProviderRepository {
         } catch (_: Exception) {
             ArabseedSeasonBundle(emptyList())
         }
+    }
+
+    /**
+     * Fetches the next small batch of catalog episodes on demand. This keeps the
+     * first detail render bounded while allowing long anime/series to continue
+     * past the first several HTML pages.
+     */
+    fun fetchMoreSeasonEpisodes(
+        item: ArabseedItem,
+        seasonUrl: String,
+        cursorUrl: String,
+        seasonNumber: Int,
+        knownEpisodeUrls: Set<String>,
+        pageLimit: Int = 4,
+        episodeLimit: Int = 60,
+    ): Pair<ArabseedSeasonBundle, String?> {
+        val seasonUri = runCatching { java.net.URI(seasonUrl.trim()) }.getOrNull()
+            ?: return ArabseedSeasonBundle(emptyList()) to null
+        val provider = getProviderForUrl(seasonUrl) ?: return ArabseedSeasonBundle(emptyList()) to null
+        if (seasonNumber <= 0 || seasonUri.scheme !in setOf("http", "https") || seasonUri.host.isNullOrBlank()) {
+            return ArabseedSeasonBundle(emptyList()) to null
+        }
+
+        val known = knownEpisodeUrls.map(SeriesCatalogParser::normalizedUrl).filter(String::isNotBlank).toSet()
+        val addedByUrl = linkedMapOf<String, ArabseedEpisode>()
+        val visitedPages = linkedSetOf<String>()
+        var pageUrl = cursorUrl.trim().ifBlank { seasonUrl.trim() }
+        var pagesFetched = 0
+        var nextPageUrl: String? = null
+
+        while (pagesFetched < pageLimit.coerceIn(1, 8) && addedByUrl.size < episodeLimit.coerceIn(1, 120)) {
+            val normalizedPage = SeriesCatalogParser.normalizedUrl(pageUrl)
+            if (!visitedPages.add(normalizedPage)) break
+            val uri = runCatching { java.net.URI(pageUrl) }.getOrNull() ?: break
+            val sameConfiguredProvider = isConfiguredProviderHost(provider, pageUrl)
+            if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank() ||
+                (!sameConfiguredProvider && !isProviderContentUrl(pageUrl, seasonUrl))
+            ) break
+
+            val referer = pageOrigin(seasonUrl, provider.baseUrl)
+            val html = runCatching { fetchSeasonHtml(pageUrl, referer) }.getOrDefault("")
+            if (html.isBlank()) {
+                nextPageUrl = pageUrl // keep the cursor retryable after a transient failure
+                break
+            }
+            val document = Jsoup.parse(html, pageUrl).apply { select("footer, script, style").remove() }
+            pagesFetched++
+            SeriesCatalogParser.parseEpisodeEntries(
+                document = document,
+                currentPageUrl = pageUrl,
+                defaultSeasonNumber = seasonNumber,
+                isAllowedContentUrl = { candidate ->
+                    isConfiguredProviderHost(provider, candidate) || isProviderContentUrl(candidate, seasonUrl)
+                },
+            ).forEach { (title, episodeUrl, parsedSeason) ->
+                if (parsedSeason != null && parsedSeason != seasonNumber) return@forEach
+                val key = SeriesCatalogParser.normalizedUrl(episodeUrl)
+                if (key.isBlank() || key in known || key in addedByUrl) return@forEach
+                val number = SeriesCatalogParser.episodeNumber(title, episodeUrl) ?: return@forEach
+                addedByUrl[key] = ArabseedEpisode(
+                    number = number,
+                    title = "الحلقة $number",
+                    pageUrl = episodeUrl,
+                    seasonNumber = seasonNumber,
+                    providerName = provider.name,
+                )
+            }
+
+            val next = SeriesCatalogParser.nextEpisodePage(document, pageUrl)
+            if (next.isNullOrBlank() || SeriesCatalogParser.normalizedUrl(next) in visitedPages) {
+                nextPageUrl = null
+                break
+            }
+            nextPageUrl = next
+            pageUrl = next
+        }
+
+        val season = ArabseedSeason(
+            number = seasonNumber,
+            title = SeriesCatalogParser.seasonTitle(seasonNumber),
+            episodes = addedByUrl.values.sortedBy { it.number },
+            pageUrl = seasonUrl,
+        )
+        android.util.Log.i(
+            TAG,
+            "season.more provider=${provider.id} season=$seasonNumber pages=$pagesFetched added=${season.episodes.size} hasMore=${nextPageUrl != null}",
+        )
+        return ArabseedSeasonBundle(listOf(season)) to nextPageUrl
     }
 
     /** Merge the selected provider's season data with exact-title matches from the

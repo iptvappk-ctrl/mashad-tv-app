@@ -194,12 +194,97 @@ class _SportsPageState extends State<SportsPage> {
 
   Widget _eventsList() {
     if (_events.isEmpty && _loading) return const _SportsMatchSkeleton();
-    if (_events.isEmpty) return _empty(_error ?? 'لا توجد مباريات متاحة الآن.');
+    if (_events.isEmpty && _footballMatches.isNotEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(14),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Text(
+                'جدول المباريات متاح، لكن مزود البث لم يرسل أحداثًا أو روابط مباراة مباشرة الآن.',
+                textAlign: TextAlign.right,
+                style: const TextStyle(color: _muted, height: 1.5),
+              ),
+            ),
+          ),
+          for (final match in _footballMatches) _fixtureCard(match),
+        ],
+      );
+    }
+    if (_events.isEmpty) {
+      return _empty(
+        _error == null
+            ? 'تعذر جلب مباريات أو روابط بث من المصادر الآن. اسحب للتحديث.'
+            : 'تعذر تحديث المباريات. اسحب للمحاولة مرة أخرى.',
+      );
+    }
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(14),
       itemCount: _events.length,
       itemBuilder: (_, index) => _eventCard(_events[index]),
+    );
+  }
+
+  Widget _fixtureCard(Map<String, dynamic> match) {
+    final home = _text(match['homeTeamArabic'])
+        .ifEmpty(_text(match['homeTeam']).ifEmpty('الفريق الأول'));
+    final away = _text(match['awayTeamArabic'])
+        .ifEmpty(_text(match['awayTeam']).ifEmpty('الفريق الثاني'));
+    final homeScore = _text(match['homeScore']);
+    final awayScore = _text(match['awayScore']);
+    final hasScore = homeScore.isNotEmpty && awayScore.isNotEmpty;
+    final state = _text(match['state']);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _text(match['leagueName']).ifEmpty('مباراة'),
+                    style: const TextStyle(color: _muted, fontSize: 12),
+                  ),
+                ),
+                Text(
+                  _text(match['timeOrStatus']).ifEmpty('الموعد غير متاح'),
+                  style: TextStyle(
+                    color: state == 'in' ? const Color(0xFF16856D) : _muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _team({'name': home, 'logo': match['homeLogo']}),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Text(
+                    hasScore ? '$homeScore  -  $awayScore' : 'VS',
+                    style: const TextStyle(
+                      color: _brick,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _team({'name': away, 'logo': match['awayLogo']}),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -678,7 +763,8 @@ Future<void> _launchPlayer(
   }
   final uri = Uri.tryParse(cleanUrl);
   // قبل الرابط لو كان http/https صالح — حتى لو embed page (WebView سيتعامل معها)
-  if (uri == null || uri.host.isEmpty ||
+  if (uri == null ||
+      uri.host.isEmpty ||
       (uri.scheme != 'http' && uri.scheme != 'https')) {
     _message(context, 'رابط التشغيل غير صالح.');
     return;

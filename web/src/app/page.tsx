@@ -5,12 +5,13 @@ import Navbar from "@/components/Navbar";
 import CinemaView from "@/components/CinemaView";
 import DetailView from "@/components/DetailView";
 import LiveTvView from "@/components/LiveTvView";
+import RecapsView from "@/components/RecapsView";
 import PlayerModal, { StreamSource } from "@/components/PlayerModal";
 import { ArabseedDetail, ArabseedEpisode, ArabseedItem, ArabseedSeason } from "@/lib/arabseed";
 import { Bookmark, Star, Trash2 } from "lucide-react";
 import { trackCompletedSearch, trackContentOpen } from "@/lib/analytics";
 
-type Tab = "home" | "movies" | "series" | "anime" | "matches" | "favorites";
+type Tab = "home" | "movies" | "series" | "anime" | "recaps" | "matches" | "favorites";
 interface DetailSnapshot {
   item: ArabseedItem;
   detail: ArabseedDetail | null;
@@ -301,6 +302,8 @@ export default function HomePage() {
             onToggleFavorite={handleToggleFavorite}
             onBrowseTab={changeTab}
           />
+        ) : activeTab === "recaps" ? (
+          <RecapsView onPlayStream={handlePlayStream} />
         ) : activeTab === "matches" ? (
           <LiveTvView searchQuery={searchQuery} onPlayStream={handlePlayStream} />
         ) : activeTab === "favorites" ? (

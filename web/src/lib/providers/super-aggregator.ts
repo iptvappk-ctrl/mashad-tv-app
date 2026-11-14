@@ -251,6 +251,10 @@ export class SuperAggregator {
 
     return serverUrl;
   }
+
+  async resolveSingleServer(serverUrl: string): Promise<string | null> {
+    return this.resolveStream(serverUrl);
+  }
 }
 
 export const superAggregator = new SuperAggregator();

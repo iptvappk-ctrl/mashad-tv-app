@@ -180,6 +180,29 @@ class FlutterMediaBridge(context: Context) {
             MultiProviderRepository.cacheSeasonPageEnrichment(seriesItem, seasonItem, bundle)
             bundle.toMap()
         }
+        "media.season.episodes.more" -> {
+            val seasonUrl = call.argument<String>("seasonUrl").orEmpty().trim()
+            val cursorUrl = call.argument<String>("cursorUrl").orEmpty().trim().ifBlank { seasonUrl }
+            val seasonNumber = call.argument<Number>("seasonNumber")?.toInt() ?: 0
+            val knownEpisodeUrls = call.argument<List<String>>("knownEpisodeUrls")
+                ?.map(String::trim)?.filter(String::isNotBlank)?.toSet().orEmpty()
+            if (!MultiProviderRepository.isMultiProvider(seasonUrl) ||
+                !MultiProviderRepository.isMultiProvider(cursorUrl)
+            ) throw IllegalArgumentException("رابط صفحات الحلقات غير تابع لمصدر مدعوم")
+
+            val (bundle, nextPageUrl) = MultiProviderRepository.fetchMoreSeasonEpisodes(
+                seasonUrl = seasonUrl,
+                cursorUrl = cursorUrl,
+                seasonNumber = seasonNumber,
+                knownEpisodeUrls = knownEpisodeUrls,
+            )
+            mapOf(
+                "seasons" to bundle.toMap()["seasons"],
+                "relatedParts" to emptyList<Any>(),
+                "nextPageUrl" to nextPageUrl.orEmpty(),
+                "hasMoreEpisodes" to !nextPageUrl.isNullOrBlank(),
+            )
+        }
         "media.servers" -> {
             val rawUrl = call.argument<String>("url").orEmpty()
             // Provider episode slugs occasionally contain literal whitespace.

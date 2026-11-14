@@ -25,6 +25,9 @@ import {
   Tv,
   Check,
   Sparkles,
+  ShieldCheck,
+  Activity,
+  Wifi,
 } from "lucide-react";
 
 export interface StreamSource {
@@ -47,7 +50,88 @@ interface PlayerModalProps {
   hasPrevEpisode?: boolean;
 }
 
-type AspectRatioMode = "contain" | "cover" | "fill";
+export type AspectRatioMode = "contain" | "cover" | "fill";
+
+export type BandwidthTier = "smart_hd" | "ultra_saver" | "balanced" | "source" | "high";
+
+export interface BandwidthProfile {
+  id: BandwidthTier;
+  title: string;
+  badge: string;
+  description: string;
+  bitrateEstimate: string;
+  hourlyConsumption: string;
+  maxHeight?: number;
+  bufferLength: number;
+}
+
+export const BANDWIDTH_PROFILES: BandwidthProfile[] = [
+  {
+    id: "smart_hd",
+    title: "🌟 HD موفّر (ذكي)",
+    badge: "توفير 60% من الباقة",
+    description: "أعلى جودة 720p ذكية مع ضغط بت ريت فائق التوفير وجودة سينمائية نقية",
+    bitrateEstimate: "~1.2 Mbps",
+    hourlyConsumption: "~540 ميجابايت / ساعة",
+    maxHeight: 720,
+    bufferLength: 8,
+  },
+  {
+    id: "ultra_saver",
+    title: "⚡ أقصى توفير للنت",
+    badge: "توفير 85% من الباقة",
+    description: "أقل استهلاك ممكن للباقة، ممتاز لشبكات الهاتف 3G/4G والإنترنت المحدود",
+    bitrateEstimate: "~500 Kbps",
+    hourlyConsumption: "~220 ميجابايت / ساعة",
+    maxHeight: 480,
+    bufferLength: 4,
+  },
+  {
+    id: "balanced",
+    title: "⚖️ جودة متوازنة",
+    badge: "توازن تام",
+    description: "توازن مثالي بين نقاء الصورة وسرعة التحميل وجودة 720p / 1080p",
+    bitrateEstimate: "~2.5 Mbps",
+    hourlyConsumption: "~1.1 جيجابايت / ساعة",
+    maxHeight: 1080,
+    bufferLength: 14,
+  },
+  {
+    id: "source",
+    title: "💎 جودة المصدر",
+    badge: "بدون أي ضغط",
+    description: "البث الخام الأصلي كما تم رفعه من السيرفر مباشرة بأعلى تفاصيل ووضوح",
+    bitrateEstimate: "مفتوح (Source)",
+    hourlyConsumption: "~2.2 جيجابايت / ساعة",
+    maxHeight: undefined,
+    bufferLength: 22,
+  },
+  {
+    id: "high",
+    title: "🚀 أعلى جودة فائقة",
+    badge: "أقصى أداء",
+    description: "أقصى معدل بت ريت متاح مع تخزين مؤقت استباقي طويل لأقوى شاشات العرض",
+    bitrateEstimate: "Max Bitrate",
+    hourlyConsumption: "~3.5 جيجابايت / ساعة",
+    maxHeight: undefined,
+    bufferLength: 32,
+  },
+];
+
+export function extractYouTubeId(url?: string): string | null {
+  if (!url) return null;
+  const match = url.match(
+    /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/)|&v=)([^#&?]{11})/
+  );
+  return match ? match[1] : null;
+}
+
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady: () => void;
+  }
+}
 
 export default function PlayerModal({
   title,
@@ -66,6 +150,8 @@ export default function PlayerModal({
   const containerRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const ytPlayerRef = useRef<any>(null);
+  const ytSyncTimer = useRef<NodeJS.Timeout | null>(null);
   const hideControlsTimer = useRef<NodeJS.Timeout | null>(null);
   const lastPlaybackReported = useRef<string | null>(null);
 
@@ -81,10 +167,12 @@ export default function PlayerModal({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<number>(0);
-
-  // Smart Data Saver Mode (720p cap @ ~1 Mbps, buffer cap, saving ~60% quota)
-  const [dataSaver, setDataSaver] = useState(true);
   const [aspectMode, setAspectMode] = useState<AspectRatioMode>("contain");
+
+  // Smart Bandwidth Management (5 Tiers)
+  const [bandwidthTier, setBandwidthTier] = useState<BandwidthTier>("smart_hd");
+  const [showBandwidthMenu, setShowBandwidthMenu] = useState(false);
+  const [liveBitrate, setLiveBitrate] = useState<string>("1.2 Mbps");
 
   // Quality settings
   const [qualities, setQualities] = useState<{ id: number; height: number; name: string }[]>([]);
@@ -99,29 +187,31 @@ export default function PlayerModal({
   const [isAutoplayMuted, setIsAutoplayMuted] = useState(false);
   const [useIframeFallback, setUseIframeFallback] = useState(false);
   const [downloadingVideo, setDownloadingVideo] = useState(false);
+  const [seekFeedback, setSeekFeedback] = useState<string | null>(null);
 
   const currentStream = streams[currentIndex] || streams[0];
+  const youtubeVideoId = extractYouTubeId(currentStream?.url);
+  const isYouTube = Boolean(youtubeVideoId);
 
   const isMovieOrSeries = Boolean(
     subtitle?.includes("سيرفر") ||
       subtitle?.includes("الحلقة") ||
       subtitle?.includes("الموسم") ||
+      subtitle?.includes("ملخص") ||
       currentStream?.name?.includes("سيرفر") ||
       currentStream?.url?.includes("datahowa") ||
       currentStream?.url?.includes("govid") ||
-      currentStream?.url?.includes("cinema")
+      currentStream?.url?.includes("cinema") ||
+      isYouTube
   );
 
   const isStreamLive =
     !isMovieOrSeries &&
     (isLive || title.includes("مباراة") || title.includes("beIN") || title.includes("SSC"));
 
-  useEffect(() => {
-    lastPlaybackReported.current = null;
-  }, [currentStream?.url]);
-
   const isEmbed = Boolean(
     currentStream?.url &&
+      !isYouTube &&
       !currentStream.url.includes(".m3u8") &&
       !currentStream.url.includes("/api/proxy/stream") &&
       !currentStream.url.includes(".mp4") &&
@@ -130,33 +220,189 @@ export default function PlayerModal({
       !currentStream.url.includes("pl.dood")
   );
 
-  // Apply Smart Data Saver constraints to HLS instance
-  const applyDataSaverPolicy = (hls: Hls, enabled: boolean) => {
-    if (!hls || !hls.levels || hls.levels.length === 0) return;
-    if (enabled) {
-      // Find highest level with height <= 720 (High Definition with low data footprint)
-      let targetIndex = -1;
-      let maxH = 0;
-      hls.levels.forEach((lvl, idx) => {
-        if (lvl.height && lvl.height <= 720 && lvl.height > maxH) {
-          maxH = lvl.height;
-          targetIndex = idx;
+  // Apply Smart Bandwidth profile constraints to HLS instance
+  const applyBandwidthPolicy = (hls: Hls, tier: BandwidthTier) => {
+    if (!hls) return;
+    const profile = BANDWIDTH_PROFILES.find((p) => p.id === tier) || BANDWIDTH_PROFILES[0];
+    setLiveBitrate(profile.bitrateEstimate);
+
+    if (hls.levels && hls.levels.length > 0) {
+      if (profile.maxHeight) {
+        let targetIndex = -1;
+        let maxH = 0;
+        hls.levels.forEach((lvl, idx) => {
+          if (lvl.height && lvl.height <= profile.maxHeight! && lvl.height > maxH) {
+            maxH = lvl.height;
+            targetIndex = idx;
+          }
+        });
+        if (targetIndex !== -1) {
+          hls.autoLevelCapping = targetIndex;
+        } else {
+          hls.autoLevelCapping = 0; // lowest available
         }
-      });
-      if (targetIndex !== -1) {
-        hls.autoLevelCapping = targetIndex;
+      } else {
+        hls.autoLevelCapping = -1; // uncapped
       }
-      hls.config.maxBufferLength = 6;
-      hls.config.maxMaxBufferLength = 10;
-    } else {
-      hls.autoLevelCapping = -1; // Uncapped
-      hls.config.maxBufferLength = 20;
-      hls.config.maxMaxBufferLength = 40;
     }
+
+    hls.config.maxBufferLength = profile.bufferLength;
+    hls.config.maxMaxBufferLength = profile.bufferLength * 2;
   };
 
-  // Initialize and attach HLS stream
+  // YouTube IFrame API Controller
   useEffect(() => {
+    if (!isYouTube || !youtubeVideoId) return;
+
+    setErrorMsg(null);
+    setIsBuffering(true);
+    let isDisposed = false;
+
+    const initYouTubePlayer = () => {
+      if (isDisposed) return;
+      try {
+        if (ytPlayerRef.current) {
+          try {
+            ytPlayerRef.current.destroy();
+          } catch {}
+          ytPlayerRef.current = null;
+        }
+
+        const ytTarget = document.getElementById("yt-pure-player-mount");
+        if (!ytTarget) return;
+
+        // Clear target
+        ytTarget.innerHTML = "";
+        const playerDiv = document.createElement("div");
+        playerDiv.id = "yt-player-inner";
+        ytTarget.appendChild(playerDiv);
+
+        const player = new window.YT.Player("yt-player-inner", {
+          videoId: youtubeVideoId,
+          width: "100%",
+          height: "100%",
+          playerVars: {
+            autoplay: 1,
+            controls: 0,
+            disablekb: 1,
+            enablejsapi: 1,
+            fs: 0,
+            iv_load_policy: 3,
+            modestbranding: 1,
+            rel: 0,
+            showinfo: 0,
+            playsinline: 1,
+            origin: typeof window !== "undefined" ? window.location.origin : undefined,
+          },
+          events: {
+            onReady: (event: any) => {
+              if (isDisposed) return;
+              ytPlayerRef.current = event.target;
+              setIsBuffering(false);
+              setIsPlaying(true);
+              try {
+                event.target.playVideo();
+                const dur = event.target.getDuration();
+                if (dur && dur > 0) setDuration(dur);
+                event.target.setVolume(Math.round(volume * 100));
+                if (isMuted) event.target.mute();
+              } catch {}
+            },
+            onStateChange: (event: any) => {
+              if (isDisposed) return;
+              // YT.PlayerState: 1 = PLAYING, 2 = PAUSED, 3 = BUFFERING, 0 = ENDED
+              if (event.data === 1) {
+                setIsPlaying(true);
+                setIsBuffering(false);
+                const dur = event.target.getDuration();
+                if (dur && dur > 0) setDuration(dur);
+              } else if (event.data === 2) {
+                setIsPlaying(false);
+                setIsBuffering(false);
+              } else if (event.data === 3) {
+                setIsBuffering(true);
+              } else if (event.data === 0) {
+                setIsPlaying(false);
+                if (hasNextEpisode && onNextEpisode) {
+                  onNextEpisode();
+                }
+              }
+            },
+            onError: () => {
+              if (isDisposed) return;
+              setErrorMsg("تعذر تشغيل الفيديو من سيرفر الملخصات");
+            },
+          },
+        });
+      } catch (err) {
+        console.error("YouTube Player init error:", err);
+      }
+    };
+
+    // Load YouTube API script if not present
+    if (!window.YT || !window.YT.Player) {
+      const existingScript = document.getElementById("youtube-iframe-api-script");
+      if (!existingScript) {
+        const tag = document.createElement("script");
+        tag.id = "youtube-iframe-api-script";
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+      }
+      window.onYouTubeIframeAPIReady = () => {
+        initYouTubePlayer();
+      };
+      const checkTimer = setInterval(() => {
+        if (window.YT && window.YT.Player) {
+          clearInterval(checkTimer);
+          initYouTubePlayer();
+        }
+      }, 200);
+      return () => {
+        clearInterval(checkTimer);
+        isDisposed = true;
+      };
+    } else {
+      initYouTubePlayer();
+    }
+
+    return () => {
+      isDisposed = true;
+      if (ytPlayerRef.current) {
+        try {
+          ytPlayerRef.current.destroy();
+        } catch {}
+        ytPlayerRef.current = null;
+      }
+    };
+  }, [youtubeVideoId, isYouTube]);
+
+  // Sync YouTube player time ticker
+  useEffect(() => {
+    if (!isYouTube) return;
+    if (ytSyncTimer.current) clearInterval(ytSyncTimer.current);
+
+    ytSyncTimer.current = setInterval(() => {
+      const player = ytPlayerRef.current;
+      if (!player) return;
+      try {
+        const cur = player.getCurrentTime();
+        const dur = player.getDuration();
+        const fraction = player.getVideoLoadedFraction();
+
+        if (typeof cur === "number" && !isNaN(cur)) setCurrentTime(cur);
+        if (typeof dur === "number" && !isNaN(dur) && dur > 0) setDuration(dur);
+        if (typeof fraction === "number" && dur > 0) setBuffered(fraction * dur);
+      } catch {}
+    }, 300);
+
+    return () => {
+      if (ytSyncTimer.current) clearInterval(ytSyncTimer.current);
+    };
+  }, [isYouTube]);
+
+  // HLS / Direct Video stream attachment (When NOT YouTube)
+  useEffect(() => {
+    if (isYouTube) return;
     const video = videoRef.current;
     if (!video || !currentStream) return;
 
@@ -177,13 +423,11 @@ export default function PlayerModal({
         startFragPrefetch: true,
         liveSyncDurationCount: 1,
         liveMaxLatencyDurationCount: 3,
-        maxBufferLength: dataSaver ? 6 : 15,
-        maxMaxBufferLength: dataSaver ? 10 : 30,
-        maxBufferSize: 12 * 1024 * 1024,
-        manifestLoadingTimeOut: 4500,
+        maxBufferSize: 16 * 1024 * 1024,
+        manifestLoadingTimeOut: 5000,
         manifestLoadingMaxRetry: 2,
-        levelLoadingTimeOut: 4500,
-        fragLoadingTimeOut: 6500,
+        levelLoadingTimeOut: 5000,
+        fragLoadingTimeOut: 7000,
         fragLoadingMaxRetry: 2,
         progressive: true,
       });
@@ -207,7 +451,7 @@ export default function PlayerModal({
         }));
         setQualities(parsedQualities);
 
-        applyDataSaverPolicy(hls, dataSaver);
+        applyBandwidthPolicy(hls, bandwidthTier);
 
         video.play().catch(() => {
           video.muted = true;
@@ -230,8 +474,13 @@ export default function PlayerModal({
         }
       });
 
-      hls.on(Hls.Events.FRAG_LOADED, () => {
+      hls.on(Hls.Events.FRAG_LOADED, (_, data: any) => {
         setIsBuffering(false);
+        const stats = data?.frag?.stats || data?.stats;
+        if (stats && stats.total && stats.bwQuote) {
+          const kbps = Math.round((stats.total * 8) / (stats.bwQuote / 1000));
+          if (kbps > 0) setLiveBitrate(`${(kbps / 1000).toFixed(1)} Mbps`);
+        }
       });
 
       hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
@@ -249,7 +498,7 @@ export default function PlayerModal({
               break;
             default:
               hls.destroy();
-              setErrorMsg("تعذر تحميل البث من هذا السيرفر. يمكنك تجربة سيرفر بديل.");
+              setErrorMsg("تعذر تحميل البث من هذا السيرفر. جرب سيرفر بديل.");
               break;
           }
         }
@@ -278,7 +527,7 @@ export default function PlayerModal({
         hlsRef.current = null;
       }
     };
-  }, [currentStream]);
+  }, [currentStream, isYouTube]);
 
   // Handle Controls Timeout
   const resetHideTimer = () => {
@@ -290,8 +539,9 @@ export default function PlayerModal({
         setShowQualityMenu(false);
         setShowSpeedMenu(false);
         setShowAspectMenu(false);
+        setShowBandwidthMenu(false);
       }
-    }, 4000);
+    }, 4500);
   };
 
   useEffect(() => {
@@ -301,15 +551,30 @@ export default function PlayerModal({
     };
   }, [isPlaying]);
 
+  // Unified Play / Pause handler
   const handlePlayPause = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      video.play();
-      setIsPlaying(true);
+    if (isYouTube) {
+      const player = ytPlayerRef.current;
+      if (!player) return;
+      try {
+        if (isPlaying) {
+          player.pauseVideo();
+          setIsPlaying(false);
+        } else {
+          player.playVideo();
+          setIsPlaying(true);
+        }
+      } catch {}
     } else {
-      video.pause();
-      setIsPlaying(false);
+      const video = videoRef.current;
+      if (!video) return;
+      if (video.paused) {
+        video.play();
+        setIsPlaying(true);
+      } else {
+        video.pause();
+        setIsPlaying(false);
+      }
     }
     resetHideTimer();
   };
@@ -321,7 +586,6 @@ export default function PlayerModal({
     if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
       setDuration(video.duration);
     }
-
     if (video.buffered.length > 0) {
       try {
         setBuffered(video.buffered.end(video.buffered.length - 1));
@@ -330,14 +594,21 @@ export default function PlayerModal({
   };
 
   const seekToPosition = (clientX: number) => {
-    if (!progressBarRef.current || !videoRef.current) return;
+    if (!progressBarRef.current) return;
     const rect = progressBarRef.current.getBoundingClientRect();
     const clickX = clientX - rect.left;
     const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-    const effectiveDuration = duration > 0 ? duration : (videoRef.current.duration || 0);
+    const effectiveDuration = duration > 0 ? duration : (videoRef.current?.duration || 0);
+
     if (effectiveDuration > 0) {
       const newTime = ratio * effectiveDuration;
-      videoRef.current.currentTime = newTime;
+      if (isYouTube && ytPlayerRef.current) {
+        try {
+          ytPlayerRef.current.seekTo(newTime, true);
+        } catch {}
+      } else if (videoRef.current) {
+        videoRef.current.currentTime = newTime;
+      }
       setCurrentTime(newTime);
     }
   };
@@ -360,34 +631,63 @@ export default function PlayerModal({
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = videoRef.current;
-    if (!video) return;
     const target = parseFloat(e.target.value);
-    video.currentTime = target;
+    if (isYouTube && ytPlayerRef.current) {
+      try {
+        ytPlayerRef.current.seekTo(target, true);
+      } catch {}
+    } else if (videoRef.current) {
+      videoRef.current.currentTime = target;
+    }
     setCurrentTime(target);
     resetHideTimer();
   };
 
   const jumpSeconds = (seconds: number) => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = Math.max(0, Math.min(duration, video.currentTime + seconds));
+    const target = Math.max(0, Math.min(duration || 10000, currentTime + seconds));
+    if (isYouTube && ytPlayerRef.current) {
+      try {
+        ytPlayerRef.current.seekTo(target, true);
+      } catch {}
+    } else if (videoRef.current) {
+      videoRef.current.currentTime = target;
+    }
+    setCurrentTime(target);
+    setSeekFeedback(seconds > 0 ? `+${seconds}ث` : `${seconds}ث`);
+    setTimeout(() => setSeekFeedback(null), 800);
+    resetHideTimer();
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = videoRef.current;
-    if (!video) return;
     const val = parseFloat(e.target.value);
-    video.volume = val;
     setVolume(val);
     setIsMuted(val === 0);
+    if (isYouTube && ytPlayerRef.current) {
+      try {
+        ytPlayerRef.current.setVolume(Math.round(val * 100));
+        if (val === 0) ytPlayerRef.current.mute();
+        else ytPlayerRef.current.unMute();
+      } catch {}
+    } else if (videoRef.current) {
+      videoRef.current.volume = val;
+      videoRef.current.muted = val === 0;
+    }
   };
 
   const toggleMute = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = !isMuted;
-    setIsMuted(!isMuted);
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    if (isYouTube && ytPlayerRef.current) {
+      try {
+        if (nextMuted) ytPlayerRef.current.mute();
+        else {
+          ytPlayerRef.current.unMute();
+          ytPlayerRef.current.setVolume(Math.round((volume || 1) * 100));
+        }
+      } catch {}
+    } else if (videoRef.current) {
+      videoRef.current.muted = nextMuted;
+    }
   };
 
   const toggleFullscreen = async () => {
@@ -408,6 +708,7 @@ export default function PlayerModal({
   };
 
   const togglePiP = async () => {
+    if (isYouTube) return;
     const video = videoRef.current;
     if (!video) return;
     try {
@@ -419,16 +720,36 @@ export default function PlayerModal({
     } catch {}
   };
 
-  const toggleDataSaver = () => {
-    const next = !dataSaver;
-    setDataSaver(next);
+  const setTier = (tier: BandwidthTier) => {
+    setBandwidthTier(tier);
+    setShowBandwidthMenu(false);
     if (hlsRef.current) {
-      applyDataSaverPolicy(hlsRef.current, next);
+      applyBandwidthPolicy(hlsRef.current, tier);
+    }
+  };
+
+  const changeSpeed = (rate: number) => {
+    setPlaybackRate(rate);
+    setShowSpeedMenu(false);
+    if (isYouTube && ytPlayerRef.current) {
+      try {
+        ytPlayerRef.current.setPlaybackRate(rate);
+      } catch {}
+    } else if (videoRef.current) {
+      videoRef.current.playbackRate = rate;
+    }
+  };
+
+  const setQuality = (id: number) => {
+    setCurrentQuality(id);
+    setShowQualityMenu(false);
+    if (hlsRef.current) {
+      hlsRef.current.currentLevel = id;
     }
   };
 
   const handleDownloadCurrentVideo = () => {
-    if (!currentStream?.url) return;
+    if (!currentStream?.url || isYouTube) return;
     setDownloadingVideo(true);
     try {
       const safeTitle = `${title.replace(/[\/\\?%*:|"<>]/g, "_")}.mp4`;
@@ -447,61 +768,42 @@ export default function PlayerModal({
     }
   };
 
-  const changeSpeed = (rate: number) => {
-    const video = videoRef.current;
-    if (video) {
-      video.playbackRate = rate;
-      setPlaybackRate(rate);
-    }
-    setShowSpeedMenu(false);
-  };
-
-  const setQuality = (id: number) => {
-    if (hlsRef.current) {
-      hlsRef.current.currentLevel = id;
-      setCurrentQuality(id);
-    }
-    setShowQualityMenu(false);
-  };
-
-  // Keyboard Shortcuts Handler
+  // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (!document.fullscreenElement) onClose();
-      } else if (e.key === " " || e.key === "k") {
-        e.preventDefault();
-        handlePlayPause();
-      } else if (e.key === "f") {
-        e.preventDefault();
-        toggleFullscreen();
-      } else if (e.key === "m") {
-        e.preventDefault();
-        toggleMute();
-      } else if (e.key === "ArrowRight") {
-        jumpSeconds(10);
-      } else if (e.key === "ArrowLeft") {
-        jumpSeconds(-10);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        if (videoRef.current) {
-          const next = Math.min(1, volume + 0.1);
-          videoRef.current.volume = next;
-          setVolume(next);
-        }
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        if (videoRef.current) {
-          const next = Math.max(0, volume - 0.1);
-          videoRef.current.volume = next;
-          setVolume(next);
-        }
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      switch (e.code) {
+        case "Space":
+          e.preventDefault();
+          handlePlayPause();
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          jumpSeconds(10);
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          jumpSeconds(-10);
+          break;
+        case "KeyM":
+          e.preventDefault();
+          toggleMute();
+          break;
+        case "KeyF":
+          e.preventDefault();
+          toggleFullscreen();
+          break;
+        case "Escape":
+          e.preventDefault();
+          onClose();
+          break;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, isPlaying, isMuted, volume]);
+  }, [isPlaying, isMuted, volume, duration, currentTime]);
 
   const formatTime = (secs: number) => {
     if (isNaN(secs) || secs < 0) return "00:00";
@@ -514,6 +816,8 @@ export default function PlayerModal({
     return `${m < 10 ? "0" : ""}${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
+  const currentProfile = BANDWIDTH_PROFILES.find((p) => p.id === bandwidthTier) || BANDWIDTH_PROFILES[0];
+
   const videoAspectClass =
     aspectMode === "cover"
       ? "object-cover"
@@ -522,15 +826,39 @@ export default function PlayerModal({
       : "object-contain";
 
   return (
-    <div className="player-modal fixed inset-0 z-50 bg-black/95 flex items-center justify-center backdrop-blur-2xl animate-fadeIn p-0 sm:p-4">
+    <div className="player-modal fixed inset-0 z-50 bg-black/95 flex items-center justify-center backdrop-blur-2xl animate-fadeIn p-0 sm:p-4 select-none">
       <div
         ref={containerRef}
         onMouseMove={resetHideTimer}
         onClick={resetHideTimer}
-        className="relative w-full h-full max-w-[100vw] sm:max-w-[96vw] max-h-[100vh] sm:max-h-[94vh] bg-[#090A0E] sm:rounded-3xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.9)] flex flex-col justify-center select-none border border-amber-500/25"
+        className="relative w-full h-full max-w-[100vw] sm:max-w-[96vw] max-h-[100vh] sm:max-h-[94vh] bg-[#090A0E] sm:rounded-3xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.9)] flex flex-col justify-center border border-amber-500/25"
       >
-        {/* Video Player or Embed Fallback */}
-        {isEmbed || useIframeFallback ? (
+        {/* 🎬 1. YOUTUBE CINEMA-PURE PLAYER (Eradicating YouTube Chrome/Overlays) */}
+        {isYouTube ? (
+          <div className="relative w-full h-full overflow-hidden flex items-center justify-center bg-black">
+            {/* The scaled container pushing edge headers and watermarks outside */}
+            <div
+              id="yt-pure-player-mount"
+              className="w-full h-full pointer-events-none select-none transition-transform duration-300"
+              style={{
+                transform: "scale(1.08)",
+                transformOrigin: "center center",
+              }}
+            />
+
+            {/* Transparent click catcher & gesture layer */}
+            <div
+              onClick={handlePlayPause}
+              onDoubleClick={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const isRightSide = e.clientX - rect.left > rect.width / 2;
+                jumpSeconds(isRightSide ? 10 : -10);
+              }}
+              className="absolute inset-0 z-10 cursor-pointer"
+            />
+          </div>
+        ) : isEmbed || useIframeFallback ? (
+          /* Generic Iframe Fallback */
           <iframe
             src={
               currentStream.url.startsWith("/api/")
@@ -542,6 +870,7 @@ export default function PlayerModal({
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
           />
         ) : (
+          /* Native HTML5 / HLS Video */
           <video
             ref={videoRef}
             poster={poster}
@@ -563,23 +892,39 @@ export default function PlayerModal({
           />
         )}
 
-        {/* Dynamic Zakzouka TV Watermark */}
+        {/* 🌟 Dynamic Zakzouka TV Watermark */}
         <div className="absolute top-20 right-6 z-20 pointer-events-none select-none hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-2xl bg-[#090A0E]/85 border border-amber-500/30 shadow-2xl backdrop-blur-md">
           <div className="w-7 h-7 rounded-lg overflow-hidden border border-amber-500/40 p-0.5 bg-black flex-shrink-0">
-            <img src="/logo.jpg" alt="زقزوقة" className="w-full h-full object-cover rounded" onError={(e) => { (e.target as HTMLImageElement).src = "/logo.png"; }} />
+            <img
+              src="/logo.jpg"
+              alt="زقزوقة"
+              className="w-full h-full object-cover rounded"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = "/logo.png";
+              }}
+            />
           </div>
           <span className="text-xs font-black bg-gradient-to-r from-amber-200 to-amber-400 bg-clip-text text-transparent">
-            زقزوقة بلاير
+            زقزوقة بلاير • Cinema Pure
           </span>
         </div>
 
-        {/* Data Saver Mode Active Pill Badge */}
-        {dataSaver && (
-          <div className="absolute top-20 left-6 z-20 pointer-events-none select-none flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 shadow-lg backdrop-blur-md">
-            <Zap size={13} className="text-emerald-400 fill-emerald-400 animate-pulse" />
-            <span className="text-[11px] font-black text-emerald-300">
-              توفير النت الفائق (توفير 60% من الباقة)
-            </span>
+        {/* 📊 Live Bandwidth Engine HUD Badge */}
+        <div className="absolute top-20 left-6 z-20 pointer-events-none select-none hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#12131D]/90 border border-amber-500/40 shadow-lg backdrop-blur-md">
+          <Zap size={13} className="text-amber-400 fill-amber-400 animate-pulse" />
+          <span className="text-[11px] font-black text-amber-300">
+            {currentProfile.title}
+          </span>
+          <span className="text-[10px] text-slate-400 font-mono">({liveBitrate})</span>
+        </div>
+
+        {/* Seek Jump Feedback Toast */}
+        {seekFeedback && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30 animate-scaleUp">
+            <div className="px-6 py-3 rounded-2xl bg-black/85 border border-amber-400 text-amber-300 font-black text-xl shadow-2xl backdrop-blur-md flex items-center gap-2">
+              <RotateCw size={24} />
+              <span>{seekFeedback}</span>
+            </div>
           </div>
         )}
 
@@ -603,20 +948,22 @@ export default function PlayerModal({
 
         {/* Buffering Indicator */}
         {isBuffering && !errorMsg && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-4">
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-4 z-20">
             <div className="relative">
               <div className="w-20 h-20 rounded-3xl overflow-hidden border-2 border-amber-400 shadow-[0_0_25px_rgba(212,175,55,0.4)] p-1 bg-black">
                 <img
                   src="/logo.jpg"
                   alt="زقزوقة TV"
                   className="w-full h-full object-cover rounded-2xl"
-                  onError={(e) => { (e.target as HTMLImageElement).src = "/logo.png"; }}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = "/logo.png";
+                  }}
                 />
               </div>
               <div className="absolute -inset-2.5 border-4 border-t-amber-400 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin" />
             </div>
             <span className="text-xs font-black text-amber-300 tracking-widest uppercase">
-              جاري تجهيز البث السريع...
+              جاري تجهيز البث فائق السرعة...
             </span>
           </div>
         )}
@@ -631,7 +978,10 @@ export default function PlayerModal({
             <p className="text-xs text-slate-400 mb-4">يمكنك تجربة المشغل المباشر أو اختيار سيرفر بديل</p>
             <div className="flex items-center gap-3 mb-6">
               <button
-                onClick={() => { setErrorMsg(null); setUseIframeFallback(true); }}
+                onClick={() => {
+                  setErrorMsg(null);
+                  setUseIframeFallback(true);
+                }}
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 text-slate-950 font-black text-xs shadow-lg transition hover:scale-105"
               >
                 ▶ الانتقال للمشغل المباشر
@@ -642,9 +992,14 @@ export default function PlayerModal({
                 {streams.map((s, idx) => (
                   <button
                     key={idx}
-                    onClick={() => { setCurrentIndex(idx); onSwitchStream?.(idx); }}
+                    onClick={() => {
+                      setCurrentIndex(idx);
+                      onSwitchStream?.(idx);
+                    }}
                     className={`px-4 py-2 rounded-xl text-xs font-black transition ${
-                      idx === currentIndex ? "bg-amber-400 text-slate-950 font-black shadow-lg" : "bg-[#161726] text-slate-200 border border-white/10"
+                      idx === currentIndex
+                        ? "bg-amber-400 text-slate-950 font-black shadow-lg"
+                        : "bg-[#161726] text-slate-200 border border-white/10"
                     }`}
                   >
                     {s.name}
@@ -655,9 +1010,9 @@ export default function PlayerModal({
           </div>
         )}
 
-        {/* Top HUD Header */}
+        {/* ── Top HUD Header ────────────────────────────────────────── */}
         <div
-          className={`absolute top-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-b from-black/95 via-black/60 to-transparent flex items-center justify-between z-20 transition-opacity duration-300 ${
+          className={`absolute top-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-b from-black/95 via-black/60 to-transparent flex items-center justify-between z-30 transition-opacity duration-300 ${
             showControls ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
         >
@@ -678,45 +1033,103 @@ export default function PlayerModal({
                     مباشر
                   </span>
                 )}
+                {isYouTube && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black">
+                    ملخص سينمائي
+                  </span>
+                )}
               </div>
               {subtitle && <p className="text-xs text-amber-300 font-bold mt-0.5">{subtitle}</p>}
             </div>
           </div>
 
-          {/* Quick Header Actions: Data Saver & Direct Download */}
+          {/* Quick Header Actions: Smart Bandwidth & Direct Download */}
           <div className="flex items-center gap-2">
-            {/* Smart Data Saver Toggle */}
-            <button
-              type="button"
-              onClick={toggleDataSaver}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition border shadow-sm ${
-                dataSaver
-                  ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-300 shadow-emerald-500/20"
-                  : "border-white/10 bg-black/60 text-slate-300 hover:text-white"
-              }`}
-              title="تفعيل/تعطيل وضع توفير النت الفائق"
-            >
-              <Zap size={14} className={dataSaver ? "fill-emerald-400 text-emerald-400" : ""} />
-              <span className="hidden sm:inline">توفير النت</span>
-            </button>
+            {/* ⚡ Smart Bandwidth Engine Button */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBandwidthMenu(!showBandwidthMenu);
+                  setShowQualityMenu(false);
+                  setShowSpeedMenu(false);
+                  setShowAspectMenu(false);
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black transition border shadow-sm border-amber-500/40 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                title="التحكم في استهلاك الباقة وجودة النت"
+              >
+                <Zap size={14} className="fill-amber-400 text-amber-400" />
+                <span className="hidden sm:inline">{currentProfile.title}</span>
+                <span className="sm:hidden">الجودة والنت</span>
+              </button>
 
-            {/* Direct Download in Player */}
-            <button
-              type="button"
-              onClick={handleDownloadCurrentVideo}
-              disabled={downloadingVideo}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/20 to-amber-500/10 text-xs font-black text-amber-300 hover:border-amber-400 hover:text-white transition shadow-sm"
-              title="تحميل مباشر للفيديو"
-            >
-              <Download size={14} className="stroke-[2.5]" />
-              <span className="hidden sm:inline">تحميل</span>
-            </button>
+              {/* Bandwidth Selection Modal Dropdown */}
+              {showBandwidthMenu && (
+                <div className="absolute top-full left-0 mt-2 w-72 sm:w-80 bg-[#12131D] border border-amber-500/40 rounded-3xl p-3 shadow-2xl z-40 backdrop-blur-2xl animate-scaleUp">
+                  <div className="px-3 py-2 border-b border-white/10 mb-2">
+                    <p className="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Zap size={14} /> محرك توفير النت والجودة
+                    </p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      اختر نمط الاستهلاك الأنسب لباقة الإنترنت الخاصة بك
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {BANDWIDTH_PROFILES.map((profile) => {
+                      const isSelected = profile.id === bandwidthTier;
+                      return (
+                        <button
+                          key={profile.id}
+                          type="button"
+                          onClick={() => setTier(profile.id)}
+                          className={`w-full text-right p-3 rounded-2xl transition flex flex-col gap-1 border ${
+                            isSelected
+                              ? "bg-gradient-to-r from-amber-500/20 to-amber-500/10 border-amber-400 text-white"
+                              : "border-transparent hover:bg-white/5 text-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black flex items-center gap-1.5">
+                              {profile.title}
+                            </span>
+                            {isSelected && <Check size={14} className="text-amber-400" />}
+                          </div>
+                          <p className="text-[10px] text-slate-400 leading-tight">
+                            {profile.description}
+                          </p>
+                          <div className="flex items-center gap-3 text-[10px] font-mono text-amber-300/80 pt-1">
+                            <span>الاستهلاك: {profile.hourlyConsumption}</span>
+                            <span>•</span>
+                            <span>السرعة: {profile.bitrateEstimate}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Direct Download in Player (For non-youtube direct streams) */}
+            {!isYouTube && (
+              <button
+                type="button"
+                onClick={handleDownloadCurrentVideo}
+                disabled={downloadingVideo}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/20 to-amber-500/10 text-xs font-black text-amber-300 hover:border-amber-400 hover:text-white transition shadow-sm"
+                title="تحميل مباشر للفيديو"
+              >
+                <Download size={14} className="stroke-[2.5]" />
+                <span className="hidden sm:inline">تحميل</span>
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Bottom HUD Controls Bar */}
+        {/* ── Bottom HUD Controls Bar ───────────────────────────────── */}
         <div
-          className={`absolute bottom-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-t from-black/98 via-black/70 to-transparent z-20 transition-opacity duration-300 flex flex-col gap-3 ${
+          className={`absolute bottom-0 inset-x-0 p-4 sm:p-6 bg-gradient-to-t from-black/98 via-black/70 to-transparent z-30 transition-opacity duration-300 flex flex-col gap-3 ${
             showControls ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
         >
@@ -746,19 +1159,34 @@ export default function PlayerModal({
                   {/* Buffer Bar */}
                   <div
                     className="absolute left-0 top-0 bottom-0 bg-white/25 rounded-full transition-all duration-150"
-                    style={{ width: `${Math.min(100, Math.max(0, (buffered / (duration || 1)) * 100))}%` }}
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.max(0, (buffered / (duration || 1)) * 100)
+                      )}%`,
+                    }}
                   />
-                  {/* Active Progress Bar in Luxury Royal Gold */}
+                  {/* Active Progress Bar in Royal Gold */}
                   <div
                     className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-amber-600 via-amber-400 to-amber-300 rounded-full shadow-[0_0_15px_rgba(212,175,55,0.9)]"
-                    style={{ width: `${Math.min(100, Math.max(0, (currentTime / (duration || 1)) * 100))}%` }}
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.max(0, (currentTime / (duration || 1)) * 100)
+                      )}%`,
+                    }}
                   />
                 </div>
 
                 {/* Scrubber Thumb */}
                 <div
                   className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-amber-400 border-2 border-white shadow-[0_0_15px_rgba(212,175,55,1)] group-hover:scale-125 transition-transform pointer-events-none z-20"
-                  style={{ left: `${Math.min(100, Math.max(0, (currentTime / (duration || 1)) * 100))}%` }}
+                  style={{
+                    left: `${Math.min(
+                      100,
+                      Math.max(0, (currentTime / (duration || 1)) * 100)
+                    )}%`,
+                  }}
                 />
 
                 <input
@@ -780,11 +1208,16 @@ export default function PlayerModal({
             <div className="flex items-center gap-2.5 sm:gap-3.5">
               {/* Play / Pause Button in Gold Gradient */}
               <button
+                type="button"
                 onClick={handlePlayPause}
                 className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-amber-400 to-amber-600 text-slate-950 font-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(212,175,55,0.4)]"
                 title={isPlaying ? "إيقاف مؤقت (Space)" : "تشغيل (Space)"}
               >
-                {isPlaying ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current ml-0.5" />}
+                {isPlaying ? (
+                  <Pause size={20} className="fill-current" />
+                ) : (
+                  <Play size={20} className="fill-current ml-0.5" />
+                )}
               </button>
 
               {/* Prev Episode Button */}
@@ -813,10 +1246,11 @@ export default function PlayerModal({
                 </button>
               )}
 
-              {/* Seek 10s */}
+              {/* Seek 10s Backward & Forward */}
               {!isStreamLive && (
                 <>
                   <button
+                    type="button"
                     onClick={() => jumpSeconds(-10)}
                     className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-black/40 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/5"
                     title="تأخير 10 ثوانٍ"
@@ -824,6 +1258,7 @@ export default function PlayerModal({
                     <RotateCcw size={15} />
                   </button>
                   <button
+                    type="button"
                     onClick={() => jumpSeconds(10)}
                     className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-black/40 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/5"
                     title="تقديم 10 ثوانٍ"
@@ -835,7 +1270,12 @@ export default function PlayerModal({
 
               {/* Volume Slider */}
               <div className="flex items-center gap-1.5 group">
-                <button onClick={toggleMute} className="text-slate-300 hover:text-white transition p-1" title="كتم الصوت (M)">
+                <button
+                  type="button"
+                  onClick={toggleMute}
+                  className="text-slate-300 hover:text-white transition p-1"
+                  title="كتم الصوت (M)"
+                >
                   {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
                 </button>
                 <input
@@ -854,72 +1294,92 @@ export default function PlayerModal({
                 <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-xl bg-black/60 border border-white/10 text-xs font-mono font-bold">
                   <span className="text-amber-300 font-black">{formatTime(currentTime)}</span>
                   <span className="text-slate-500">/</span>
-                  <span className="text-slate-300">{duration > 0 ? formatTime(duration) : "00:00"}</span>
+                  <span className="text-slate-300">
+                    {duration > 0 ? formatTime(duration) : "00:00"}
+                  </span>
                 </div>
               )}
             </div>
 
             {/* Right Controls */}
             <div className="flex items-center gap-2 relative">
-              {/* Aspect Ratio Menu */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAspectMenu(!showAspectMenu);
-                    setShowQualityMenu(false);
-                    setShowSpeedMenu(false);
-                  }}
-                  className="flex items-center gap-1 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-bold text-slate-200 border border-white/10 transition"
-                  title="أبعاد الشاشة"
-                >
-                  <Tv size={14} className="text-amber-400" />
-                  <span className="hidden sm:inline">الأبعاد</span>
-                </button>
+              {/* Aspect Ratio Menu (for native video) */}
+              {!isYouTube && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAspectMenu(!showAspectMenu);
+                      setShowQualityMenu(false);
+                      setShowSpeedMenu(false);
+                      setShowBandwidthMenu(false);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-bold text-slate-200 border border-white/10 transition"
+                    title="أبعاد الشاشة"
+                  >
+                    <Tv size={14} className="text-amber-400" />
+                    <span className="hidden sm:inline">الأبعاد</span>
+                  </button>
 
-                {showAspectMenu && (
-                  <div className="absolute bottom-full right-0 mb-2 py-1.5 w-32 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
-                    <button
-                      onClick={() => { setAspectMode("contain"); setShowAspectMenu(false); }}
-                      className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
-                        aspectMode === "contain" ? "text-amber-300" : "text-slate-300"
-                      }`}
-                    >
-                      <span>احتواء كامل</span>
-                      {aspectMode === "contain" && <Check size={14} />}
-                    </button>
-                    <button
-                      onClick={() => { setAspectMode("cover"); setShowAspectMenu(false); }}
-                      className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
-                        aspectMode === "cover" ? "text-amber-300" : "text-slate-300"
-                      }`}
-                    >
-                      <span>ملء الشاشة</span>
-                      {aspectMode === "cover" && <Check size={14} />}
-                    </button>
-                    <button
-                      onClick={() => { setAspectMode("fill"); setShowAspectMenu(false); }}
-                      className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
-                        aspectMode === "fill" ? "text-amber-300" : "text-slate-300"
-                      }`}
-                    >
-                      <span>تمدد كامل</span>
-                      {aspectMode === "fill" && <Check size={14} />}
-                    </button>
-                  </div>
-                )}
-              </div>
+                  {showAspectMenu && (
+                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-32 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAspectMode("contain");
+                          setShowAspectMenu(false);
+                        }}
+                        className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                          aspectMode === "contain" ? "text-amber-300" : "text-slate-300"
+                        }`}
+                      >
+                        <span>احتواء كامل</span>
+                        {aspectMode === "contain" && <Check size={14} />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAspectMode("cover");
+                          setShowAspectMenu(false);
+                        }}
+                        className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                          aspectMode === "cover" ? "text-amber-300" : "text-slate-300"
+                        }`}
+                      >
+                        <span>ملء الشاشة</span>
+                        {aspectMode === "cover" && <Check size={14} />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAspectMode("fill");
+                          setShowAspectMenu(false);
+                        }}
+                        className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                          aspectMode === "fill" ? "text-amber-300" : "text-slate-300"
+                        }`}
+                      >
+                        <span>تمدد كامل</span>
+                        {aspectMode === "fill" && <Check size={14} />}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Playback Speed Menu */}
               {!isStreamLive && (
                 <div className="relative">
                   <button
+                    type="button"
                     onClick={() => {
                       setShowSpeedMenu(!showSpeedMenu);
                       setShowQualityMenu(false);
                       setShowAspectMenu(false);
+                      setShowBandwidthMenu(false);
                     }}
                     className="flex items-center gap-1 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-black text-slate-200 border border-white/10 transition"
+                    title="سرعة التشغيل"
                   >
                     <Gauge size={14} />
                     <span>{playbackRate}x</span>
@@ -930,6 +1390,7 @@ export default function PlayerModal({
                       {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => (
                         <button
                           key={rate}
+                          type="button"
                           onClick={() => changeSpeed(rate)}
                           className={`w-full px-3 py-1.5 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
                             playbackRate === rate ? "text-amber-300 font-black" : "text-slate-300"
@@ -944,24 +1405,31 @@ export default function PlayerModal({
                 </div>
               )}
 
-              {/* Quality Menu Button */}
-              {qualities.length > 0 && (
+              {/* Quality Menu Button (For HLS streams) */}
+              {!isYouTube && qualities.length > 0 && (
                 <div className="relative">
                   <button
+                    type="button"
                     onClick={() => {
                       setShowQualityMenu(!showQualityMenu);
                       setShowSpeedMenu(false);
                       setShowAspectMenu(false);
+                      setShowBandwidthMenu(false);
                     }}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-black text-slate-200 border border-white/10 transition"
                   >
                     <Settings size={14} />
-                    <span>{currentQuality === -1 ? "تلقائي" : qualities[currentQuality]?.name || "تلقائي"}</span>
+                    <span>
+                      {currentQuality === -1
+                        ? "تلقائي"
+                        : qualities[currentQuality]?.name || "تلقائي"}
+                    </span>
                   </button>
 
                   {showQualityMenu && (
                     <div className="absolute bottom-full right-0 mb-2 py-1.5 w-36 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
                       <button
+                        type="button"
                         onClick={() => setQuality(-1)}
                         className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
                           currentQuality === -1 ? "text-amber-300 font-black" : "text-slate-300"
@@ -973,9 +1441,12 @@ export default function PlayerModal({
                       {qualities.map((q) => (
                         <button
                           key={q.id}
+                          type="button"
                           onClick={() => setQuality(q.id)}
                           className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
-                            currentQuality === q.id ? "text-amber-300 font-black" : "text-slate-300"
+                            currentQuality === q.id
+                              ? "text-amber-300 font-black"
+                              : "text-slate-300"
                           }`}
                         >
                           <span>{q.name}</span>
@@ -988,16 +1459,20 @@ export default function PlayerModal({
               )}
 
               {/* PiP Button */}
-              <button
-                onClick={togglePiP}
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-black/50 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/10"
-                title="وضع صورة داخل صورة (PiP)"
-              >
-                <PictureInPicture size={17} />
-              </button>
+              {!isYouTube && (
+                <button
+                  type="button"
+                  onClick={togglePiP}
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-black/50 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/10"
+                  title="وضع صورة داخل صورة (PiP)"
+                >
+                  <PictureInPicture size={17} />
+                </button>
+              )}
 
               {/* Fullscreen Button */}
               <button
+                type="button"
                 onClick={toggleFullscreen}
                 className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-black/50 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/10"
                 title="شاشة كاملة (F)"

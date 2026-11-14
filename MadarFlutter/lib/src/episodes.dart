@@ -23,6 +23,7 @@ class _EpisodePageState extends State<EpisodePage> {
   bool _loading = true;
   String? _error;
   int _request = 0;
+  int _visibleEpisodeCount = 60;
   Future<List<Map<String, dynamic>>>? _alternateServerFuture;
   Map<String, dynamic> get _episode => _episodes[_index];
   int get _number => _episodeNumber(_episode);
@@ -263,28 +264,51 @@ class _EpisodePageState extends State<EpisodePage> {
               '${_episodes.length} حلقة',
               style: const TextStyle(color: _muted, fontSize: 12),
             ),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: List.generate(_episodes.length, (index) {
-                final number = _episodeNumber(_episodes[index]);
-                return ChoiceChip(
-                  label: Text('الحلقة $number'),
-                  selected: index == _index,
-                  showCheckmark: false,
-                  labelStyle: TextStyle(
-                    color: index == _index ? Colors.white : _muted,
+            child: Column(
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: List.generate(
+                    _episodes.length < _visibleEpisodeCount
+                        ? _episodes.length
+                        : _visibleEpisodeCount,
+                    (index) {
+                      final number = _episodeNumber(_episodes[index]);
+                      return ChoiceChip(
+                        label: Text('الحلقة $number'),
+                        selected: index == _index,
+                        showCheckmark: false,
+                        labelStyle: TextStyle(
+                          color: index == _index ? Colors.white : _muted,
+                        ),
+                        side: BorderSide(
+                          color: index == _index ? _brick : _line,
+                        ),
+                        onSelected: (_) {
+                          setState(() {
+                            _index = index;
+                            _servers = [];
+                          });
+                          unawaited(_loadServers());
+                        },
+                      );
+                    },
                   ),
-                  side: BorderSide(color: index == _index ? _brick : _line),
-                  onSelected: (_) {
-                    setState(() {
-                      _index = index;
-                      _servers = [];
-                    });
-                    unawaited(_loadServers());
-                  },
-                );
-              }),
+                ),
+                if (_episodes.length > _visibleEpisodeCount) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => setState(() {
+                      _visibleEpisodeCount = (_visibleEpisodeCount + 60)
+                          .clamp(0, _episodes.length)
+                          .toInt();
+                    }),
+                    icon: const Icon(Icons.expand_more_rounded),
+                    label: const Text('عرض المزيد من الحلقات'),
+                  ),
+                ],
+              ],
             ),
           ),
         ],

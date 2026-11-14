@@ -348,6 +348,103 @@ internal object SeriesCatalogParser {
         }.distinctBy(::normalizedUrl).take(60)
     }
 
+    /** Parse one provider episode-list page for on-demand, incremental loading. */
+    fun parseEpisodeEntries(
+        document: Document,
+        currentPageUrl: String,
+        defaultSeasonNumber: Int,
+        isAllowedContentUrl: (String) -> Boolean,
+    ): List<Triple<String, String, Int?>> {
+        val selectors = listOf(
+            ".episodes-list a", ".EpisodesList li a", ".eplister li a",
+            ".eps-list li a", ".eps a", "a.episode__item", ".episode__item a", "a.ep-item",
+            "a[href*='الحلقة']", "a[href*='episode']", "a[href*='ep-']",
+            ".postDiv a[href*='serie']",
+            ".episodes-list [data-url], .episodes-list [data-href]",
+            ".EpisodesList [data-url], .EpisodesList [data-href]",
+            ".eplister [data-url], .eplister [data-href]",
+            "[data-episode][data-url], [data-episode][data-href], [data-episode-link]",
+        ).joinToString(", ")
+        val collected = linkedMapOf<String, Triple<String, String, Int?>>()
+        for (element in document.select(selectors)) {
+            if (isInsideUnrelatedContentContainer(element)) continue
+            val rawUrl = listOf("href", "data-url", "data-href", "data-link", "data-episode-link")
+                .firstNotNullOfOrNull { attribute ->
+                    element.absUrl(attribute).ifBlank { element.attr(attribute).trim() }
+                        .takeIf(String::isNotBlank)
+                } ?: continue
+            val url = runCatching {
+                val current = java.net.URI(currentPageUrl)
+                val candidate = current.resolve(rawUrl)
+                candidate.toString()
+            }.getOrDefault("")
+            if (url.isBlank() || !isAllowedContentUrl(url)) continue
+
+            val title = element.text().trim().ifBlank { element.attr("title").trim() }
+            val isEpisodeListEntry = element.parents().any { ancestor ->
+                val marker = "${ancestor.className()} ${ancestor.id()}".lowercase()
+                listOf("episode", "episodes", "eplist", "eps-list", "episodeslist", "eps", "episodios")
+                    .any(marker::contains)
+            } || element.classNames().any { className ->
+                className.contains("episode", ignoreCase = true) || className.contains("ep-item", ignoreCase = true)
+            }
+            val number = episodeNumber(title, url, allowNumericTitle = isEpisodeListEntry) ?: continue
+            val season = seasonNumber(title, url)
+                ?: seasonNumberFromElement(element, title, url)
+                ?: defaultSeasonNumber.takeIf { it > 0 }
+            val key = normalizedUrl(url)
+            val previous = collected[key]
+            if (previous == null || (previous.third == null && season != null)) {
+                collected[key] = Triple(title.ifBlank { "الحلقة $number" }, url, season)
+            }
+        }
+        return collected.values.toList()
+    }
+
+    /**
+     * Resolve only the next numbered page (or explicit rel=next link). Numeric
+     * pagers commonly contain links to both earlier and later pages, so choosing
+     * the first link causes loops and silently prevents long seasons from loading.
+     */
+    fun nextEpisodePage(document: Document, currentPageUrl: String): String? {
+        val current = runCatching { java.net.URI(currentPageUrl) }.getOrNull() ?: return null
+        val candidates = linkedEpisodePages(document, currentPageUrl)
+        if (candidates.isEmpty()) return null
+
+        val explicitNext = document.select(
+            "a[rel~='next'][href], a.next[href], a[aria-label*=Next][href], a[aria-label*=التالي][href]",
+        ).firstNotNullOfOrNull { link ->
+            val raw = link.attr("href").trim()
+            val reference = if (raw.startsWith("?")) current.rawPath.orEmpty() + raw else raw
+            val url = runCatching { current.resolve(reference).toString() }.getOrNull()
+            url?.takeIf { candidate -> candidates.any { normalizedUrl(it) == normalizedUrl(candidate) } }
+        }
+        if (explicitNext != null) return explicitNext
+
+        fun pageNumber(url: String): Int? {
+            val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return null
+            val queryNumber = uri.rawQuery.orEmpty().split('&').firstNotNullOfOrNull { part ->
+                val key = runCatching { URLDecoder.decode(part.substringBefore('='), "UTF-8") }
+                    .getOrDefault(part.substringBefore('=')).lowercase()
+                if (key !in setOf("page", "paged", "pageno", "page_no", "ep_page", "episode_page", "episodes_page", "p")) {
+                    null
+                } else {
+                    runCatching { URLDecoder.decode(part.substringAfter('=', ""), "UTF-8").toIntOrNull() }.getOrNull()
+                }
+            }
+            return queryNumber ?: Regex("(?i)/(?:page|paged|p)/(\\d+)(?:/|$)")
+                .find(uri.path.orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull()
+        }
+
+        val currentNumber = pageNumber(currentPageUrl)
+        if (currentNumber != null) {
+            return candidates.mapNotNull { candidate ->
+                pageNumber(candidate)?.takeIf { it > currentNumber }?.let { it to candidate }
+            }.minByOrNull { it.first }?.second
+        }
+        return candidates.singleOrNull()
+    }
+
     /** Fetches numbered/next episode pages concurrently, with a strict time and page cap. */
     fun collectPaginatedEpisodes(
         firstDocument: Document,
