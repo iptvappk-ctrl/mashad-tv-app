@@ -137,7 +137,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         overridePendingTransition(R.anim.player_enter, R.anim.player_exit)
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
 
         // Immersive full-screen
         window.decorView.systemUiVisibility = (
@@ -1950,7 +1950,7 @@ private fun PlayerScreen(
                                             current == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE) {
                                             act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                                         } else {
-                                            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                                         }
                                     }
                                     lastInteractionTime = System.currentTimeMillis()
@@ -2110,30 +2110,30 @@ private fun BandwidthControlSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetContext = LocalContext.current
-    // Bandwidth presets are meaningful only when the source exposes alternate
-    // renditions. The player selects source tracks; it does not transcode a
-    // single rendition into a lower-bitrate stream.
+    // Bandwidth presets provide clear, distinct data consumption estimates
+    // and match the source renditions when multiple tracks exist.
     val options: List<QualityOption> = buildList {
         val sourceTracks = availableTracks.distinctBy { it.height to it.bitrate }
-        val lowest = sourceTracks.minWithOrNull(
-            compareBy<VideoQualityTrack> { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
-                .thenBy { it.height },
-        )
-        val balanced = sourceTracks.filter { it.height in 480..720 }
+        val hasMultiTracks = sourceTracks.size > 1
+
+        val track360 = sourceTracks.filter { it.height in 280..420 }
             .minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
-            ?: lowest
-        val hd = sourceTracks.filter { it.height >= 720 }
+            ?: sourceTracks.filter { it.height <= 420 }.minByOrNull { it.bitrate }
+
+        val trackMid = sourceTracks.filter { it.height in 480..720 }
             .minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
-            ?: sourceTracks.maxByOrNull { it.height }
-        fun estimate(track: VideoQualityTrack?, fallback: Int): Int =
-            track?.bitrate?.takeIf { it > 0 }?.div(1000) ?: fallback
+
+        val trackHd = sourceTracks.filter { it.height in 720..1079 }
+            .minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
+
+        val trackFhd = sourceTracks.filter { it.height >= 1080 }
+            .maxByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: 0 }
 
         // 1. تلقائي (Adaptive)
         add(QualityOption(
             label = "تلقائي",
             displayName = "⚙ تلقائي · تعديل ديناميكي حسب سرعة النت",
-            estimatedKbps = currentBitrateKbps.takeIf { it > 0 }
-                ?: sourceTracks.maxByOrNull { it.bitrate }?.bitrate?.div(1000) ?: 1500,
+            estimatedKbps = currentBitrateKbps.takeIf { it > 0 } ?: 1800,
             isSpecial = true,
         ))
 
@@ -2141,7 +2141,7 @@ private fun BandwidthControlSheet(
         add(QualityOption(
             label = "أقصى توفير",
             displayName = "⚡ أقصى توفير (360p / باقات محدودة)",
-            estimatedKbps = estimate(lowest, 450),
+            estimatedKbps = track360?.bitrate?.takeIf { it > 0 }?.div(1000) ?: 400,
             isSpecial = true,
         ))
 
@@ -2149,7 +2149,7 @@ private fun BandwidthControlSheet(
         add(QualityOption(
             label = "جودة متوازنة",
             displayName = "⚖️ جودة متوسطة متوازنة (480p / 720p)",
-            estimatedKbps = estimate(balanced, 800),
+            estimatedKbps = trackMid?.bitrate?.takeIf { it > 0 }?.div(1000) ?: 900,
             isSpecial = true,
         ))
 
@@ -2157,7 +2157,7 @@ private fun BandwidthControlSheet(
         add(QualityOption(
             label = "ضغط ذكي (HD موفّر)",
             displayName = "🧠 ضغط ذكي · جودة HD موفّرة للنت",
-            estimatedKbps = estimate(hd, 1200),
+            estimatedKbps = trackHd?.bitrate?.takeIf { it > 0 }?.div(1000) ?: 1800,
             isSpecial = true,
         ))
 
@@ -2165,36 +2165,44 @@ private fun BandwidthControlSheet(
         add(QualityOption(
             label = "أعلى جودة",
             displayName = "✦ أعلى جودة متاحة (1080p / FHD)",
-            estimatedKbps = sourceTracks.maxByOrNull { it.bitrate }?.bitrate?.div(1000)
-                ?: currentBitrateKbps.takeIf { it > 0 } ?: 6000,
+            estimatedKbps = trackFhd?.bitrate?.takeIf { it > 0 }?.div(1000)
+                ?: if (sourceTracks.isNotEmpty() && sourceTracks.maxOf { it.height } >= 1080)
+                    sourceTracks.maxOf { it.bitrate } / 1000
+                else 4500,
             isSpecial = true,
         ))
 
-        // 6. مسارات الجودة التفصيلية المكتشفة من البث (إن وُجدت)
-        availableTracks.forEachIndexed { i, track ->
-            val lbl = qualityLabels.getOrNull(i) ?: "${track.height}p"
-            add(QualityOption(
-                label = lbl,
-                displayName = "🎞 $lbl",
-                estimatedKbps = if (track.bitrate > 0) track.bitrate / 1000 else
-                    when {
-                        track.height <= 240  -> 150
-                        track.height <= 360  -> 400
-                        track.height <= 480  -> 800
-                        track.height <= 720  -> 1800
-                        track.height <= 1080 -> 4500
-                        else                 -> 8000
-                    }
-            ))
+        // 6. مسارات الجودة المكتشفة من البث (فقط إذا توافر أكثر من مسار، وللدقة >= 360p فقط)
+        if (hasMultiTracks) {
+            val highTracks = availableTracks.filter { it.height >= 360 }
+            highTracks.forEachIndexed { _, track ->
+                val lbl = qualityLabels.getOrNull(availableTracks.indexOf(track)) ?: "${track.height}p"
+                if (none { it.label == lbl }) {
+                    add(QualityOption(
+                        label = lbl,
+                        displayName = "🎞 $lbl",
+                        estimatedKbps = if (track.bitrate > 0) track.bitrate / 1000 else
+                            when {
+                                track.height <= 360  -> 400
+                                track.height <= 480  -> 800
+                                track.height <= 720  -> 1800
+                                track.height <= 1080 -> 4500
+                                else                 -> 8000
+                            }
+                    ))
+                }
+            }
         }
 
         // 7. جودة المصدر
         val sourceRate = currentBitrateKbps.takeIf { it > 0 }
-            ?: sourceTracks.singleOrNull()?.bitrate?.takeIf { it > 0 }?.div(1000)
+            ?: sourceTracks.firstOrNull()?.bitrate?.takeIf { it > 0 }?.div(1000)
             ?: 1200
+        val maxSourceH = sourceTracks.maxByOrNull { it.height }?.height
+        val srcLabel = if (maxSourceH != null && maxSourceH > 0) "🎞 جودة المصدر (${maxSourceH}p)" else "🎞 جودة المصدر"
         add(QualityOption(
             label = "جودة المصدر",
-            displayName = if (currentTrackInfo.isNotBlank()) "🎞 جودة المصدر · $currentTrackInfo" else "🎞 جودة المصدر",
+            displayName = if (currentTrackInfo.isNotBlank()) "$srcLabel · $currentTrackInfo" else srcLabel,
             estimatedKbps = sourceRate,
             isSpecial = true,
         ))
@@ -2202,9 +2210,9 @@ private fun BandwidthControlSheet(
 
     val maxKbps = options.maxOf { it.estimatedKbps }.coerceAtLeast(1)
     val currentIndex = options.indexOfFirst { it.label == selectedQuality }.coerceAtLeast(0)
-    var sliderIndex by remember { mutableIntStateOf(currentIndex) }
+    var sliderIndex by remember(options, selectedQuality) { mutableIntStateOf(currentIndex) }
     val highlighted = options.getOrNull(sliderIndex) ?: options.first()
-    val fraction = highlighted.estimatedKbps.toFloat() / maxKbps
+    val fraction = (highlighted.estimatedKbps.toFloat() / maxKbps).coerceIn(0.06f, 1f)
     val barColor = bandwidthColor(fraction)
 
     Dialog(
@@ -2339,6 +2347,29 @@ private fun BandwidthControlSheet(
                     }
                 } else {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+
+                        val sourceTracks = availableTracks.distinctBy { it.height to it.bitrate }
+                        if (sourceTracks.size <= 1) {
+                            val h = sourceTracks.firstOrNull()?.height ?: 0
+                            if (h in 1..400) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 10.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0x2EF59E0B))
+                                        .border(0.5.dp, Color(0x66F59E0B), RoundedCornerShape(12.dp))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        "ℹ️ ملاحظة: هذا السيرفر يبث بجودة وحيدة (${h}p) من المصدر. اختر سيرفرًا آخر من تفاصيل الفيلم/المسلسل للوصول لجودات أعلى (1080p).",
+                                        color = Color(0xFFFFD580),
+                                        fontSize = 11.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                            }
+                        }
 
                         // ── Live cost summary card ───────────────────────────
                         Box(

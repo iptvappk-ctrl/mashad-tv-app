@@ -9,10 +9,10 @@
     "releaseNotes": "تحديث زقزوقة 1.0.65: إضافة زر التحديث السريع بجانب البحث مع نقطة حمراء، دعم استئناف التحميل المقطوع تلقائياً، وتثبيت الملف المحمل بضغطة واحدة مباشرة.",
     "player": {
         "packageName": "com.madar.player",
-        "versionCode": 18,
-        "versionName": "1.1.3",
-        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.65-70/zaqzouka-player-1.1.18.apk",
-        "sha256": "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39",
-        "releaseNotes": "تحديث مشغل زقزوقة: استعادة وإتاحة كافة خيارات الجودة الكاملة (أقصى توفير، متوازن، أعلى جودة، تلقائي، ضغط ذكي HD) وسلاسة فائقة."
+        "versionCode": 19,
+        "versionName": "1.1.19",
+        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.65-70/zaqzouka-player-1.1.19.apk",
+        "sha256": "047c58a70b867192e678157ab20fd24fb1d5a7fcce42e390a850d767c935afc7",
+        "releaseNotes": "تحديث مشغل زقزوقة 1.1.19: تشغيل أفقي كامل تلقائي (Landscape) للأفلام والمسلسلات، حساب ديناميكي فوري للاستهلاك والتكلفة لكل جودة، وإلغاء الأزرار الرديئة (240p) مع توضيح جودة المصدر."
     }
 }
