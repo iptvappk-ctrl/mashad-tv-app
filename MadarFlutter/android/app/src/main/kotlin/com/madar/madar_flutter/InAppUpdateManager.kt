@@ -217,15 +217,41 @@ class InAppUpdateManager(private val activity: MainActivity) {
             "versionCode" to release.versionCode,
             "versionName" to release.versionName,
             "releaseNotes" to release.releaseNotes,
+            "appDownloaded" to (getDownloadedAppApk() != null),
             "playerUpdateAvailable" to playerNeedsUpdate,
             "playerInstalled" to (installedPlayerCode > 0L),
             "playerCurrentCode" to installedPlayerCode,
             "playerVersionCode" to (playerRel?.versionCode ?: 18L),
             "playerVersionName" to (playerRel?.versionName ?: "1.1.3"),
             "playerReleaseNotes" to (playerRel?.releaseNotes ?: ""),
-            "playerApkUrl" to (playerRel?.apkUrl ?: "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.63-68/zaqzouka-player-1.1.18.apk"),
+            "playerApkUrl" to (playerRel?.apkUrl ?: "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.64-69/zaqzouka-player-1.1.18.apk"),
             "playerSha256" to (playerRel?.sha256 ?: "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39"),
+            "playerDownloaded" to (getDownloadedPlayerApk() != null),
         ))
+    }
+
+    fun getDownloadedAppApk(): File? {
+        val release = latestRelease ?: return null
+        val updateDirectory = File(activity.cacheDir, "updates")
+        val apkFile = File(updateDirectory, "zaqzouka-${release.versionCode}.apk")
+        if (apkFile.exists() && apkFile.length() > 0) {
+            if (sha256(apkFile).equals(release.sha256, ignoreCase = true)) {
+                return apkFile
+            }
+        }
+        return null
+    }
+
+    fun getDownloadedPlayerApk(): File? {
+        val updateDirectory = File(activity.cacheDir, "updates")
+        val apkFile = File(updateDirectory, "zaqzouka-player-update.apk")
+        if (apkFile.exists() && apkFile.length() > 0) {
+            val archived = activity.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            if (archived?.packageName == "com.madar.player") {
+                return apkFile
+            }
+        }
+        return null
     }
 
     fun getInstalledPlayerVersionCode(): Long {
@@ -240,10 +266,26 @@ class InAppUpdateManager(private val activity: MainActivity) {
     fun downloadAndInstallPlayer(apkUrl: String?, sha256Expected: String?, result: MethodChannel.Result) {
         val targetUrl = apkUrl?.takeIf { it.isNotBlank() }
             ?: latestRelease?.playerRelease?.apkUrl
-            ?: "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.63-68/zaqzouka-player-1.1.18.apk"
+            ?: "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.64-69/zaqzouka-player-1.1.18.apk"
         val expectedHash = sha256Expected?.takeIf { it.isNotBlank() }
             ?: latestRelease?.playerRelease?.sha256
             ?: "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39"
+
+        val updateDirectory = File(activity.cacheDir, "updates")
+        val apkFile = File(updateDirectory, "zaqzouka-player-update.apk")
+        val partFile = File(updateDirectory, "zaqzouka-player-update.apk.part")
+
+        // 1. If already fully downloaded and valid: directly install!
+        if (apkFile.exists() && apkFile.length() > 0) {
+            val archived = activity.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            if (archived?.packageName == "com.madar.player") {
+                openInstaller(apkFile)
+                respond(result, mapOf("status" to "install_started"))
+                return
+            } else {
+                apkFile.delete()
+            }
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !activity.packageManager.canRequestPackageInstalls()
@@ -261,11 +303,19 @@ class InAppUpdateManager(private val activity: MainActivity) {
             return
         }
 
-        val request = Request.Builder()
+        updateDirectory.mkdirs()
+        val existingBytes = if (partFile.exists()) partFile.length() else 0L
+
+        val reqBuilder = Request.Builder()
             .url(targetUrl)
             .header("Accept", "application/vnd.android.package-archive,application/octet-stream")
             .header("User-Agent", "Zaqzouka-Android")
-            .build()
+
+        if (existingBytes > 0) {
+            reqBuilder.header("Range", "bytes=$existingBytes-")
+        }
+
+        val request = reqBuilder.build()
         val call = client.newCall(request)
         activeDownload = call
         call.enqueue(object : Callback {
@@ -280,30 +330,35 @@ class InAppUpdateManager(private val activity: MainActivity) {
                     val finalHost = it.networkResponse?.request?.url?.host
                         ?: it.request.url.host
                     if (!it.isSuccessful || !isTrustedAssetHost(finalHost)) {
-                        Log.w(TAG, "Rejected player download: success=${it.isSuccessful} host=$finalHost")
+                        Log.w(TAG, "Rejected player download: code=${it.code} host=$finalHost")
                         activeDownload = null
                         respond(result, mapOf("status" to "download_failed"))
                         return
                     }
 
                     val body = it.body
-                    if (body == null || body.contentLength() > MAX_APK_BYTES) {
+                    if (body == null) {
                         activeDownload = null
                         respond(result, mapOf("status" to "download_failed"))
                         return
                     }
 
-                    val updateDirectory = File(activity.cacheDir, "updates")
-                    val apkFile = File(updateDirectory, "zaqzouka-player-update.apk")
+                    val isPartial = it.code == 206
+                    val append = isPartial && existingBytes > 0
+                    val startOffset = if (append) existingBytes else 0L
+                    val totalBytes = if (isPartial) {
+                        startOffset + body.contentLength()
+                    } else {
+                        body.contentLength()
+                    }
+
                     try {
-                        updateDirectory.mkdirs()
-                        apkFile.delete()
-                        val totalBytes = body.contentLength()
                         body.byteStream().use { input ->
-                            FileOutputStream(apkFile).use { output ->
+                            FileOutputStream(partFile, append).use { output ->
                                 val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
-                                var downloaded = 0L
-                                var lastReported = 0L
+                                var downloaded = startOffset
+                                var lastReported = startOffset
+                                postProgress(downloaded, totalBytes)
                                 while (true) {
                                     val count = input.read(buffer)
                                     if (count < 0) break
@@ -320,21 +375,18 @@ class InAppUpdateManager(private val activity: MainActivity) {
                             }
                         }
 
-                        if (!sha256(apkFile).equals(expectedHash, ignoreCase = true)) {
-                            Log.w(TAG, "Player APK checksum warning (computed=${sha256(apkFile)} expected=$expectedHash)")
-                        }
-
-                        // Validate package name
-                        val archived = activity.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+                        val archived = activity.packageManager.getPackageArchiveInfo(partFile.absolutePath, 0)
                         if (archived?.packageName != "com.madar.player") {
+                            partFile.delete()
                             throw IOException("Downloaded package is not com.madar.player")
                         }
 
+                        apkFile.delete()
+                        partFile.renameTo(apkFile)
                         openInstaller(apkFile)
                         activeDownload = null
                         respond(result, mapOf("status" to "install_started"))
                     } catch (error: Exception) {
-                        apkFile.delete()
                         activeDownload = null
                         Log.w(TAG, "Downloaded player update rejected (${error.javaClass.simpleName}: ${error.message})")
                         respond(result, mapOf("status" to "download_failed", "error" to "${error.message}"))
@@ -351,6 +403,21 @@ class InAppUpdateManager(private val activity: MainActivity) {
             return
         }
 
+        val updateDirectory = File(activity.cacheDir, "updates")
+        val apkFile = File(updateDirectory, "zaqzouka-${release.versionCode}.apk")
+        val partFile = File(updateDirectory, "zaqzouka-${release.versionCode}.apk.part")
+
+        // 1. If already fully downloaded and verified: install immediately!
+        if (apkFile.exists() && apkFile.length() > 0) {
+            if (sha256(apkFile).equals(release.sha256, ignoreCase = true)) {
+                openInstaller(apkFile)
+                respond(result, mapOf("status" to "install_started"))
+                return
+            } else {
+                apkFile.delete()
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !activity.packageManager.canRequestPackageInstalls()
         ) {
@@ -367,11 +434,19 @@ class InAppUpdateManager(private val activity: MainActivity) {
             return
         }
 
-        val request = Request.Builder()
+        updateDirectory.mkdirs()
+        val existingBytes = if (partFile.exists()) partFile.length() else 0L
+
+        val reqBuilder = Request.Builder()
             .url(release.apkUrl)
             .header("Accept", "application/vnd.android.package-archive,application/octet-stream")
             .header("User-Agent", "Zaqzouka-Android")
-            .build()
+
+        if (existingBytes > 0) {
+            reqBuilder.header("Range", "bytes=$existingBytes-")
+        }
+
+        val request = reqBuilder.build()
         val call = client.newCall(request)
         activeDownload = call
         call.enqueue(object : Callback {
@@ -383,35 +458,38 @@ class InAppUpdateManager(private val activity: MainActivity) {
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
-                    // Check all hops: original request, any network-level hop, and priorResponse.
-                    // OkHttp follows redirects transparently; it.request is always the last request.
                     val finalHost = it.networkResponse?.request?.url?.host
                         ?: it.request.url.host
                     if (!it.isSuccessful || !isTrustedAssetHost(finalHost)) {
-                        Log.w(TAG, "Rejected download: success=${it.isSuccessful} host=$finalHost")
+                        Log.w(TAG, "Rejected download: code=${it.code} host=$finalHost")
                         activeDownload = null
                         respond(result, mapOf("status" to "download_failed"))
                         return
                     }
 
                     val body = it.body
-                    if (body == null || body.contentLength() > MAX_APK_BYTES) {
+                    if (body == null) {
                         activeDownload = null
                         respond(result, mapOf("status" to "download_failed"))
                         return
                     }
 
-                    val updateDirectory = File(activity.cacheDir, "updates")
-                    val apkFile = File(updateDirectory, "zaqzouka-${release.versionCode}.apk")
+                    val isPartial = it.code == 206
+                    val append = isPartial && existingBytes > 0
+                    val startOffset = if (append) existingBytes else 0L
+                    val totalBytes = if (isPartial) {
+                        startOffset + body.contentLength()
+                    } else {
+                        body.contentLength()
+                    }
+
                     try {
-                        updateDirectory.mkdirs()
-                        apkFile.delete()
-                        val totalBytes = body.contentLength()
                         body.byteStream().use { input ->
-                            FileOutputStream(apkFile).use { output ->
+                            FileOutputStream(partFile, append).use { output ->
                                 val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
-                                var downloaded = 0L
-                                var lastReported = 0L
+                                var downloaded = startOffset
+                                var lastReported = startOffset
+                                postProgress(downloaded, totalBytes)
                                 while (true) {
                                     val count = input.read(buffer)
                                     if (count < 0) break
@@ -428,15 +506,17 @@ class InAppUpdateManager(private val activity: MainActivity) {
                             }
                         }
 
-                        if (!sha256(apkFile).equals(release.sha256, ignoreCase = true)) {
+                        if (!sha256(partFile).equals(release.sha256, ignoreCase = true)) {
+                            partFile.delete()
                             throw IOException("Downloaded APK checksum mismatch")
                         }
-                        validateApk(apkFile, release.versionCode)
+                        validateApk(partFile, release.versionCode)
+                        apkFile.delete()
+                        partFile.renameTo(apkFile)
                         openInstaller(apkFile)
                         activeDownload = null
                         respond(result, mapOf("status" to "install_started"))
                     } catch (error: Exception) {
-                        apkFile.delete()
                         activeDownload = null
                         Log.w(TAG, "Downloaded update was rejected (${error.javaClass.simpleName})")
                         respond(result, mapOf("status" to "download_failed"))
@@ -490,7 +570,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
         }.onFailure { Log.w(TAG, "Signature inspection skipped: ${it.message}") }
     }
 
-    private fun openInstaller(apkFile: File) {
+    fun openInstaller(apkFile: File) {
         val uri = FileProvider.getUriForFile(
             activity,
             "${activity.packageName}.fileprovider",

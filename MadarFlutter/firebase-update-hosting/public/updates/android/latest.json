@@ -1,17 +1,17 @@
 {
     "packageName": "com.madar.madar_flutter",
-    "versionCode": 69,
-    "versionName": "1.0.64",
-    "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.64-69/zaqzouka-1.0.64-69.apk",
-    "sha256": "4bcd04a9c876ad60ff221cd2bb3a1626b3773d4fb3914cd64268203f3ad6a1e1",
+    "versionCode": 70,
+    "versionName": "1.0.65",
+    "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.65-70/zaqzouka-1.0.65-70.apk",
+    "sha256": "911b2ed8b467d228f20f5074a2d32f03b38c512d1c78a3044613679991f65f0d",
     "telemetryUrl": "http://192.168.100.2:4040",
     "mandatory": false,
-    "releaseNotes": "تحديث زقزوقة 1.0.64: إرسال تحديثات المشغل تلقائياً وتثبيتها بنقرة واحدة داخل التطبيق، واستعادة وتفعيل كافة خيارات الجودة الخمسة الذكية للمشغل (أقصى توفير، متوسط، أعلى جودة، تلقائي، ضغط ذكي HD).",
+    "releaseNotes": "تحديث زقزوقة 1.0.65: إضافة زر التحديث السريع بجانب البحث مع نقطة حمراء، دعم استئناف التحميل المقطوع تلقائياً، وتثبيت الملف المحمل بضغطة واحدة مباشرة.",
     "player": {
         "packageName": "com.madar.player",
         "versionCode": 18,
         "versionName": "1.1.3",
-        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.64-69/zaqzouka-player-1.1.18.apk",
+        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.65-70/zaqzouka-player-1.1.18.apk",
         "sha256": "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39",
         "releaseNotes": "تحديث مشغل زقزوقة: استعادة وإتاحة كافة خيارات الجودة الكاملة (أقصى توفير، متوازن، أعلى جودة، تلقائي، ضغط ذكي HD) وسلاسة فائقة."
     }

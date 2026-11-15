@@ -126,12 +126,23 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
   Timer? _checkTimer;
   int? _shownVersionCode;
   int? _shownPlayerVersionCode;
+  StreamSubscription<dynamic>? _progressSub;
 
   @override
   void initState() {
     super.initState();
     // Let the first screen render before making a short HTTPS request.
     _checkTimer = Timer(const Duration(seconds: 2), _checkForUpdate);
+    _progressSub = _updateProgress.receiveBroadcastStream().listen((event) {
+      if (event is! Map) return;
+      final downloaded = (event['downloadedBytes'] as num?)?.toInt() ?? -1;
+      final total = (event['totalBytes'] as num?)?.toInt() ?? -1;
+      final prog = (downloaded > 0 && total > 0) ? (downloaded / total).clamp(0.0, 1.0) : null;
+      appUpdateNotifier.value = appUpdateNotifier.value.copyWith(
+        isDownloading: true,
+        downloadProgress: prog,
+      );
+    });
   }
 
   Future<void> _checkForUpdate() async {
@@ -142,6 +153,21 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
       if (!mounted || update == null) return;
       final appUpdateAvailable = update['available'] == true;
       final playerUpdateAvailable = update['playerUpdateAvailable'] == true;
+      final appDownloaded = update['appDownloaded'] == true;
+      final playerDownloaded = update['playerDownloaded'] == true;
+
+      appUpdateNotifier.value = AppUpdateInfo(
+        hasAppUpdate: appUpdateAvailable,
+        hasPlayerUpdate: playerUpdateAvailable,
+        isAppDownloaded: appDownloaded,
+        isPlayerDownloaded: playerDownloaded,
+        appVersion: (update['versionName'] as String? ?? '').trim(),
+        playerVersion: (update['playerVersionName'] as String? ?? '1.1.3').trim(),
+        appNotes: (update['releaseNotes'] as String? ?? '').trim(),
+        playerNotes: (update['playerReleaseNotes'] as String? ?? '').trim(),
+        playerApkUrl: update['playerApkUrl'] as String?,
+        playerSha256: update['playerSha256'] as String?,
+      );
 
       if (appUpdateAvailable) {
         final code = (update['versionCode'] as num?)?.toInt();
@@ -311,6 +337,7 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
   @override
   void dispose() {
     _checkTimer?.cancel();
+    _progressSub?.cancel();
     super.dispose();
   }
 

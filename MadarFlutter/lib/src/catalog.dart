@@ -769,7 +769,93 @@ class _CatalogPageState extends State<CatalogPage> {
             ),
           ),
         ],
-        if (!_searchOpen)
+        if (!_searchOpen) ...[
+          ValueListenableBuilder<AppUpdateInfo>(
+            valueListenable: appUpdateNotifier,
+            builder: (ctx, info, _) {
+              if (!info.hasAnyUpdate && !info.isReadyToInstall && !info.isDownloading) {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsetsDirectional.only(end: 6),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    IconButton.filledTonal(
+                      tooltip: info.isReadyToInstall
+                          ? 'التحديث جاهز للتثبيت ⚡'
+                          : info.isDownloading
+                              ? 'جاري تحميل التحديث...'
+                              : 'يتوفر تحديث جديد',
+                      style: IconButton.styleFrom(
+                        backgroundColor: info.isReadyToInstall
+                            ? const Color(0xFF16856D)
+                            : _card,
+                        foregroundColor: info.isReadyToInstall
+                            ? Colors.white
+                            : _brick,
+                      ),
+                      onPressed: () => handleUpdateAction(context),
+                      icon: info.isDownloading
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                value: info.downloadProgress,
+                                strokeWidth: 2.2,
+                                color: _brick,
+                              ),
+                            )
+                          : Icon(
+                              info.isReadyToInstall
+                                  ? Icons.system_update_rounded
+                                  : Icons.download_rounded,
+                              size: 22,
+                            ),
+                    ),
+                    if (!info.isReadyToInstall && !info.isDownloading)
+                      Positioned(
+                        top: 2,
+                        left: 2,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                            boxShadow: const [
+                              BoxShadow(color: Colors.red, blurRadius: 4, spreadRadius: 1),
+                            ],
+                          ),
+                        ),
+                      ),
+                    if (info.isReadyToInstall)
+                      Positioned(
+                        top: -2,
+                        left: -2,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.white, width: 1),
+                          ),
+                          child: const Text(
+                            'تثبيت',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
           IconButton.filledTonal(
             tooltip: 'بحث',
             style: IconButton.styleFrom(
@@ -778,7 +864,8 @@ class _CatalogPageState extends State<CatalogPage> {
             ),
             onPressed: _toggleSearch,
             icon: const Icon(Icons.search_rounded),
-          )
+          ),
+        ]
         else
           IconButton.filledTonal(
             tooltip: 'إغلاق البحث',

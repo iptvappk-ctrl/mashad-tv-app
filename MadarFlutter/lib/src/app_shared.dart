@@ -1,5 +1,121 @@
 part of '../main.dart';
 
+class AppUpdateInfo {
+  final bool hasAppUpdate;
+  final bool hasPlayerUpdate;
+  final bool isAppDownloaded;
+  final bool isPlayerDownloaded;
+  final String appVersion;
+  final String playerVersion;
+  final String appNotes;
+  final String playerNotes;
+  final String? playerApkUrl;
+  final String? playerSha256;
+  final double? downloadProgress;
+  final bool isDownloading;
+
+  const AppUpdateInfo({
+    this.hasAppUpdate = false,
+    this.hasPlayerUpdate = false,
+    this.isAppDownloaded = false,
+    this.isPlayerDownloaded = false,
+    this.appVersion = '',
+    this.playerVersion = '',
+    this.appNotes = '',
+    this.playerNotes = '',
+    this.playerApkUrl,
+    this.playerSha256,
+    this.downloadProgress,
+    this.isDownloading = false,
+  });
+
+  bool get hasAnyUpdate => hasAppUpdate || hasPlayerUpdate;
+  bool get isReadyToInstall =>
+      (hasAppUpdate && isAppDownloaded) || (hasPlayerUpdate && isPlayerDownloaded);
+
+  AppUpdateInfo copyWith({
+    bool? hasAppUpdate,
+    bool? hasPlayerUpdate,
+    bool? isAppDownloaded,
+    bool? isPlayerDownloaded,
+    String? appVersion,
+    String? playerVersion,
+    String? appNotes,
+    String? playerNotes,
+    String? playerApkUrl,
+    String? playerSha256,
+    double? downloadProgress,
+    bool? isDownloading,
+  }) {
+    return AppUpdateInfo(
+      hasAppUpdate: hasAppUpdate ?? this.hasAppUpdate,
+      hasPlayerUpdate: hasPlayerUpdate ?? this.hasPlayerUpdate,
+      isAppDownloaded: isAppDownloaded ?? this.isAppDownloaded,
+      isPlayerDownloaded: isPlayerDownloaded ?? this.isPlayerDownloaded,
+      appVersion: appVersion ?? this.appVersion,
+      playerVersion: playerVersion ?? this.playerVersion,
+      appNotes: appNotes ?? this.appNotes,
+      playerNotes: playerNotes ?? this.playerNotes,
+      playerApkUrl: playerApkUrl ?? this.playerApkUrl,
+      playerSha256: playerSha256 ?? this.playerSha256,
+      downloadProgress: downloadProgress ?? this.downloadProgress,
+      isDownloading: isDownloading ?? this.isDownloading,
+    );
+  }
+}
+
+final appUpdateNotifier = ValueNotifier<AppUpdateInfo>(const AppUpdateInfo());
+
+Future<void> handleUpdateAction(BuildContext context) async {
+  final info = appUpdateNotifier.value;
+  if (info.isReadyToInstall) {
+    final target = (info.hasAppUpdate && info.isAppDownloaded) ? 'app' : 'player';
+    final title = target == 'player'
+        ? 'مشغل زقزوقة جاهز للتثبيت ⚡'
+        : 'تحديث زقزوقة جاهز للتثبيت ⚡';
+    await showDialog<void>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        icon: const Icon(Icons.system_update_rounded, color: Color(0xFF16856D), size: 40),
+        title: Text(title),
+        content: const Text(
+          'تم تنزيل حزمة التحديث بالكامل ومطابقتها. اضغط تثبيت للبدء مباشرة دون الحاجة لإعادة التنزيل.',
+          style: TextStyle(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF16856D)),
+            onPressed: () async {
+              Navigator.pop(dialog);
+              await NativeBridge.installDownloaded(target: target);
+            },
+            icon: const Icon(Icons.install_mobile_rounded),
+            label: const Text('تثبيت التحديث الآن ⚡'),
+          ),
+        ],
+      ),
+    );
+    return;
+  }
+
+  if (info.hasAppUpdate) {
+    await NativeBridge.promptAppUpdate(context);
+  } else if (info.hasPlayerUpdate) {
+    await NativeBridge.promptPlayerUpdate(
+      context,
+      apkUrl: info.playerApkUrl,
+      sha256: info.playerSha256,
+      versionName: info.playerVersion,
+      releaseNotes: info.playerNotes,
+    );
+  }
+}
+
+
 class NativeBridge {
   static Future<String?> readCache(String key) async {
     try {
@@ -75,6 +191,140 @@ class NativeBridge {
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<Map<String, dynamic>?> installDownloaded({String target = 'app'}) async {
+    try {
+      return await _native.invokeMapMethod<String, dynamic>('updates.installDownloaded', {
+        'target': target,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> promptAppUpdate(BuildContext context) async {
+    var busy = false;
+    var hint = '';
+    double? downloadProgress;
+    StreamSubscription<dynamic>? progressSubscription;
+    final info = appUpdateNotifier.value;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            icon: const Icon(Icons.system_update_alt_rounded, color: _brick, size: 40),
+            title: Text('تحديث جديد (${info.appVersion.ifEmpty('1.0.64')}) ⚡'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  info.appNotes.trim().isNotEmpty
+                      ? info.appNotes.trim()
+                      : 'يتوفر إصدار جديد من تطبيق زقزوقة. يدعم التحديث الاستئناف التلقائي في حال انقطاع النت.',
+                  style: const TextStyle(fontSize: 13, height: 1.5),
+                ),
+                if (hint.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(hint, style: const TextStyle(color: _brick, fontSize: 12)),
+                ],
+                if (busy && downloadProgress != null) ...[
+                  const SizedBox(height: 14),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      value: downloadProgress,
+                      backgroundColor: _card,
+                      valueColor: const AlwaysStoppedAnimation<Color>(_brick),
+                      minHeight: 8,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Center(
+                    child: Text(
+                      'جاري التحميل... ${(downloadProgress! * 100).toInt()}%',
+                      style: const TextStyle(fontSize: 12, color: _muted),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: busy ? null : () => Navigator.of(dialogContext).pop(),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton.icon(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        setDialogState(() {
+                          busy = true;
+                          hint = '';
+                        });
+                        appUpdateNotifier.value = appUpdateNotifier.value.copyWith(isDownloading: true);
+                        try {
+                          progressSubscription ??= _updateProgress
+                              .receiveBroadcastStream()
+                              .listen((event) {
+                                if (event is! Map) return;
+                                final downloaded = (event['downloadedBytes'] as num?)?.toInt() ?? -1;
+                                final total = (event['totalBytes'] as num?)?.toInt() ?? -1;
+                                final prog = (downloaded > 0 && total > 0)
+                                    ? (downloaded / total).clamp(0.0, 1.0)
+                                    : null;
+                                appUpdateNotifier.value = appUpdateNotifier.value.copyWith(
+                                  isDownloading: true,
+                                  downloadProgress: prog,
+                                );
+                                if (!dialogContext.mounted) return;
+                                setDialogState(() {
+                                  downloadProgress = prog;
+                                });
+                              });
+
+                          final res = await _native.invokeMapMethod<String, dynamic>('updates.install');
+                          final status = res?['status'] as String? ?? 'download_failed';
+                          if (status == 'install_started') {
+                            appUpdateNotifier.value = appUpdateNotifier.value.copyWith(
+                              isDownloading: false,
+                              isAppDownloaded: true,
+                            );
+                            if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+                          } else if (status == 'permission_required') {
+                            appUpdateNotifier.value = appUpdateNotifier.value.copyWith(isDownloading: false);
+                            setDialogState(() {
+                              busy = false;
+                              hint = 'يلزم تفعيل إذن تثبيت التطبيقات من الإعدادات.';
+                            });
+                          } else {
+                            appUpdateNotifier.value = appUpdateNotifier.value.copyWith(isDownloading: false);
+                            setDialogState(() {
+                              busy = false;
+                              hint = 'تعذر التنزيل، تأكد من الاتصال وحاول مجدداً.';
+                            });
+                          }
+                        } catch (_) {
+                          appUpdateNotifier.value = appUpdateNotifier.value.copyWith(isDownloading: false);
+                          setDialogState(() {
+                            busy = false;
+                            hint = 'حدث خطأ أثناء تنزيل التحديث.';
+                          });
+                        }
+                      },
+                icon: const Icon(Icons.download_rounded),
+                label: const Text('تحميل وتثبيت التحديث الآن ⚡'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    await progressSubscription?.cancel();
   }
 
   static Future<Map<String, dynamic>?> installPlayer({String? apkUrl, String? sha256}) async {

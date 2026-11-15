@@ -1,13 +1,127 @@
 {
   "stats": {
     "totalInstalls": 1,
-    "firstOpens": 1,
-    "bouncedUsers": 0,
+    "firstOpens": 7,
+    "bouncedUsers": 2,
     "totalSearches": 0,
-    "totalPlays": 0,
+    "totalPlays": 2,
     "playbackErrors": 0
   },
   "sessions": [
+    {
+      "id": "sess_1794775468788_xdzcn",
+      "deviceId": "9751afb6-e049-46dd-b615-d2c62344d98b",
+      "device": "Xiaomi 2311DRK48G",
+      "deviceType": "phone",
+      "osVersion": "Android 16 (SDK 36)",
+      "country": "مصر EG",
+      "countryCode": "EG",
+      "openTime": "22:44",
+      "closeTime": "22:44",
+      "durationText": "1 دقيقة",
+      "durationMinutes": 1,
+      "lastSection": "أفلام",
+      "lastContent": "فيلم Best Pancakes in the County 2027 مترجم",
+      "status": "closed",
+      "openedAt": "2026-11-15T20:44:28.788Z",
+      "lastSeen": "2026-11-15T20:44:28.788Z",
+      "actionsCount": 0
+    },
+    {
+      "id": "sess_1794775403347_y8cin",
+      "deviceId": "9751afb6-e049-46dd-b615-d2c62344d98b",
+      "device": "Xiaomi 2311DRK48G",
+      "deviceType": "phone",
+      "osVersion": "Android 16 (SDK 36)",
+      "country": "مصر EG",
+      "countryCode": "EG",
+      "openTime": "22:43",
+      "closeTime": "22:43",
+      "durationText": "1 دقيقة",
+      "durationMinutes": 1,
+      "lastSection": "أفلام",
+      "lastContent": "فيلم Best Pancakes in the County 2027 مترجم",
+      "status": "closed",
+      "openedAt": "2026-11-15T20:43:23.347Z",
+      "lastSeen": "2026-11-15T20:43:23.347Z",
+      "actionsCount": 0
+    },
+    {
+      "id": "sess_1794775391299_vpv9h",
+      "deviceId": "9751afb6-e049-46dd-b615-d2c62344d98b",
+      "device": "Xiaomi 2311DRK48G",
+      "deviceType": "phone",
+      "osVersion": "Android 16 (SDK 36)",
+      "country": "مصر EG",
+      "countryCode": "EG",
+      "openTime": "22:43",
+      "closeTime": "22:43",
+      "durationText": "1 دقيقة",
+      "durationMinutes": 1,
+      "lastSection": "أفلام",
+      "lastContent": "فيلم Best Pancakes in the County 2027 مترجم",
+      "status": "closed",
+      "openedAt": "2026-11-15T20:43:11.299Z",
+      "lastSeen": "2026-11-15T20:43:11.299Z",
+      "actionsCount": 1
+    },
+    {
+      "id": "sess_1794775180467_aat81",
+      "deviceId": "9751afb6-e049-46dd-b615-d2c62344d98b",
+      "device": "Xiaomi 2311DRK48G",
+      "deviceType": "phone",
+      "osVersion": "Android 16 (SDK 36)",
+      "country": "مصر EG",
+      "countryCode": "EG",
+      "openTime": "22:39",
+      "closeTime": "22:39",
+      "durationText": "1 دقيقة",
+      "durationMinutes": 1,
+      "lastSection": "أفلام",
+      "lastContent": "فيلم Best Pancakes in the County 2027 مترجم",
+      "status": "closed",
+      "openedAt": "2026-11-15T20:39:40.467Z",
+      "lastSeen": "2026-11-15T20:39:47.610Z",
+      "actionsCount": 4
+    },
+    {
+      "id": "sess_1794775153338_90on5",
+      "deviceId": "9751afb6-e049-46dd-b615-d2c62344d98b",
+      "device": "Xiaomi 2311DRK48G",
+      "deviceType": "phone",
+      "osVersion": "Android 16 (SDK 36)",
+      "country": "مصر EG",
+      "countryCode": "EG",
+      "openTime": "22:39",
+      "closeTime": "22:39",
+      "durationText": "1 دقيقة",
+      "durationMinutes": 1,
+      "lastSection": "الرئيسية 🏠",
+      "lastContent": "",
+      "status": "closed",
+      "openedAt": "2026-11-15T20:39:13.338Z",
+      "lastSeen": "2026-11-15T20:39:15.411Z",
+      "actionsCount": 1
+    },
+    {
+      "id": "sess_1794774989582_01abx",
+      "deviceId": "9751afb6-e049-46dd-b615-d2c62344d98b",
+      "device": "Xiaomi 2311DRK48G",
+      "deviceType": "phone",
+      "osVersion": "Android 16 (SDK 36)",
+      "country": "مصر EG",
+      "countryCode": "EG",
+      "openTime": "22:36",
+      "closeTime": "22:38",
+      "durationText": "3 دقيقة",
+      "durationMinutes": 3,
+      "lastSection": "الرئيسية 🏠",
+      "lastContent": "",
+      "status": "closed",
+      "openedAt": "2026-11-15T20:36:29.582Z",
+      "lastSeen": "2026-11-15T20:38:59.875Z",
+      "actionsCount": 5
+    },
     {
       "id": "sess_1794742112982_5sve5",
       "deviceId": "9751afb6-e049-46dd-b615-d2c62344d98b",
@@ -28,10 +142,139 @@
       "actionsCount": 4
     }
   ],
-  "topContent": [],
+  "topContent": [
+    {
+      "id": "c_1794775193895",
+      "title": "فيلم Best Pancakes in the County 2027 مترجم",
+      "category": "أفلام",
+      "categoryIcon": "⚽",
+      "views": 2,
+      "completionRate": 85
+    }
+  ],
   "searches": [],
   "errors": [],
   "activityLog": [
+    {
+      "id": "act_1794775470525_921x",
+      "type": "bounce",
+      "text": "مستخدم ارتد فوراً (Xiaomi 2311DRK48G) دون تصفح",
+      "icon": "⚠️",
+      "time": "22:44",
+      "timestamp": "2026-11-15T20:44:30.525Z"
+    },
+    {
+      "id": "act_1794775468788_phas",
+      "type": "open",
+      "text": "فتح التطبيق من جهاز Xiaomi 2311DRK48G (مصر EG)",
+      "icon": "📱",
+      "time": "22:44",
+      "timestamp": "2026-11-15T20:44:28.788Z"
+    },
+    {
+      "id": "act_1794775416451_7ols",
+      "type": "bounce",
+      "text": "مستخدم ارتد فوراً (Xiaomi 2311DRK48G) دون تصفح",
+      "icon": "⚠️",
+      "time": "22:43",
+      "timestamp": "2026-11-15T20:43:36.451Z"
+    },
+    {
+      "id": "act_1794775403347_rz3r",
+      "type": "open",
+      "text": "فتح التطبيق من جهاز Xiaomi 2311DRK48G (مصر EG)",
+      "icon": "📱",
+      "time": "22:43",
+      "timestamp": "2026-11-15T20:43:23.347Z"
+    },
+    {
+      "id": "act_1794775396719_yhs2",
+      "type": "close",
+      "text": "أنهى (Xiaomi 2311DRK48G) جلسته بعد 1 دقيقة",
+      "icon": "⚪",
+      "time": "22:43",
+      "timestamp": "2026-11-15T20:43:16.719Z"
+    },
+    {
+      "id": "act_1794775396382_imoz",
+      "type": "play",
+      "text": "بدأ مشاهدة: فيلم Best Pancakes in the County 2027 مترجم (أفلام)",
+      "icon": "▶️",
+      "time": "22:43",
+      "timestamp": "2026-11-15T20:43:16.382Z"
+    },
+    {
+      "id": "act_1794775391299_ve2s",
+      "type": "open",
+      "text": "فتح التطبيق من جهاز Xiaomi 2311DRK48G (مصر EG)",
+      "icon": "📱",
+      "time": "22:43",
+      "timestamp": "2026-11-15T20:43:11.299Z"
+    },
+    {
+      "id": "act_1794775194543_nt4b",
+      "type": "close",
+      "text": "أنهى (Xiaomi 2311DRK48G) جلسته بعد 1 دقيقة",
+      "icon": "⚪",
+      "time": "22:39",
+      "timestamp": "2026-11-15T20:39:54.543Z"
+    },
+    {
+      "id": "act_1794775193891_5aue",
+      "type": "play",
+      "text": "بدأ مشاهدة: فيلم Best Pancakes in the County 2027 مترجم (أفلام)",
+      "icon": "▶️",
+      "time": "22:39",
+      "timestamp": "2026-11-15T20:39:53.891Z"
+    },
+    {
+      "id": "act_1794775187610_zegl",
+      "type": "nav",
+      "text": "المستخدم (Xiaomi 2311DRK48G) تصفح قسم: أفلام ومسلسلات 🎬",
+      "icon": "🧭",
+      "time": "22:39",
+      "timestamp": "2026-11-15T20:39:47.610Z"
+    },
+    {
+      "id": "act_1794775183390_c5pl",
+      "type": "nav",
+      "text": "المستخدم (Xiaomi 2311DRK48G) تصفح قسم: بثات الكورة ⚽",
+      "icon": "🧭",
+      "time": "22:39",
+      "timestamp": "2026-11-15T20:39:43.390Z"
+    },
+    {
+      "id": "act_1794775180467_cttp",
+      "type": "open",
+      "text": "فتح التطبيق من جهاز Xiaomi 2311DRK48G (مصر EG)",
+      "icon": "📱",
+      "time": "22:39",
+      "timestamp": "2026-11-15T20:39:40.467Z"
+    },
+    {
+      "id": "act_1794775170364_64mn",
+      "type": "close",
+      "text": "أنهى (Xiaomi 2311DRK48G) جلسته بعد 1 دقيقة",
+      "icon": "⚪",
+      "time": "22:39",
+      "timestamp": "2026-11-15T20:39:30.364Z"
+    },
+    {
+      "id": "act_1794775153338_jsz0",
+      "type": "open",
+      "text": "فتح التطبيق من جهاز Xiaomi 2311DRK48G (مصر EG)",
+      "icon": "📱",
+      "time": "22:39",
+      "timestamp": "2026-11-15T20:39:13.338Z"
+    },
+    {
+      "id": "act_1794774989583_1wjz",
+      "type": "open",
+      "text": "فتح التطبيق من جهاز Xiaomi 2311DRK48G (مصر EG)",
+      "icon": "📱",
+      "time": "22:36",
+      "timestamp": "2026-11-15T20:36:29.583Z"
+    },
     {
       "id": "act_1",
       "type": "open",

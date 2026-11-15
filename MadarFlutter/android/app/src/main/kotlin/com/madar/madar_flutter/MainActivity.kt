@@ -70,6 +70,16 @@ class MainActivity : FlutterActivity() {
                     "download.start" -> startDownload(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), result)
                     "updates.check" -> inAppUpdateManager.checkForUpdate(result)
                     "updates.install" -> inAppUpdateManager.downloadAndInstall(result)
+                    "updates.installDownloaded" -> {
+                        val target = call.argument<String>("target") ?: "app"
+                        val apk = if (target == "player") inAppUpdateManager.getDownloadedPlayerApk() else inAppUpdateManager.getDownloadedAppApk()
+                        if (apk != null && apk.exists()) {
+                            inAppUpdateManager.openInstaller(apk)
+                            result.success(mapOf("status" to "install_started"))
+                        } else {
+                            result.success(mapOf("status" to "file_not_found"))
+                        }
+                    }
                     "notifications.status" -> result.success(
                         mapOf("enabled" to runCatching {
                             NotificationCenter.areNotificationsAllowed(this)
