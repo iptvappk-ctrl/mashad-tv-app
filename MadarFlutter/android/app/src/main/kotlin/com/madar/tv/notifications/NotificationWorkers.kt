@@ -1,6 +1,7 @@
 package com.madar.tv.notifications
 
 import android.content.Context
+import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.madar.tv.data.ArabseedItem
@@ -14,7 +15,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
 internal class NewContentNotificationWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
@@ -134,5 +139,56 @@ internal class MatchAlertNotificationWorker(context: Context, params: WorkerPara
 
     companion object {
         private const val PREFS = "background_notifications_v1"
+    }
+}
+
+internal class AppUpdateNotificationWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        if (!NotificationCenter.isChannelAllowed(applicationContext, NotificationCenter.UPDATE_CHANNEL)) return Result.success()
+        return runCatching {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build()
+            val request = Request.Builder()
+                .url(FIREBASE_UPDATE_URL)
+                .header("Accept", "application/json")
+                .header("Cache-Control", "no-cache")
+                .header("User-Agent", "Zaqzouka-Android")
+                .build()
+            val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+            response.use {
+                if (!it.isSuccessful) return@runCatching Result.retry()
+                val body = it.body?.string() ?: return@runCatching Result.success()
+                val json = JSONObject(body)
+                val remoteVersionCode = json.optLong("versionCode", 0L)
+                val versionName = json.optString("versionName", "")
+                val releaseNotes = json.optString("releaseNotes", "")
+
+                @Suppress("DEPRECATION")
+                val installed = applicationContext.packageManager.getPackageInfo(applicationContext.packageName, 0)
+                val currentVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) installed.longVersionCode else installed.versionCode.toLong()
+
+                if (remoteVersionCode > currentVersionCode) {
+                    val prefs = applicationContext.getSharedPreferences("app_update_notifications", Context.MODE_PRIVATE)
+                    val lastNotifiedCode = prefs.getLong("last_notified_version_code", 0L)
+                    if (remoteVersionCode > lastNotifiedCode) {
+                        val posted = NotificationCenter.postUpdateNotification(
+                            applicationContext,
+                            versionName,
+                            releaseNotes.ifBlank { "يتوفر تحديث جديد لتحسين استقرار التطبيق والمشاهدة." },
+                        )
+                        if (posted) {
+                            prefs.edit().putLong("last_notified_version_code", remoteVersionCode).apply()
+                        }
+                    }
+                }
+            }
+            Result.success()
+        }.getOrElse { Result.retry() }
+    }
+
+    companion object {
+        private const val FIREBASE_UPDATE_URL = "https://madartv-updates.web.app/updates/android/latest.json"
     }
 }

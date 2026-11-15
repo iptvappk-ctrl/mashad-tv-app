@@ -15,17 +15,27 @@ import com.madar.madar_flutter.R
 internal object NotificationCenter {
     const val CONTENT_CHANNEL = "new_content_v1"
     const val MATCH_CHANNEL = "match_alerts_v1"
+    const val UPDATE_CHANNEL = "app_updates_v2"
+    const val UPDATE_NOTIFICATION_ID = 7001
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannels(
             listOf(
+                NotificationChannel(UPDATE_CHANNEL, "تحديثات التطبيق", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "إشعارات التحديثات والإصدارات الجديدة والتطويرات لتطبيق زقزوقة"
+                    enableVibration(true)
+                    enableLights(true)
+                },
                 NotificationChannel(CONTENT_CHANNEL, "أعمال جديدة", NotificationManager.IMPORTANCE_DEFAULT).apply {
                     description = "تنبيه عند ظهور أفلام أو مسلسلات جديدة في المصادر المتاحة"
+                    enableVibration(true)
                 },
                 NotificationChannel(MATCH_CHANNEL, "المباريات", NotificationManager.IMPORTANCE_HIGH).apply {
                     description = "تنبيه قبل بداية المباريات وعند رصد بدايتها"
+                    enableVibration(true)
+                    enableLights(true)
                 },
             ),
         )
@@ -43,6 +53,19 @@ internal object NotificationCenter {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
         val manager = context.getSystemService(NotificationManager::class.java)
         return manager.getNotificationChannel(channel)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
+    fun postUpdateNotification(context: Context, versionName: String, releaseNotes: String): Boolean {
+        val title = "🚀 تحديث جديد متوفر: زقزوقة $versionName"
+        val body = if (releaseNotes.isNotBlank()) releaseNotes else "يتوفر إصدار أحدث لتحسين استقرار التطبيق والمشاهدة."
+        return post(
+            context = context,
+            id = UPDATE_NOTIFICATION_ID,
+            channel = UPDATE_CHANNEL,
+            title = title,
+            body = body,
+            highPriority = true,
+        )
     }
 
     fun post(context: Context, id: Int, channel: String, title: String, body: String, highPriority: Boolean = false): Boolean {
