@@ -965,6 +965,11 @@ class _RecapsPageState extends State<RecapsPage> {
                     _searchQuery = val.trim();
                     _visibleCount = 45;
                   }),
+                  onSubmitted: (val) {
+                    if (val.trim().isNotEmpty) {
+                      AppTelemetry.trackSearch(query: val.trim(), found: true);
+                    }
+                  },
                   style: const TextStyle(
                     color: _ink,
                     fontSize: 14,

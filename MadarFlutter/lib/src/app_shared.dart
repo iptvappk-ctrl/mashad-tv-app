@@ -69,6 +69,141 @@ class NativeBridge {
     } catch (_) {}
   }
 
+  static Future<Map<String, dynamic>?> checkPlayerStatus() async {
+    try {
+      return await _native.invokeMapMethod<String, dynamic>('player.status');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> installPlayer({String? apkUrl, String? sha256}) async {
+    try {
+      return await _native.invokeMapMethod<String, dynamic>('player.install', {
+        if (apkUrl != null) 'apkUrl': apkUrl,
+        if (sha256 != null) 'sha256': sha256,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> promptPlayerUpdate(
+    BuildContext context, {
+    String? apkUrl,
+    String? sha256,
+    String? versionName,
+    String? releaseNotes,
+  }) async {
+    var busy = false;
+    var hint = '';
+    double? downloadProgress;
+    StreamSubscription<dynamic>? progressSubscription;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            icon: const Icon(Icons.play_circle_fill_rounded, color: _brick, size: 40),
+            title: const Text('مشغل زقزوقة (نسخة الجودات الكاملة)'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  releaseNotes?.trim().isNotEmpty == true
+                      ? releaseNotes!.trim()
+                      : 'يتوفر تحديث جديد لمشغل زقزوقة مع تحكم كامل بجميع الجودات (أقصى توفير، متوسط، أعلى جودة، وتلقائي). اضغط تحديث لتحميله وتثبيته مباشرة داخل التطبيق.',
+                  style: const TextStyle(fontSize: 13, height: 1.5),
+                ),
+                if (hint.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(hint, style: const TextStyle(color: _brick, fontSize: 12)),
+                ],
+                if (busy && downloadProgress != null) ...[
+                  const SizedBox(height: 14),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      value: downloadProgress,
+                      backgroundColor: _card,
+                      valueColor: const AlwaysStoppedAnimation<Color>(_brick),
+                      minHeight: 8,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Center(
+                    child: Text(
+                      'جاري التحميل... ${(downloadProgress! * 100).toInt()}%',
+                      style: const TextStyle(fontSize: 12, color: _muted),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: busy ? null : () => Navigator.of(dialogContext).pop(),
+                child: const Text('إلغاء'),
+              ),
+              FilledButton.icon(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        setDialogState(() {
+                          busy = true;
+                          hint = '';
+                        });
+                        try {
+                          progressSubscription ??= _updateProgress
+                              .receiveBroadcastStream()
+                              .listen((event) {
+                                if (event is! Map) return;
+                                final downloaded = (event['downloadedBytes'] as num?)?.toInt() ?? -1;
+                                final total = (event['totalBytes'] as num?)?.toInt() ?? -1;
+                                if (!dialogContext.mounted) return;
+                                setDialogState(() {
+                                  downloadProgress = (downloaded > 0 && total > 0)
+                                      ? (downloaded / total).clamp(0.0, 1.0)
+                                      : null;
+                                });
+                              });
+
+                          final res = await installPlayer(apkUrl: apkUrl, sha256: sha256);
+                          final status = res?['status'] as String? ?? 'download_failed';
+                          if (status == 'install_started') {
+                            if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+                          } else if (status == 'permission_required') {
+                            setDialogState(() {
+                              busy = false;
+                              hint = 'يلزم السماح بتثبيت التطبيقات من هذا المصدر في الإعدادات.';
+                            });
+                          } else {
+                            setDialogState(() {
+                              busy = false;
+                              hint = 'تعذر التحميل، تأكد من الاتصال وحاول مجدداً.';
+                            });
+                          }
+                        } catch (_) {
+                          setDialogState(() {
+                            busy = false;
+                            hint = 'حدث خطأ أثناء تنزيل التحديث.';
+                          });
+                        }
+                      },
+                icon: const Icon(Icons.download_rounded),
+                label: const Text('تحميل وتثبيت التحديث الآن ⚡'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    await progressSubscription?.cancel();
+  }
+
   static Future<bool> notificationsEnabled() async {
     try {
       final status = await map('notifications.status');

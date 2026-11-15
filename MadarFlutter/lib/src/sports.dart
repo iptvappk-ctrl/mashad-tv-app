@@ -1141,6 +1141,20 @@ Future<void> _launchPlayer(
     _message(context, 'رابط التشغيل غير صالح.');
     return;
   }
+  final category = isLive
+      ? 'بث مباشر'
+      : (title.contains('الحلقة') || title.contains('الموسم'))
+          ? 'مسلسلات'
+          : (title.contains('ملخص'))
+              ? 'ملخصات'
+              : 'أفلام';
+
+  AppTelemetry.trackPlayback(
+    title: title,
+    category: category,
+    event: 'start',
+  );
+
   final opened = await NativeBridge.openPlayer(
     url: url,
     title: title,
@@ -1151,28 +1165,13 @@ Future<void> _launchPlayer(
     isLive: isLive,
   );
   if (!context.mounted || opened) return;
-  await showDialog<void>(
-    context: context,
-    builder: (dialog) => AlertDialog(
-      title: const Text('مشغل زقزوقة مطلوب'),
-      content: const Text(
-        'ثبّت مشغل زقزوقة لفتح الفيديو. إذا كان مثبتًا بالفعل، حدّث المشغل والتطبيق معًا.',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialog),
-          child: const Text('إغلاق'),
-        ),
-        FilledButton(
-          onPressed: () async {
-            Navigator.pop(dialog);
-            await NativeBridge.openPlayerStore();
-          },
-          child: const Text('تحميل المشغل'),
-        ),
-      ],
-    ),
+  AppTelemetry.trackPlayback(
+    title: title,
+    category: category,
+    event: 'error',
+    errorMessage: 'تعذر فتح مشغل الفيديو',
   );
+  await NativeBridge.promptPlayerUpdate(context);
 }
 
 String _absolute(String value, String base) {

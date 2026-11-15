@@ -14,6 +14,7 @@ part 'src/details.dart';
 part 'src/episodes.dart';
 part 'src/recaps.dart';
 part 'src/sports.dart';
+part 'src/telemetry.dart';
 
 const _native = MethodChannel('madar/native');
 const _nativeScraper = NativeScraperService();
@@ -124,6 +125,7 @@ class _UpdatePromptGate extends StatefulWidget {
 class _UpdatePromptGateState extends State<_UpdatePromptGate> {
   Timer? _checkTimer;
   int? _shownVersionCode;
+  int? _shownPlayerVersionCode;
 
   @override
   void initState() {
@@ -137,17 +139,40 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
       final update = await _native.invokeMapMethod<String, dynamic>(
         'updates.check',
       );
-      if (!mounted || update?['available'] != true) return;
-      final code = (update?['versionCode'] as num?)?.toInt();
-      if (code == null || code <= 0 || code == _shownVersionCode) return;
-      _shownVersionCode = code;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showUpdateDialog(Map<String, dynamic>.from(update!));
-      });
+      if (!mounted || update == null) return;
+      final appUpdateAvailable = update['available'] == true;
+      final playerUpdateAvailable = update['playerUpdateAvailable'] == true;
+
+      if (appUpdateAvailable) {
+        final code = (update['versionCode'] as num?)?.toInt();
+        if (code != null && code > 0 && code != _shownVersionCode) {
+          _shownVersionCode = code;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _showUpdateDialog(Map<String, dynamic>.from(update));
+          });
+          return;
+        }
+      }
+
+      if (playerUpdateAvailable) {
+        final pCode = (update['playerVersionCode'] as num?)?.toInt();
+        if (pCode != null && pCode > 0 && pCode != _shownPlayerVersionCode) {
+          _shownPlayerVersionCode = pCode;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              NativeBridge.promptPlayerUpdate(
+                context,
+                apkUrl: update['playerApkUrl'] as String?,
+                sha256: update['playerSha256'] as String?,
+                versionName: update['playerVersionName'] as String?,
+                releaseNotes: update['playerReleaseNotes'] as String?,
+              );
+            }
+          });
+        }
+      }
     } on PlatformException catch (_) {
-      // Update checks are optional; an unavailable network must not block use.
     } catch (_) {
-      // Malformed or unreachable update metadata is ignored safely.
     }
   }
 

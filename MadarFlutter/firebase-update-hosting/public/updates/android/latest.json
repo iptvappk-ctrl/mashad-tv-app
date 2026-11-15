@@ -1,9 +1,18 @@
 {
     "packageName": "com.madar.madar_flutter",
-    "versionCode": 66,
-    "versionName": "1.0.61",
-    "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.61-66/zaqzouka-1.0.61-66.apk",
-    "sha256": "17506200256e1d3fa4efa6664ce83d8293d1db37e428642d378a0175772e6c5a",
+    "versionCode": 69,
+    "versionName": "1.0.64",
+    "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.64-69/zaqzouka-1.0.64-69.apk",
+    "sha256": "4bcd04a9c876ad60ff221cd2bb3a1626b3773d4fb3914cd64268203f3ad6a1e1",
+    "telemetryUrl": "http://192.168.100.2:4040",
     "mandatory": false,
-    "releaseNotes": "إصدار 1 billion: فلترة وعرض مباريات اليوم حصراً، وتحديد القناة الناقلة لكل دوري (beIN Sports 1, 3, 4, 5)، وإتاحة فتح القناة والمشاهدة المباشرة بضغطة واحدة، مع عرض دقيق لحالة المباراة (جارية الآن / تبدأ الساعة كذا / انتهت)."
+    "releaseNotes": "تحديث زقزوقة 1.0.64: إرسال تحديثات المشغل تلقائياً وتثبيتها بنقرة واحدة داخل التطبيق، واستعادة وتفعيل كافة خيارات الجودة الخمسة الذكية للمشغل (أقصى توفير، متوسط، أعلى جودة، تلقائي، ضغط ذكي HD).",
+    "player": {
+        "packageName": "com.madar.player",
+        "versionCode": 18,
+        "versionName": "1.1.3",
+        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.64-69/zaqzouka-player-1.1.18.apk",
+        "sha256": "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39",
+        "releaseNotes": "تحديث مشغل زقزوقة: استعادة وإتاحة كافة خيارات الجودة الكاملة (أقصى توفير، متوازن، أعلى جودة، تلقائي، ضغط ذكي HD) وسلاسة فائقة."
+    }
 }

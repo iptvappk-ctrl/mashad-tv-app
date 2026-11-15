@@ -1,0 +1,52 @@
+{
+  "stats": {
+    "totalInstalls": 1,
+    "firstOpens": 1,
+    "bouncedUsers": 0,
+    "totalSearches": 0,
+    "totalPlays": 0,
+    "playbackErrors": 0
+  },
+  "sessions": [
+    {
+      "id": "sess_1794742112982_5sve5",
+      "deviceId": "9751afb6-e049-46dd-b615-d2c62344d98b",
+      "device": "Xiaomi 2311DRK48G",
+      "deviceType": "phone",
+      "osVersion": "Android 16 (SDK 36)",
+      "country": "مصر EG",
+      "countryCode": "EG",
+      "openTime": "13:28",
+      "closeTime": "13:28",
+      "durationText": "1 دقيقة",
+      "durationMinutes": 1,
+      "lastSection": "بثات الكورة ⚽",
+      "lastContent": "",
+      "status": "closed",
+      "openedAt": "2026-11-15T11:28:32.982Z",
+      "lastSeen": "2026-11-15T11:28:39.073Z",
+      "actionsCount": 4
+    }
+  ],
+  "topContent": [],
+  "searches": [],
+  "errors": [],
+  "activityLog": [
+    {
+      "id": "act_1",
+      "type": "open",
+      "text": "فتح التطبيق من هاتف Xiaomi 2311DRK48G (مصر EG)",
+      "icon": "📱",
+      "time": "13:28",
+      "timestamp": "2026-11-15T11:28:32.982Z"
+    },
+    {
+      "id": "act_2",
+      "type": "nav",
+      "text": "تصفح قسم: بثات الكورة ⚽",
+      "icon": "🧭",
+      "time": "13:28",
+      "timestamp": "2026-11-15T11:28:35.000Z"
+    }
+  ]
+}

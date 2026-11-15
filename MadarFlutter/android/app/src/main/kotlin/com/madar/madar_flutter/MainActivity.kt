@@ -13,6 +13,9 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import android.content.res.Configuration
+import java.util.Locale
+import java.util.UUID
 import org.json.JSONObject
 import com.madar.tv.notifications.NotificationCenter
 import com.madar.tv.notifications.NotificationWorkScheduler
@@ -49,6 +52,20 @@ class MainActivity : FlutterActivity() {
                     }
                     "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), call.argument("backupSourcesJson"), call.argument<Boolean>("live") ?: false, result)
                     "player.store" -> openPlayerStore(result)
+                    "player.status" -> {
+                        val code = inAppUpdateManager.getInstalledPlayerVersionCode()
+                        result.success(
+                            mapOf(
+                                "installed" to (code > 0L),
+                                "versionCode" to code,
+                            )
+                        )
+                    }
+                    "player.install" -> {
+                        val apkUrl = call.argument<String>("apkUrl")
+                        val sha256 = call.argument<String>("sha256")
+                        inAppUpdateManager.downloadAndInstallPlayer(apkUrl, sha256, result)
+                    }
                     "youtube.open" -> openYouTube(call.argument("videoId"), call.argument("watchUrl"), result)
                     "download.start" -> startDownload(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), result)
                     "updates.check" -> inAppUpdateManager.checkForUpdate(result)
@@ -60,6 +77,44 @@ class MainActivity : FlutterActivity() {
                     )
                     "notifications.request" -> requestNotificationPermissionFromUser(result)
                     "notifications.settings" -> openNotificationSettings(result)
+                    "telemetry.deviceInfo" -> {
+                        val manufacturer = Build.MANUFACTURER.replaceFirstChar {
+                            if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString()
+                        }
+                        val model = Build.MODEL
+                        val deviceName = if (model.startsWith(manufacturer, ignoreCase = true)) model else "$manufacturer $model"
+                        val osVersion = "Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
+                        val uiModeManager = getSystemService(UI_MODE_SERVICE) as? android.app.UiModeManager
+                        val isTv = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+                        val country = detectRealCountry()
+                        val language = Locale.getDefault().language
+                        val tzId = java.util.TimeZone.getDefault().id
+
+                        val prefs = getSharedPreferences("madar_telemetry", MODE_PRIVATE)
+                        var deviceId = prefs.getString("device_uuid", null)
+                        var isFirstOpen = false
+                        if (deviceId == null) {
+                            deviceId = UUID.randomUUID().toString()
+                            prefs.edit().putString("device_uuid", deviceId).apply()
+                            isFirstOpen = true
+                        }
+
+                        result.success(
+                            mapOf(
+                                "deviceId" to deviceId,
+                                "device" to deviceName,
+                                "deviceType" to if (isTv) "tv" else "phone",
+                                "osVersion" to osVersion,
+                                "countryCode" to country,
+                                "timezone" to tzId,
+                                "language" to language,
+                                "brand" to Build.BRAND,
+                                "manufacturer" to Build.MANUFACTURER,
+                                "model" to Build.MODEL,
+                                "isNewInstall" to isFirstOpen
+                            )
+                        )
+                    }
                     else -> if (!mediaBridge.handle(call, result)) result.notImplemented()
                 }
             }
@@ -82,6 +137,50 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         if (::inAppUpdateManager.isInitialized) inAppUpdateManager.close()
         super.onDestroy()
+    }
+
+    private fun detectRealCountry(): String {
+        // 1. Check SIM Operator Country (e.g. Vodafone Egypt, Orange, Etisalat, WE)
+        try {
+            val tm = getSystemService(TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+            val simCountry = tm?.simCountryIso?.trim()?.uppercase(Locale.ROOT)
+            if (!simCountry.isNullOrEmpty() && simCountry.length == 2) {
+                return simCountry
+            }
+            val networkCountry = tm?.networkCountryIso?.trim()?.uppercase(Locale.ROOT)
+            if (!networkCountry.isNullOrEmpty() && networkCountry.length == 2) {
+                return networkCountry
+            }
+        } catch (_: Exception) {}
+
+        // 2. Check Device TimeZone (e.g. "Africa/Cairo", "Egypt", "Asia/Riyadh")
+        val tzId = java.util.TimeZone.getDefault().id.lowercase(Locale.ROOT)
+        if (tzId.contains("cairo") || tzId.contains("egypt")) return "EG"
+        if (tzId.contains("riyadh") || tzId.contains("saudi")) return "SA"
+        if (tzId.contains("dubai")) return "AE"
+        if (tzId.contains("baghdad")) return "IQ"
+        if (tzId.contains("casablanca")) return "MA"
+        if (tzId.contains("kuwait")) return "KW"
+        if (tzId.contains("algiers")) return "DZ"
+        if (tzId.contains("qatar") || tzId.contains("doha")) return "QA"
+        if (tzId.contains("amman")) return "JO"
+        if (tzId.contains("beirut")) return "LB"
+        if (tzId.contains("tunis")) return "TN"
+        if (tzId.contains("khartoum")) return "SD"
+        if (tzId.contains("tripoli")) return "LY"
+        if (tzId.contains("damascus")) return "SY"
+        if (tzId.contains("muscat")) return "OM"
+        if (tzId.contains("bahrain") || tzId.contains("manama")) return "BH"
+        if (tzId.contains("jerusalem") || tzId.contains("gaza")) return "PS"
+
+        // 3. Fallback: check GMT Offset for Egypt (GMT+2 / GMT+3 with daylight saving)
+        val rawOffsetHours = java.util.TimeZone.getDefault().rawOffset / (1000 * 60 * 60)
+        val localeCountry = Locale.getDefault().country.trim().uppercase(Locale.ROOT)
+        if (localeCountry == "US" && (rawOffsetHours == 2 || rawOffsetHours == 3)) {
+            return "EG"
+        }
+
+        return if (localeCountry.isNotEmpty()) localeCountry else "EG"
     }
 
     private fun requestNotificationPermissionOnce() {

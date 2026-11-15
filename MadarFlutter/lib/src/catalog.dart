@@ -20,12 +20,14 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(AppTelemetry.initialize());
     unawaited(_restoreFavorites());
     unawaited(_refreshNotificationStatus());
   }
 
   @override
   void dispose() {
+    AppTelemetry.endSession();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -34,6 +36,9 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(_refreshNotificationStatus());
+      AppTelemetry.onAppResumed();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      AppTelemetry.endSession();
     }
   }
 
@@ -219,6 +224,15 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
           _tab = index;
           if (index == 1) _recapsBuilt = true;
           if (index == 2) _sportsBuilt = true;
+          const tabNames = [
+            'أفلام ومسلسلات 🎬',
+            'ملخصات 🍿',
+            'بثات الكورة ⚽',
+            'المفضلة ❤️',
+          ];
+          if (index >= 0 && index < tabNames.length) {
+            AppTelemetry.updateSection(tabNames[index]);
+          }
         }),
         destinations: const [
           NavigationDestination(
@@ -609,6 +623,13 @@ class _CatalogPageState extends State<CatalogPage> {
       });
       if (query.isEmpty) _rememberSnapshot(merged);
       if (merged.isNotEmpty) widget.onItems(merged);
+      if (query.isNotEmpty) {
+        AppTelemetry.trackSearch(
+          query: query,
+          found: merged.isNotEmpty,
+          resultsCount: merged.length,
+        );
+      }
     } catch (error) {
       if (mounted && request == _request)
         setState(() {
@@ -714,8 +735,11 @@ class _CatalogPageState extends State<CatalogPage> {
               autofocus: true,
               textInputAction: TextInputAction.search,
               onChanged: _onSearchChanged,
-              onSubmitted: (_) {
+              onSubmitted: (queryVal) {
                 _debounce?.cancel();
+                if (queryVal.trim().isNotEmpty) {
+                  AppTelemetry.trackSearch(query: queryVal.trim());
+                }
                 _load(reset: true);
               },
               decoration: InputDecoration(

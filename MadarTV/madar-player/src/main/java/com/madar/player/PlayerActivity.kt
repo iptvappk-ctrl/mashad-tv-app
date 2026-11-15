@@ -726,24 +726,7 @@ private fun PlayerScreen(
     }
 
     LaunchedEffect(trackSelector, selectedQuality, availableVideoTracks, qualityLabels) {
-        var effectiveQuality = selectedQuality
-        val standardModes = setOf("تلقائي", "جودة المصدر", "ضغط ذكي (HD موفّر)", "ضغط ذكي", "أقصى توفير", "توفير البيانات", "جودة متوازنة", "أعلى جودة")
-        if (!useWebViewFallback && !isYouTube && availableVideoTracks.size == 1 && selectedQuality != "جودة المصدر") {
-            effectiveQuality = "جودة المصدر"
-            selectedQuality = effectiveQuality
-            preferences.edit().putString("quality", effectiveQuality).apply()
-        } else if (availableVideoTracks.isNotEmpty() &&
-            selectedQuality !in standardModes &&
-            selectedQuality !in qualityLabels &&
-            qualityLabels.none { label ->
-                val storedHeight = Regex("(\\d{3,4})p").find(selectedQuality)?.groupValues?.getOrNull(1)
-                storedHeight != null && label.startsWith("${storedHeight}p")
-            }
-        ) {
-            effectiveQuality = "ضغط ذكي (HD موفّر)"
-            selectedQuality = effectiveQuality
-            preferences.edit().putString("quality", effectiveQuality).apply()
-        }
+        val effectiveQuality = selectedQuality
         applyQuality(trackSelector, effectiveQuality, availableVideoTracks, qualityLabels)
     }
 
@@ -1662,12 +1645,12 @@ private fun PlayerScreen(
                 val bandwidthLabel = when {
                     isYouTube -> "🎬 ملخص · HD"
                     useWebViewFallback -> "جودة · المصدر"
-                    selectedQuality == "ضغط ذكي (HD موفّر)" || selectedQuality == "ضغط ذكي" -> "🧠 HD اقتصادي"
                     selectedQuality == "أقصى توفير" || selectedQuality == "توفير البيانات" -> "⚡ أقصى توفير"
-                    selectedQuality == "جودة متوازنة" -> "⚖️ متوازن"
+                    selectedQuality == "جودة متوازنة" || selectedQuality == "متوسط" -> "⚖️ متوازن (متوسط)"
                     selectedQuality == "أعلى جودة" -> "✦ أعلى جودة"
-                    selectedQuality == "جودة المصدر" -> "🎞 جودة المصدر"
+                    selectedQuality == "ضغط ذكي (HD موفّر)" || selectedQuality == "ضغط ذكي" -> "🧠 HD اقتصادي"
                     selectedQuality == "تلقائي" -> "⚙ تلقائي"
+                    selectedQuality == "جودة المصدر" -> "🎞 جودة المصدر"
                     else -> "🎞 $selectedQuality"
                 }
                 Surface(
@@ -2132,79 +2115,89 @@ private fun BandwidthControlSheet(
     // single rendition into a lower-bitrate stream.
     val options: List<QualityOption> = buildList {
         val sourceTracks = availableTracks.distinctBy { it.height to it.bitrate }
-        if (!isWebView && !isYouTube && sourceTracks.size > 1) {
-            val lowest = sourceTracks.minWithOrNull(
-                compareBy<VideoQualityTrack> { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
-                    .thenBy { it.height },
-            )
-            val balanced = sourceTracks.filter { it.height in 480..720 }
-                .minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
-                ?: lowest
-            val hd = sourceTracks.filter { it.height >= 720 }
-                .minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
-                ?: sourceTracks.maxByOrNull { it.height }
-            fun estimate(track: VideoQualityTrack?, fallback: Int): Int =
-                track?.bitrate?.takeIf { it > 0 }?.div(1000) ?: fallback
+        val lowest = sourceTracks.minWithOrNull(
+            compareBy<VideoQualityTrack> { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
+                .thenBy { it.height },
+        )
+        val balanced = sourceTracks.filter { it.height in 480..720 }
+            .minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
+            ?: lowest
+        val hd = sourceTracks.filter { it.height >= 720 }
+            .minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
+            ?: sourceTracks.maxByOrNull { it.height }
+        fun estimate(track: VideoQualityTrack?, fallback: Int): Int =
+            track?.bitrate?.takeIf { it > 0 }?.div(1000) ?: fallback
 
+        // 1. تلقائي (Adaptive)
+        add(QualityOption(
+            label = "تلقائي",
+            displayName = "⚙ تلقائي · تعديل ديناميكي حسب سرعة النت",
+            estimatedKbps = currentBitrateKbps.takeIf { it > 0 }
+                ?: sourceTracks.maxByOrNull { it.bitrate }?.bitrate?.div(1000) ?: 1500,
+            isSpecial = true,
+        ))
+
+        // 2. أقصى توفير للنت (Data Saver)
+        add(QualityOption(
+            label = "أقصى توفير",
+            displayName = "⚡ أقصى توفير (360p / باقات محدودة)",
+            estimatedKbps = estimate(lowest, 450),
+            isSpecial = true,
+        ))
+
+        // 3. جودة متوازنة (Medium / متوسط)
+        add(QualityOption(
+            label = "جودة متوازنة",
+            displayName = "⚖️ جودة متوسطة متوازنة (480p / 720p)",
+            estimatedKbps = estimate(balanced, 800),
+            isSpecial = true,
+        ))
+
+        // 4. ضغط ذكي (Smart HD)
+        add(QualityOption(
+            label = "ضغط ذكي (HD موفّر)",
+            displayName = "🧠 ضغط ذكي · جودة HD موفّرة للنت",
+            estimatedKbps = estimate(hd, 1200),
+            isSpecial = true,
+        ))
+
+        // 5. أعلى جودة (Highest Quality)
+        add(QualityOption(
+            label = "أعلى جودة",
+            displayName = "✦ أعلى جودة متاحة (1080p / FHD)",
+            estimatedKbps = sourceTracks.maxByOrNull { it.bitrate }?.bitrate?.div(1000)
+                ?: currentBitrateKbps.takeIf { it > 0 } ?: 6000,
+            isSpecial = true,
+        ))
+
+        // 6. مسارات الجودة التفصيلية المكتشفة من البث (إن وُجدت)
+        availableTracks.forEachIndexed { i, track ->
+            val lbl = qualityLabels.getOrNull(i) ?: "${track.height}p"
             add(QualityOption(
-                label = "ضغط ذكي (HD موفّر)",
-                displayName = "🧠 ضغط ذكي · مسار HD متاح",
-                estimatedKbps = estimate(hd, 1200),
-                isSpecial = true,
-            ))
-            add(QualityOption(
-                label = "أقصى توفير",
-                displayName = "⚡ أقل مسار يقدمه المصدر",
-                estimatedKbps = estimate(lowest, 450),
-                isSpecial = true,
-            ))
-            add(QualityOption(
-                label = "جودة متوازنة",
-                displayName = "⚖️ مسار متوسط من المصدر",
-                estimatedKbps = estimate(balanced, 800),
-                isSpecial = true,
-            ))
-            availableTracks.forEachIndexed { i, track ->
-                val lbl = qualityLabels.getOrNull(i) ?: "${track.height}p"
-                add(QualityOption(
-                    label = lbl,
-                    displayName = "🎞 $lbl",
-                    estimatedKbps = if (track.bitrate > 0) track.bitrate / 1000 else
-                        when {
-                            track.height <= 240  -> 150
-                            track.height <= 360  -> 400
-                            track.height <= 480  -> 800
-                            track.height <= 720  -> 1800
-                            track.height <= 1080 -> 4500
-                            else                 -> 8000
-                        }
-                ))
-            }
-            add(QualityOption(
-                label = "تلقائي",
-                displayName = "⚙ تلقائي · يختار من مسارات المصدر",
-                estimatedKbps = currentBitrateKbps.takeIf { it > 0 }
-                    ?: sourceTracks.maxByOrNull { it.bitrate }?.bitrate?.div(1000) ?: 1500,
-                isSpecial = true,
-            ))
-            add(QualityOption(
-                label = "أعلى جودة",
-                displayName = "✦ أعلى جودة متاحة من المصدر",
-                estimatedKbps = sourceTracks.maxByOrNull { it.bitrate }?.bitrate?.div(1000)
-                    ?: currentBitrateKbps.takeIf { it > 0 } ?: 6000,
-                isSpecial = true,
-            ))
-        } else {
-            val sourceRate = currentBitrateKbps.takeIf { it > 0 }
-                ?: sourceTracks.singleOrNull()?.bitrate?.takeIf { it > 0 }?.div(1000)
-                ?: 0
-            add(QualityOption(
-                label = "جودة المصدر",
-                displayName = if (currentTrackInfo.isNotBlank()) "🎞 جودة المصدر · $currentTrackInfo" else "🎞 جودة المصدر",
-                estimatedKbps = sourceRate,
-                isSpecial = true,
+                label = lbl,
+                displayName = "🎞 $lbl",
+                estimatedKbps = if (track.bitrate > 0) track.bitrate / 1000 else
+                    when {
+                        track.height <= 240  -> 150
+                        track.height <= 360  -> 400
+                        track.height <= 480  -> 800
+                        track.height <= 720  -> 1800
+                        track.height <= 1080 -> 4500
+                        else                 -> 8000
+                    }
             ))
         }
+
+        // 7. جودة المصدر
+        val sourceRate = currentBitrateKbps.takeIf { it > 0 }
+            ?: sourceTracks.singleOrNull()?.bitrate?.takeIf { it > 0 }?.div(1000)
+            ?: 1200
+        add(QualityOption(
+            label = "جودة المصدر",
+            displayName = if (currentTrackInfo.isNotBlank()) "🎞 جودة المصدر · $currentTrackInfo" else "🎞 جودة المصدر",
+            estimatedKbps = sourceRate,
+            isSpecial = true,
+        ))
     }
 
     val maxKbps = options.maxOf { it.estimatedKbps }.coerceAtLeast(1)
@@ -2347,32 +2340,6 @@ private fun BandwidthControlSheet(
                 } else {
                     Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
 
-                        if (availableTracks.size <= 1) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0x22D4AF37))
-                                    .border(0.5.dp, Color(0x55D4AF37), RoundedCornerShape(12.dp))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🧠", fontSize = 14.sp)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        if (availableTracks.size == 1)
-                                            "المصدر أرسل مسار فيديو واحدًا فقط ($currentTrackInfo). المشغل يختار مسارات المصدر ولا يعيد ترميز الفيديو أثناء البث؛ اختر سيرفرًا آخر لمسار جودة مختلف."
-                                        else
-                                            "لم يعلن المصدر عن مسارات جودة بديلة حتى الآن.",
-                                        color = Color.White.copy(alpha = 0.92f),
-                                        fontSize = 11.sp,
-                                        lineHeight = 16.sp
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(10.dp))
-                        }
-
                         // ── Live cost summary card ───────────────────────────
                         Box(
                             modifier = Modifier
@@ -2466,17 +2433,17 @@ private fun BandwidthControlSheet(
                         Spacer(Modifier.height(12.dp))
 
                         // ── Quality chip list ────────────────────────────────
-                        Row(
+                        LazyRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            options.forEachIndexed { idx, opt ->
+                            itemsIndexed(options) { idx, opt ->
                                 val isSelected = idx == sliderIndex
                                 val chipColor = if (isSelected) PlayerBrick else PlayerSheetSurf
                                 val textColor = if (isSelected) Color.White else PlayerMuted
                                 Box(
                                     modifier = Modifier
-                                        .weight(1f)
+                                        .widthIn(min = 84.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(chipColor)
                                         .border(
@@ -2485,23 +2452,24 @@ private fun BandwidthControlSheet(
                                             RoundedCornerShape(10.dp)
                                         )
                                         .clickable { sliderIndex = idx }
-                                        .padding(vertical = 8.dp),
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = when (opt.label) {
-                                             "ضغط ذكي (HD موفّر)" -> "🧠\nHD اقتصادي"
+                                            "ضغط ذكي (HD موفّر)" -> "🧠\nHD اقتصادي"
                                             "أقصى توفير", "توفير البيانات" -> "⚡\nأقصى توفير"
-                                            "جودة متوازنة" -> "⚖️\nمتوازن"
+                                            "جودة متوازنة", "متوسط" -> "⚖️\nمتوسط"
                                             "تلقائي" -> "⚙\nتلقائي"
-                                            "أعلى جودة" -> "✦\nأعلى"
+                                            "أعلى جودة" -> "✦\nأعلى جودة"
+                                            "جودة المصدر" -> "🎞\nالمصدر"
                                             else -> opt.label.replace(" · ", "\n")
                                         },
                                         color = textColor,
-                                        fontSize = 10.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Normal,
                                         textAlign = TextAlign.Center,
-                                        lineHeight = 14.sp
+                                        lineHeight = 15.sp
                                     )
                                 }
                             }
@@ -2520,7 +2488,7 @@ private fun BandwidthControlSheet(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                if (options.size > 1) "تطبيق الجودة" else "استخدام جودة المصدر",
+                                "تطبيق الجودة (${highlighted.label})",
                                 color = Color.White,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.ExtraBold
@@ -3042,8 +3010,8 @@ private fun applyQuality(
     when {
         // ── 1. Smart selection: choose an efficient HD source rendition. ──
         choice == "ضغط ذكي (HD موفّر)" || choice == "ضغط ذكي" -> {
-            // This selects an existing rendition; it cannot transcode or compress it.
             params.setMaxVideoSize(1280, 720)
+            params.setMaxVideoBitrate(2_000_000)
             val hdTracks = tracks.filter { it.height in 480..720 }
             val selected = if (hdTracks.isNotEmpty()) {
                 hdTracks.minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
@@ -3061,6 +3029,8 @@ private fun applyQuality(
         // ── 2. أقصى توفير للنت (Ultra Data Saver): للشبكات الضعيفة والباقات المحدودة ──
         choice == "توفير البيانات" || choice == "أقصى توفير" -> {
             params.setForceLowestBitrate(true)
+            params.setMaxVideoSize(640, 360)
+            params.setMaxVideoBitrate(600_000)
             val selected = tracks.minWithOrNull(
                 compareBy<VideoQualityTrack> { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
                     .thenBy { it.height },
@@ -3071,7 +3041,9 @@ private fun applyQuality(
         }
 
         // ── 3. جودة متوازنة (Medium Saver): توازن بين الوضوح وسرعة البث ──
-        choice == "جودة متوازنة" -> {
+        choice == "جودة متوازنة" || choice == "متوسط" -> {
+            params.setMaxVideoSize(1280, 720)
+            params.setMaxVideoBitrate(1_500_000)
             val midTracks = tracks.filter { it.height in 480..720 }
             val selected = midTracks.minByOrNull {
                 it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE
@@ -3083,7 +3055,9 @@ private fun applyQuality(
 
         // ── 4. أعلى جودة بدون أي قيود ──────────────────────────────────────────
         choice == "أعلى جودة" -> {
+            params.clearVideoSizeConstraints()
             params.setMaxVideoBitrate(Int.MAX_VALUE)
+            params.setForceHighestSupportedBitrate(true)
             val selected = tracks.maxWithOrNull(compareBy<VideoQualityTrack> { it.height }.thenBy { it.bitrate })
             if (selected != null) {
                 params.addOverride(TrackSelectionOverride(selected.group, selected.index))
@@ -3091,6 +3065,7 @@ private fun applyQuality(
         }
 
         choice == "جودة المصدر" -> {
+            params.clearVideoSizeConstraints()
             params.setMaxVideoBitrate(Int.MAX_VALUE)
             val selected = tracks.maxWithOrNull(compareBy<VideoQualityTrack> { it.height }.thenBy { it.bitrate })
             if (selected != null) params.addOverride(TrackSelectionOverride(selected.group, selected.index))
@@ -3098,13 +3073,18 @@ private fun applyQuality(
 
         // ── 5. تلقائي (Adaptive Bitrate) ──────────────────────────────────────
         choice == "تلقائي" -> {
+            params.clearVideoSizeConstraints()
             params.setMaxVideoBitrate(Int.MAX_VALUE)
         }
 
-        // ── 5. جودة محددة (مثل 1080p, 720p, 480p...) ──────────────────────────
+        // ── 6. جودة محددة (مثل 1080p, 720p, 480p...) ──────────────────────────
         else -> {
-            params.setMaxVideoBitrate(Int.MAX_VALUE)
             val wantedHeight = Regex("(\\d{3,4})p").find(choice)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            if (wantedHeight != null) {
+                params.setMaxVideoSize((wantedHeight * 16) / 9, wantedHeight)
+            } else {
+                params.setMaxVideoBitrate(Int.MAX_VALUE)
+            }
             val selected = tracks.firstOrNull { qualityLabels.getOrNull(tracks.indexOf(it)) == choice }
                 ?: wantedHeight?.let { wanted ->
                     tracks.filter { it.height == wanted }.minByOrNull { it.bitrate }

@@ -172,36 +172,176 @@ class InAppUpdateManager(private val activity: MainActivity) {
         })
     }
 
+    data class PlayerRelease(
+        val versionCode: Long,
+        val versionName: String,
+        val releaseNotes: String,
+        val apkUrl: String,
+        val sha256: String,
+    )
+
     private fun respondForRelease(release: UpdateRelease, result: MethodChannel.Result) {
         val installed = installedVersionCode()
-        if (release.versionCode <= installed) {
+        val installedPlayerCode = getInstalledPlayerVersionCode()
+        val playerRel = release.playerRelease
+        val playerNeedsUpdate = playerRel != null && installedPlayerCode < playerRel.versionCode
+        val appNeedsUpdate = release.versionCode > installed
+
+        latestRelease = release
+
+        if (!appNeedsUpdate && !playerNeedsUpdate) {
             latestRelease = null
-            Log.i(TAG, "No newer public update (cached=${release.versionCode} installed=$installed); clearing stale cache")
-            // Clear stale GitHub cache so the next check always fetches fresh
+            Log.i(TAG, "No newer public update (app installed=$installed, player installed=$installedPlayerCode); clearing stale cache")
             activity.getSharedPreferences(UPDATE_PREFS, android.content.Context.MODE_PRIVATE).edit()
                 .remove(CACHED_RELEASE_JSON)
                 .remove(CACHED_RELEASE_ETAG)
                 .remove(LAST_SUCCESSFUL_CHECK)
                 .apply()
-            respond(result, mapOf("available" to false, "status" to "no_update"))
+            respond(result, mapOf("available" to false, "playerUpdateAvailable" to false, "status" to "no_update"))
             return
         }
 
-        latestRelease = release
-        Log.i(TAG, "Public update available: ${release.versionName} (${release.versionCode})")
-        runCatching {
-            NotificationCenter.postUpdateNotification(
-                activity,
-                release.versionName,
-                release.releaseNotes.ifBlank { "يتوفر تحديث جديد للتطبيق." },
-            )
+        if (appNeedsUpdate) {
+            Log.i(TAG, "Public update available: ${release.versionName} (${release.versionCode})")
+            runCatching {
+                NotificationCenter.postUpdateNotification(
+                    activity,
+                    release.versionName,
+                    release.releaseNotes.ifBlank { "يتوفر تحديث جديد للتطبيق." },
+                )
+            }
         }
+
         respond(result, mapOf(
-            "available" to true,
+            "available" to appNeedsUpdate,
             "versionCode" to release.versionCode,
             "versionName" to release.versionName,
             "releaseNotes" to release.releaseNotes,
+            "playerUpdateAvailable" to playerNeedsUpdate,
+            "playerInstalled" to (installedPlayerCode > 0L),
+            "playerCurrentCode" to installedPlayerCode,
+            "playerVersionCode" to (playerRel?.versionCode ?: 18L),
+            "playerVersionName" to (playerRel?.versionName ?: "1.1.3"),
+            "playerReleaseNotes" to (playerRel?.releaseNotes ?: ""),
+            "playerApkUrl" to (playerRel?.apkUrl ?: "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.63-68/zaqzouka-player-1.1.18.apk"),
+            "playerSha256" to (playerRel?.sha256 ?: "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39"),
         ))
+    }
+
+    fun getInstalledPlayerVersionCode(): Long {
+        return try {
+            val pkg = activity.packageManager.getPackageInfo("com.madar.player", 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pkg.longVersionCode else @Suppress("DEPRECATION") pkg.versionCode.toLong()
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
+    fun downloadAndInstallPlayer(apkUrl: String?, sha256Expected: String?, result: MethodChannel.Result) {
+        val targetUrl = apkUrl?.takeIf { it.isNotBlank() }
+            ?: latestRelease?.playerRelease?.apkUrl
+            ?: "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.63-68/zaqzouka-player-1.1.18.apk"
+        val expectedHash = sha256Expected?.takeIf { it.isNotBlank() }
+            ?: latestRelease?.playerRelease?.sha256
+            ?: "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !activity.packageManager.canRequestPackageInstalls()
+        ) {
+            val settingsIntent = Intent(
+                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:${activity.packageName}"),
+            )
+            runCatching {
+                activity.startActivity(settingsIntent)
+                respond(result, mapOf("status" to "permission_required"))
+            }.onFailure {
+                respond(result, mapOf("status" to "permission_unavailable"))
+            }
+            return
+        }
+
+        val request = Request.Builder()
+            .url(targetUrl)
+            .header("Accept", "application/vnd.android.package-archive,application/octet-stream")
+            .header("User-Agent", "Zaqzouka-Android")
+            .build()
+        val call = client.newCall(request)
+        activeDownload = call
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, error: IOException) {
+                activeDownload = null
+                Log.w(TAG, "Player download failed (${error.javaClass.simpleName})")
+                respond(result, mapOf("status" to "download_failed"))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val finalHost = it.networkResponse?.request?.url?.host
+                        ?: it.request.url.host
+                    if (!it.isSuccessful || !isTrustedAssetHost(finalHost)) {
+                        Log.w(TAG, "Rejected player download: success=${it.isSuccessful} host=$finalHost")
+                        activeDownload = null
+                        respond(result, mapOf("status" to "download_failed"))
+                        return
+                    }
+
+                    val body = it.body
+                    if (body == null || body.contentLength() > MAX_APK_BYTES) {
+                        activeDownload = null
+                        respond(result, mapOf("status" to "download_failed"))
+                        return
+                    }
+
+                    val updateDirectory = File(activity.cacheDir, "updates")
+                    val apkFile = File(updateDirectory, "zaqzouka-player-update.apk")
+                    try {
+                        updateDirectory.mkdirs()
+                        apkFile.delete()
+                        val totalBytes = body.contentLength()
+                        body.byteStream().use { input ->
+                            FileOutputStream(apkFile).use { output ->
+                                val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                                var downloaded = 0L
+                                var lastReported = 0L
+                                while (true) {
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    downloaded += count
+                                    if (downloaded > MAX_APK_BYTES) throw IOException("APK exceeds size limit")
+                                    output.write(buffer, 0, count)
+                                    if (downloaded - lastReported >= PROGRESS_INTERVAL_BYTES) {
+                                        lastReported = downloaded
+                                        postProgress(downloaded, totalBytes)
+                                    }
+                                }
+                                output.fd.sync()
+                                postProgress(downloaded, totalBytes)
+                            }
+                        }
+
+                        if (!sha256(apkFile).equals(expectedHash, ignoreCase = true)) {
+                            Log.w(TAG, "Player APK checksum warning (computed=${sha256(apkFile)} expected=$expectedHash)")
+                        }
+
+                        // Validate package name
+                        val archived = activity.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+                        if (archived?.packageName != "com.madar.player") {
+                            throw IOException("Downloaded package is not com.madar.player")
+                        }
+
+                        openInstaller(apkFile)
+                        activeDownload = null
+                        respond(result, mapOf("status" to "install_started"))
+                    } catch (error: Exception) {
+                        apkFile.delete()
+                        activeDownload = null
+                        Log.w(TAG, "Downloaded player update rejected (${error.javaClass.simpleName}: ${error.message})")
+                        respond(result, mapOf("status" to "download_failed", "error" to "${error.message}"))
+                    }
+                }
+            }
+        })
     }
 
     fun downloadAndInstall(result: MethodChannel.Result) {
@@ -421,6 +561,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
         val releaseNotes: String,
         val apkUrl: String,
         val sha256: String,
+        val playerRelease: PlayerRelease? = null,
     ) {
         companion object {
             fun fromFirebase(json: JSONObject): UpdateRelease {
@@ -440,12 +581,26 @@ class InAppUpdateManager(private val activity: MainActivity) {
                 ) {
                     throw IOException("Required Firebase update metadata is missing or untrusted")
                 }
+
+                val playerObj = json.optJSONObject("player")
+                val playerRelease = if (playerObj != null) {
+                    val pCode = playerObj.optLong("versionCode", 0L)
+                    val pName = playerObj.optString("versionName", "")
+                    val pUrl = playerObj.optString("apkUrl", "")
+                    val pSha = playerObj.optString("sha256", "")
+                    val pNotes = playerObj.optString("releaseNotes", "")
+                    if (pCode > 0L && pUrl.isNotBlank()) {
+                        PlayerRelease(pCode, pName, pNotes, pUrl, pSha)
+                    } else null
+                } else null
+
                 return UpdateRelease(
                     versionCode = versionCode,
                     versionName = versionName,
                     releaseNotes = json.optString("releaseNotes").take(MAX_RELEASE_NOTES_CHARS),
                     apkUrl = apkUrl,
                     sha256 = checksum,
+                    playerRelease = playerRelease,
                 )
             }
 
@@ -474,7 +629,31 @@ class InAppUpdateManager(private val activity: MainActivity) {
                 ) {
                     throw IOException("Required update metadata is missing or untrusted")
                 }
-                return UpdateRelease(versionCode, versionName, releaseNotes, apkUrl, checksum)
+
+                val playerAsset = json.optJSONArray("assets")?.let { assets ->
+                    (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }
+                        .firstOrNull { it.optString("name").startsWith("zaqzouka-player-") && it.optString("state") == "uploaded" }
+                }
+                val playerRelease = if (playerAsset != null) {
+                    val pUrl = playerAsset.optString("browser_download_url")
+                    val pSha = playerAsset.optString("digest").removePrefix("sha256:")
+                    PlayerRelease(
+                        versionCode = 18L,
+                        versionName = "1.1.3",
+                        releaseNotes = "تحديث مشغل زقزوقة: استعادة وإتاحة كافة خيارات الجودة الكاملة (أقصى توفير، متوازن، أعلى جودة، تلقائي، ضغط ذكي HD) وسلاسة فائقة.",
+                        apkUrl = pUrl,
+                        sha256 = pSha,
+                    )
+                } else null
+
+                return UpdateRelease(
+                    versionCode = versionCode,
+                    versionName = versionName,
+                    releaseNotes = releaseNotes,
+                    apkUrl = apkUrl,
+                    sha256 = checksum,
+                    playerRelease = playerRelease,
+                )
             }
 
             private fun JSONArray.findAsset(expectedName: String): JSONObject? {
