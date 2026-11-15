@@ -1,0 +1,9 @@
+{
+  "name": "zaqzouka-telemetry-api",
+  "version": "1.0.0",
+  "description": "Zaqzouka TV Telemetry & Dashboard API - deployed on Vercel with Firebase RTDB",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "firebase-admin": "^13.4.0"
+  }
+}

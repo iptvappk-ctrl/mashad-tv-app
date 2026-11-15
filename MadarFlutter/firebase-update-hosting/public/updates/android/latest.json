@@ -1,18 +1,26 @@
 {
     "packageName": "com.madar.madar_flutter",
-    "versionCode": 70,
-    "versionName": "1.0.65",
-    "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.65-70/zaqzouka-1.0.65-70.apk",
-    "sha256": "911b2ed8b467d228f20f5074a2d32f03b38c512d1c78a3044613679991f65f0d",
-    "telemetryUrl": "http://192.168.100.2:4040",
+    "versionCode": 71,
+    "versionName": "1.0.66",
+    "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.66-71/zaqzouka-1.0.66-71.apk",
+    "sha256": "21f9fb9853d139ce8ee0ecf2ca307e176d0f89b86c25da079b15b42468fee0c0",
+    "telemetryUrl": "https://zaqzouka-dashboard-api.vercel.app",
     "mandatory": false,
-    "releaseNotes": "تحديث زقزوقة 1.0.65: إضافة زر التحديث السريع بجانب البحث مع نقطة حمراء، دعم استئناف التحميل المقطوع تلقائياً، وتثبيت الملف المحمل بضغطة واحدة مباشرة.",
+    "releaseNotes": "تحديث زقزوقة 1.0.66: ربط سحابي عالمي لنظام التحليلات واستقبال بيانات المشاهدة الحية، مع مشغل زقزوقة 1.1.19 بالوضع الأفقي الإجباري التلقائي وحساب دقيق لمعدل استهلاك الجودة.",
     "player": {
         "packageName": "com.madar.player",
         "versionCode": 19,
         "versionName": "1.1.19",
-        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.65-70/zaqzouka-player-1.1.19.apk",
+        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.66-71/zaqzouka-player-1.1.19.apk",
         "sha256": "047c58a70b867192e678157ab20fd24fb1d5a7fcce42e390a850d767c935afc7",
         "releaseNotes": "تحديث مشغل زقزوقة 1.1.19: تشغيل أفقي كامل تلقائي (Landscape) للأفلام والمسلسلات، حساب ديناميكي فوري للاستهلاك والتكلفة لكل جودة، وإلغاء الأزرار الرديئة (240p) مع توضيح جودة المصدر."
+    },
+    "admin": {
+        "packageName": "com.zaqzouka.admin",
+        "versionCode": 1,
+        "versionName": "1.0.0",
+        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.66-71/zaqzouka-admin.apk",
+        "sha256": "c24be7728514fd840674453f610250224f3b1fd8f232ae96eca6fd258c18e0d6",
+        "description": "تطبيق فلاتر الرسمي لمنظومة تحليلات زقزوقة TV لمتابعة الجلسات الحية وساعات الذروة وإحصائيات المستخدمين مباشرة من هاتفك."
     }
 }

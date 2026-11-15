@@ -21,16 +21,18 @@ class AppTelemetry {
   static bool _initialized = false;
 
   // Candidate telemetry endpoints:
-  // 1. Local Wi-Fi IP (for physical phones on same Wi-Fi)
-  // 2. Android Emulator loopback
-  // 3. Localhost
+  // 1. Production Cloud API (Vercel Serverless + Firebase RTDB)
+  // 2. Local Wi-Fi IP (for local testing)
+  // 3. Android Emulator loopback
+  // 4. Localhost
   static const List<String> _candidateHosts = [
+    'https://zaqzouka-dashboard-api.vercel.app',
     'http://192.168.100.2:4040',
     'http://10.0.2.2:4040',
     'http://127.0.0.1:4040',
   ];
 
-  static String _resolvedBaseUrl = 'http://192.168.100.2:4040';
+  static String _resolvedBaseUrl = 'https://zaqzouka-dashboard-api.vercel.app';
 
   /// Initializes device telemetry and reports session start.
   static Future<void> initialize() async {
