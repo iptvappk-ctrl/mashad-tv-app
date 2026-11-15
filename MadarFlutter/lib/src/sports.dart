@@ -14,6 +14,7 @@ class _SportsPageState extends State<SportsPage> {
   String? _loadingId, _error;
   bool _loading = true, _refreshing = false;
   bool _scoreRefreshing = false;
+  bool _todayOnly = true;
 
   @override
   void initState() {
@@ -197,39 +198,270 @@ class _SportsPageState extends State<SportsPage> {
     }),
   );
 
-  Widget _eventsList() {
-    if (_events.isEmpty && _loading) return const _SportsMatchSkeleton();
-    if (_events.isEmpty && _footballMatches.isNotEmpty) {
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(14),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Text(
-                'جدول المباريات متاح، لكن مزود البث لم يرسل أحداثًا أو روابط مباراة مباشرة الآن.',
-                textAlign: TextAlign.right,
-                style: const TextStyle(color: _muted, height: 1.5),
+  bool _isMatchToday(Map<String, dynamic> match) {
+    final state = _text(match['state']);
+    if (state == 'in') return true;
+
+    final kickoff = _integer(match['kickoffEpochMs']);
+    final now = DateTime.now();
+    if (kickoff > 0) {
+      final dt = DateTime.fromMillisecondsSinceEpoch(kickoff).toLocal();
+      return dt.year == now.year && dt.month == now.month && dt.day == now.day;
+    }
+
+    final dateStr = _text(match['matchDate']);
+    if (dateStr.isNotEmpty) {
+      final parsed = DateTime.tryParse(dateStr)?.toLocal();
+      if (parsed != null) {
+        return parsed.year == now.year && parsed.month == now.month && parsed.day == now.day;
+      }
+    }
+
+    final timeOrStatus = _text(match['timeOrStatus']);
+    return timeOrStatus.contains('اليوم') || timeOrStatus.contains('تبدأ');
+  }
+
+  List<Map<String, dynamic>> _todayMatches() =>
+      _footballMatches.where(_isMatchToday).toList();
+
+  String _channelForLeague(String leagueName) {
+    final lower = leagueName.toLowerCase();
+    if (lower.contains('إنجليزي') || lower.contains('premier')) return 'beIN SPORTS 1 HD';
+    if (lower.contains('إسباني') || lower.contains('la liga')) return 'beIN SPORTS 3 HD';
+    if (lower.contains('فرنسي') || lower.contains('ligue 1')) return 'beIN SPORTS 4 HD';
+    if (lower.contains('ألماني') || lower.contains('bundesliga')) return 'beIN SPORTS 5 HD';
+    if (lower.contains('أبطال') || lower.contains('champions')) return 'beIN SPORTS 1 HD';
+    if (lower.contains('إيطالي') || lower.contains('serie a')) return 'أبوظبي الرياضية بريميوم';
+    return 'beIN SPORTS HD';
+  }
+
+  Widget _matchStatusWidget(Map<String, dynamic> match) {
+    final state = _text(match['state']);
+    final rawTime = _text(match['timeOrStatus']);
+
+    if (state == 'in') {
+      final detail = rawTime
+          .replaceAll('مباشر', '')
+          .replaceAll('🔴', '')
+          .replaceAll('جارية', '')
+          .replaceAll('الآن', '')
+          .trim();
+      final label = detail.isNotEmpty
+          ? 'جارية الآن ($detail)'
+          : 'جارية الآن 🔴';
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE5F4EC),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: const BoxDecoration(
+                color: Color(0xFF16856D),
+                shape: BoxShape.circle,
               ),
             ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF16856D),
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (state == 'post') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3F4F6),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Text(
+          'انتهت المباراة',
+          style: TextStyle(
+            color: _muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
           ),
-          for (final match in _footballMatches) _fixtureCard(match),
+        ),
+      );
+    } else {
+      String kickoffLabel;
+      final kickoff = _integer(match['kickoffEpochMs']);
+      if (kickoff > 0) {
+        final dt = DateTime.fromMillisecondsSinceEpoch(kickoff).toLocal();
+        final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+        final period = dt.hour >= 12 ? 'م' : 'ص';
+        final minute = dt.minute.toString().padLeft(2, '0');
+        kickoffLabel = 'تبدأ الساعة $hour:$minute $period';
+      } else {
+        final timeMatch = RegExp(r'(\d{1,2}:\d{2}\s*[صم])').firstMatch(rawTime);
+        if (timeMatch != null) {
+          kickoffLabel = 'تبدأ الساعة ${timeMatch.group(1)}';
+        } else {
+          kickoffLabel = rawTime.isNotEmpty ? rawTime : 'لم تبدأ بعد';
+        }
+      }
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8F9FA),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _line),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.schedule_rounded, size: 12, color: _muted),
+            const SizedBox(width: 4),
+            Text(
+              kickoffLabel,
+              style: const TextStyle(
+                color: _ink,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Future<void> _chooseStreamsForFixture(Map<String, dynamic> match) async {
+    final home = _text(match['homeTeamArabic'])
+        .ifEmpty(_text(match['homeTeam']).ifEmpty('الفريق الأول'));
+    final away = _text(match['awayTeamArabic'])
+        .ifEmpty(_text(match['awayTeam']).ifEmpty('الفريق الثاني'));
+    final title = '$home × $away';
+    final league = _text(match['leagueName']);
+    final channel = _channelForLeague(league);
+    final id = _text(match['id']).ifEmpty('fixture_${home}_$away');
+
+    // البحث عن مباراة مطابقة في أحداث الياسين إن وجدت
+    final matched = _events.firstWhere(
+      (e) {
+        final t1 = _text((e['team1'] as Map?)?['name']);
+        final t2 = _text((e['team2'] as Map?)?['name']);
+        return (t1.isNotEmpty && (t1.contains(home) || home.contains(t1))) ||
+               (t2.isNotEmpty && (t2.contains(away) || away.contains(t2)));
+      },
+      orElse: () => const <String, dynamic>{},
+    );
+
+    await _chooseStreams(
+      matched.isNotEmpty ? _text(matched['id']) : id,
+      title,
+      matched.isNotEmpty,
+      channelOverride: matched.isNotEmpty ? _text(matched['channel']) : channel,
+      leagueOverride: league,
+    );
+  }
+
+  Widget _eventsList() {
+    if (_events.isEmpty && _footballMatches.isEmpty && _loading) {
+      return const _SportsMatchSkeleton();
+    }
+
+    final todayMatches = _todayMatches();
+    final matchesList = _todayOnly ? todayMatches : _footballMatches;
+
+    // في حال وجود أحداث مباشرة من سيرفر الأحداث
+    if (_events.isNotEmpty) {
+      return ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(14),
+        itemCount: _events.length,
+        itemBuilder: (_, index) => _eventCard(_events[index]),
+      );
+    }
+
+    // جدول المباريات مع فلتر مباريات اليوم
+    if (_footballMatches.isNotEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 18),
+        children: [
+          Row(
+            children: [
+              ChoiceChip(
+                label: Text('مباريات اليوم (${todayMatches.length})'),
+                selected: _todayOnly,
+                showCheckmark: false,
+                labelStyle: TextStyle(
+                  color: _todayOnly ? Colors.white : _ink,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+                side: BorderSide(color: _todayOnly ? _brick : _line),
+                selectedColor: _brick,
+                onSelected: (_) => setState(() => _todayOnly = true),
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text('جميع المباريات (${_footballMatches.length})'),
+                selected: !_todayOnly,
+                showCheckmark: false,
+                labelStyle: TextStyle(
+                  color: !_todayOnly ? Colors.white : _ink,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+                side: BorderSide(color: !_todayOnly ? _brick : _line),
+                selectedColor: _brick,
+                onSelected: (_) => setState(() => _todayOnly = false),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (matchesList.isEmpty && _todayOnly)
+            Card(
+              margin: const EdgeInsets.only(top: 20),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.sports_soccer_rounded, size: 48, color: _muted),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'لا توجد مباريات أخرى مجدولة لليوم في الدوريات الكبرى.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: _muted, fontSize: 13, height: 1.5),
+                    ),
+                    const SizedBox(height: 14),
+                    OutlinedButton.icon(
+                      onPressed: () => setState(() => _todayOnly = false),
+                      icon: const Icon(Icons.calendar_month_rounded, color: _brick, size: 18),
+                      label: const Text('عرض جميع مباريات الجولة', style: TextStyle(color: _brick)),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: _brick),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            for (final match in matchesList) _fixtureCard(match),
         ],
       );
     }
-    if (_events.isEmpty) {
-      return _empty(
-        _error == null
-            ? 'تعذر جلب مباريات أو روابط بث من المصادر الآن. اسحب للتحديث.'
-            : 'تعذر تحديث المباريات. اسحب للمحاولة مرة أخرى.',
-      );
-    }
-    return ListView.builder(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(14),
-      itemCount: _events.length,
-      itemBuilder: (_, index) => _eventCard(_events[index]),
+
+    return _empty(
+      _error == null
+          ? 'تعذر جلب مباريات أو روابط بث من المصادر الآن. اسحب للتحديث.'
+          : 'تعذر تحديث المباريات. اسحب للمحاولة مرة أخرى.',
     );
   }
 
@@ -240,54 +472,102 @@ class _SportsPageState extends State<SportsPage> {
         .ifEmpty(_text(match['awayTeam']).ifEmpty('الفريق الثاني'));
     final homeScore = _text(match['homeScore']);
     final awayScore = _text(match['awayScore']);
-    final hasScore = homeScore.isNotEmpty && awayScore.isNotEmpty;
     final state = _text(match['state']);
+    final hasScore = (state == 'in' || state == 'post') &&
+        homeScore.isNotEmpty &&
+        awayScore.isNotEmpty;
+    final league = _text(match['leagueName']).ifEmpty('مباراة');
+    final channel = _channelForLeague(league);
+    final id = _text(match['id']);
+
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _text(match['leagueName']).ifEmpty('مباراة'),
-                    style: const TextStyle(color: _muted, fontSize: 12),
-                  ),
-                ),
-                Text(
-                  _text(match['timeOrStatus']).ifEmpty('الموعد غير متاح'),
-                  style: TextStyle(
-                    color: state == 'in' ? const Color(0xFF16856D) : _muted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _team({'name': home, 'logo': match['homeLogo']}),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: Text(
-                    hasScore ? '$homeScore  -  $awayScore' : 'VS',
-                    style: const TextStyle(
-                      color: _brick,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
+      margin: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => _chooseStreamsForFixture(match),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      league,
+                      style: const TextStyle(color: _muted, fontSize: 12),
                     ),
                   ),
+                  _matchStatusWidget(match),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _brick.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      channel,
+                      style: const TextStyle(
+                        color: _brick,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _team({'name': home, 'logo': match['homeLogo']}),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Text(
+                      hasScore ? '$homeScore  -  $awayScore' : 'VS',
+                      style: TextStyle(
+                        color: state == 'in'
+                            ? const Color(0xFF16856D)
+                            : _brick,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: _team({'name': away, 'logo': match['awayLogo']}),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (_loadingId == id)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _brick,
+                  ),
+                )
+              else
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.play_circle_fill_rounded, size: 14, color: _brick),
+                    const SizedBox(width: 5),
+                    Text(
+                      state == 'in' ? 'شاهد البث المباشر الآن' : 'اضغط لاختيار قناة البث',
+                      style: const TextStyle(
+                        color: _brick,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
-                Expanded(
-                  child: _team({'name': away, 'logo': match['awayLogo']}),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -487,6 +767,37 @@ class _SportsPageState extends State<SportsPage> {
     return DateTime.tryParse(value)?.millisecondsSinceEpoch ?? 0;
   }
 
+  Widget _eventScheduledBadge(int startEpochSeconds) {
+    if (startEpochSeconds <= 0) return const SizedBox.shrink();
+    final dt = DateTime.fromMillisecondsSinceEpoch(startEpochSeconds * 1000).toLocal();
+    final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+    final period = dt.hour >= 12 ? 'م' : 'ص';
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FA),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _line),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.schedule_rounded, size: 12, color: _muted),
+          const SizedBox(width: 4),
+          Text(
+            'تبدأ الساعة $hour:$minute $period',
+            style: const TextStyle(
+              color: _ink,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _eventCard(Map<String, dynamic> event) {
     final start = int.tryParse(_text(event['startTime'])) ?? 0;
     final end = int.tryParse(_text(event['endTime'])) ?? 0;
@@ -523,7 +834,9 @@ class _SportsPageState extends State<SportsPage> {
                   if (live || resultIsLive)
                     const _LiveBadge()
                   else if (resultIsFinished)
-                    const _FinishedBadge(),
+                    const _FinishedBadge()
+                  else
+                    _eventScheduledBadge(start),
                   const SizedBox(width: 8),
                   Text(
                     _text(event['channel']),
@@ -602,7 +915,13 @@ class _SportsPageState extends State<SportsPage> {
   String _matchTitle(Map<String, dynamic> e) =>
       '${_text((e['team1'] as Map?)?['name'])} × ${_text((e['team2'] as Map?)?['name'])}';
 
-  Future<void> _chooseStreams(String id, String title, bool event) async {
+  Future<void> _chooseStreams(
+    String id,
+    String title,
+    bool event, {
+    String? channelOverride,
+    String? leagueOverride,
+  }) async {
     if (id.isEmpty || _loadingId == id) return;
     setState(() {
       _loadingId = id;
@@ -615,12 +934,19 @@ class _SportsPageState extends State<SportsPage> {
               orElse: () => const <String, dynamic>{},
             )
           : const <String, dynamic>{};
+      final channelName = channelOverride?.isNotEmpty == true
+          ? channelOverride!
+          : (event ? _text(match['channel']) : '');
+      final leagueName = leagueOverride?.isNotEmpty == true
+          ? leagueOverride!
+          : (event ? _text(match['champions']) : '');
+
       final streams = await NativeBridge.list(
-        event ? 'live.matchStreams' : 'live.channelStreams',
+        'live.matchStreams',
         {
           'id': id,
-          if (event) 'channel': _text(match['channel']),
-          if (event) 'league': _text(match['champions']),
+          'channel': channelName,
+          'league': leagueName,
         },
       );
       if (!mounted) return;
@@ -637,15 +963,42 @@ class _SportsPageState extends State<SportsPage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
             shrinkWrap: true,
             children: [
-              const Text(
-                'اختر سيرفر المشاهدة',
-                style: TextStyle(
-                  color: _ink,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 18,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        color: _ink,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 17,
+                      ),
+                    ),
+                  ),
+                  if (channelName.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: _brick.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        channelName,
+                        style: const TextStyle(
+                          color: _brick,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
+              const Text(
+                'اختر سيرفر أو قناة المشاهدة المباشرة',
+                style: TextStyle(color: _muted, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
               ...streams.map(
                 (stream) => _ServerTile(
                   server: {
@@ -718,13 +1071,27 @@ class _LiveBadge extends StatelessWidget {
       color: const Color(0xFFE5F4EC),
       borderRadius: BorderRadius.circular(20),
     ),
-    child: const Text(
-      'مباشر',
-      style: TextStyle(
-        color: Color(0xFF14845D),
-        fontWeight: FontWeight.bold,
-        fontSize: 11,
-      ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: const BoxDecoration(
+            color: Color(0xFF16856D),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 5),
+        const Text(
+          'جارية الآن 🔴',
+          style: TextStyle(
+            color: Color(0xFF14845D),
+            fontWeight: FontWeight.bold,
+            fontSize: 11,
+          ),
+        ),
+      ],
     ),
   );
 }

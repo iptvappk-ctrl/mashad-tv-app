@@ -125,7 +125,7 @@ object FootballRepository {
                             "pre" -> 1
                             else -> 2
                         }
-                    }.thenBy { it.matchDate }
+                    }.thenBy { it.kickoffEpochMs ?: Long.MAX_VALUE }
                 )
                 if (sorted.isNotEmpty()) {
                     cachedMatches = sorted
@@ -327,8 +327,8 @@ object FootballRepository {
     private fun formatMatchTime(isoDate: String, state: String, shortDetail: String): String {
         return when (state) {
             "in" -> {
-                val min = shortDetail.ifBlank { "مباشر 🔴" }
-                "مباشر $min"
+                val min = shortDetail.ifBlank { "🔴" }
+                "جارية الآن $min".trim()
             }
             "post" -> {
                 "انتهت"
@@ -347,7 +347,7 @@ object FootballRepository {
 
                         if (calMatch.get(Calendar.DAY_OF_YEAR) == calNow.get(Calendar.DAY_OF_YEAR) &&
                             calMatch.get(Calendar.YEAR) == calNow.get(Calendar.YEAR)) {
-                            "اليوم $timeStr"
+                            "تبدأ $timeStr"
                         } else {
                             val dayName = when (calMatch.get(Calendar.DAY_OF_WEEK)) {
                                 Calendar.SATURDAY -> "السبت"
@@ -359,7 +359,7 @@ object FootballRepository {
                                 Calendar.FRIDAY -> "الجمعة"
                                 else -> ""
                             }
-                            "$dayName $timeStr"
+                            "$dayName تبدأ $timeStr"
                         }
                     } else {
                         shortDetail.ifBlank { "قريباً" }
