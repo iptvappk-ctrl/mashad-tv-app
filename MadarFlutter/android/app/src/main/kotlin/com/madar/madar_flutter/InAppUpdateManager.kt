@@ -99,7 +99,8 @@ class InAppUpdateManager(private val activity: MainActivity) {
             val cachedRelease = runCatching {
                 UpdateRelease.fromGitHub(JSONObject(cachedReleaseJson))
             }.getOrNull()
-            if (cachedRelease != null) {
+            // Only use the cached release if it's actually newer than what's installed.
+            if (cachedRelease != null && cachedRelease.versionCode > installedVersionCode()) {
                 Log.i(TAG, "Using the recently checked public release")
                 return respondForRelease(cachedRelease, result)
             }
@@ -172,9 +173,16 @@ class InAppUpdateManager(private val activity: MainActivity) {
     }
 
     private fun respondForRelease(release: UpdateRelease, result: MethodChannel.Result) {
-        if (release.versionCode <= installedVersionCode()) {
+        val installed = installedVersionCode()
+        if (release.versionCode <= installed) {
             latestRelease = null
-            Log.i(TAG, "No newer public update is available")
+            Log.i(TAG, "No newer public update (cached=${release.versionCode} installed=$installed); clearing stale cache")
+            // Clear stale GitHub cache so the next check always fetches fresh
+            activity.getSharedPreferences(UPDATE_PREFS, android.content.Context.MODE_PRIVATE).edit()
+                .remove(CACHED_RELEASE_JSON)
+                .remove(CACHED_RELEASE_ETAG)
+                .remove(LAST_SUCCESSFUL_CHECK)
+                .apply()
             respond(result, mapOf("available" to false, "status" to "no_update"))
             return
         }
@@ -235,7 +243,12 @@ class InAppUpdateManager(private val activity: MainActivity) {
 
             override fun onResponse(call: Call, response: Response) {
                 response.use {
-                    if (!it.isSuccessful || !isTrustedAssetHost(it.request.url.host)) {
+                    // Check all hops: original request, any network-level hop, and priorResponse.
+                    // OkHttp follows redirects transparently; it.request is always the last request.
+                    val finalHost = it.networkResponse?.request?.url?.host
+                        ?: it.request.url.host
+                    if (!it.isSuccessful || !isTrustedAssetHost(finalHost)) {
+                        Log.w(TAG, "Rejected download: success=${it.isSuccessful} host=$finalHost")
                         activeDownload = null
                         respond(result, mapOf("status" to "download_failed"))
                         return

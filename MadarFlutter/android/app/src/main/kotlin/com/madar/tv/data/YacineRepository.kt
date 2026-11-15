@@ -344,16 +344,48 @@ object YacineRepository {
         val combined = (eventStreams + channelStreams)
             .filter { it.url.isNotBlank() }
             .distinctBy { it.url.trim() }
-        // If no streams found at all, return at least the first beIN channel streams
-        if (combined.isEmpty() && target == null) {
-            val first = BEIN_FALLBACK_CHANNELS.firstOrNull()
-            runCatching { getChannelStreams(first?.id ?: return@withContext emptyList()) }
-                .getOrDefault(emptyList())
-                .map { stream -> stream.copy(name = "${first?.name} · ${stream.name}") }
+        // If no streams found at all, return the reliable live beIN streams as guaranteed fallback
+        if (combined.isEmpty()) {
+            BEIN_LIVE_STREAMS
         } else {
             combined
         }
     }
+
+    val BEIN_LIVE_STREAMS = listOf(
+        YacineStream(
+            name = "beIN SPORTS XTRA HD (بث مباشر)",
+            url = "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            referer = "https://yacinelive.com/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        ),
+        YacineStream(
+            name = "beIN SPORTS Live (سيرفر 2)",
+            url = "https://tvsen6.aynaott.com/beinsports/index.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            referer = "https://yacinelive.com/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        ),
+        YacineStream(
+            name = "beIN SPORTS XTRA 2 (بث بديل)",
+            url = "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            referer = "https://yacinelive.com/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        ),
+        YacineStream(
+            name = "beIN SPORTS HD (سيرفر مباشر 4)",
+            url = "https://5c7b683162943.streamlock.net/live/ngrp:sportsone_all/playlist.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            referer = "https://yacinelive.com/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        )
+    )
 
     val DEFAULT_SPORTS_STREAMS = listOf(
         YacineStream(
@@ -418,8 +450,12 @@ object YacineRepository {
     suspend fun getChannelStreams(channelId: String): List<YacineStream> = withContext(Dispatchers.IO) {
         val id = channelId.lowercase()
 
-        // القنوات المحلية (bein_* و arab_*) لها سيرفرات ثابتة — لا نسأل API الياسين أبداً
-        // لأن الياسين بيرجع أحياناً محتوى غير رياضي (كرتون) على هذه القنوات
+        // قنوات beIN Sports تقدم بثوث beIN الحية الفعلية
+        if (id.startsWith("bein_")) {
+            return@withContext BEIN_LIVE_STREAMS
+        }
+
+        // القنوات الرياضية العربية المحلية
         val localStreams: List<YacineStream>? = when {
             id.contains("kuwait_plus") || id.contains("plus") ->
                 listOf(DEFAULT_SPORTS_STREAMS[5], DEFAULT_SPORTS_STREAMS[0])
@@ -435,44 +471,18 @@ object YacineRepository {
                 listOf(DEFAULT_SPORTS_STREAMS[3])
             id.startsWith("arab_iraq") || id.contains("iraq") ->
                 listOf(DEFAULT_SPORTS_STREAMS[4])
-            id.startsWith("bein_") -> listOf(
-                YacineStream(
-                    name = "beIN SPORTS HD · سيرفر 1",
-                    url = DEFAULT_SPORTS_STREAMS[0].url,
-                    userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    referer = "https://media.gov.kw/",
-                    urlType = 3,
-                    headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                ),
-                YacineStream(
-                    name = "beIN SPORTS HD · سيرفر 2",
-                    url = DEFAULT_SPORTS_STREAMS[1].url,
-                    userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    referer = "https://yacinelive.com/",
-                    urlType = 3,
-                    headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                ),
-                YacineStream(
-                    name = "beIN SPORTS HD · سيرفر 3",
-                    url = DEFAULT_SPORTS_STREAMS[2].url,
-                    userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    referer = "https://partneta.cdn.mgmlcdn.com/",
-                    urlType = 3,
-                    headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                ),
-            )
             else -> null
         }
         if (localStreams != null) return@withContext localStreams
 
-        // للقنوات الأخرى: حاول API الياسين أولاً
+        // محاولة سحب السيرفرات من API في حال توفرها
         val fetched = runCatching {
             parseStreamPayload(decryptResponse("channel/$channelId"))
         }.getOrElse { emptyList() }
         if (fetched.isNotEmpty()) return@withContext fetched
 
-        // fallback نهائي
-        listOf(DEFAULT_SPORTS_STREAMS[0])
+        // fallback نهائي: بث رياضي مباشر موثوق
+        BEIN_LIVE_STREAMS
     }
 
     private fun parseStreamPayload(raw: String): List<YacineStream> {
