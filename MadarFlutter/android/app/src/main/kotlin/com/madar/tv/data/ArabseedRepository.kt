@@ -599,7 +599,8 @@ object ArabseedRepository {
             }
         }
         val encoded = URLEncoder.encode(query.trim(), "UTF-8")
-        val url = "$BASE_URL/?s=$encoded"
+        // MySeed uses /find/?word= (the old /?s= returns an error page)
+        val url = "$BASE_URL/find/?word=$encoded"
         val results = parseListing(fetchHtml(url), null)
         if (results.isNotEmpty()) {
             searchCache[normalized] = now to results
@@ -627,7 +628,7 @@ object ArabseedRepository {
             })
         }
         val pageResults = mutableMapOf<String, List<ArabseedServer>>()
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(3500)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(8000)
         repeat(pageFutures.size) {
             val remaining = deadline - System.nanoTime()
             if (remaining <= 0L) return@repeat
@@ -658,7 +659,7 @@ object ArabseedRepository {
         if (servers.isEmpty()) {
             val fallback = serverFallbackPool.submit(Callable { fetchServersViaSearch(pageUrl) })
             try {
-                return fallback.get(2, TimeUnit.SECONDS).distinctBy { it.embedUrl }.take(10)
+                return fallback.get(5, TimeUnit.SECONDS).distinctBy { it.embedUrl }.take(10)
             } catch (_: Exception) {
                 fallback.cancel(true)
             }
@@ -786,7 +787,13 @@ object ArabseedRepository {
 
 
 
-        fun fetchSeasonsAndEpisodes(
+        fun saveSynthesizedBundle(pageUrl: String, bundle: ArabseedSeasonBundle) {
+        seasonBundleCache[pageUrl] = bundle
+        seasonBundleCacheAt[pageUrl] = System.currentTimeMillis()
+        CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v16:" + pageUrl, bundle)
+    }
+
+    fun fetchSeasonsAndEpisodes(
             item: ArabseedItem,
             forceRefresh: Boolean = false,
             seasonNumbersOnly: Set<Int>? = null,
@@ -1173,6 +1180,100 @@ object ArabseedRepository {
                         )
                     } else if (seasons[existingIndex].pageUrl.isBlank()) {
                         seasons[existingIndex] = seasons[existingIndex].copy(pageUrl = seasonUrl)
+                    }
+                }
+
+                // ── Fallback discovery for series where each episode is a separate post ──
+                if (seasons.isEmpty() || seasons.all { it.episodes.isEmpty() }) {
+                    val cleanBaseTitle = SeriesCatalogParser.cleanSeriesTitle(item.title)
+                    // Also try the title without common episode-number noise so search hits more
+                    val strippedTitle = cleanBaseTitle
+                        .replace(Regex("""(?i)^(مسلسل|سلسلة)\s+"""), "")
+                        .replace(Regex("""(?i)\s+(الحلقة|حلقة|ep\.?|episode)\s*\d+.*"""), "")
+                        .trim()
+                    val searchCandidates = buildList {
+                        if (strippedTitle.length >= 2 && strippedTitle != cleanBaseTitle) add(strippedTitle)
+                        if (cleanBaseTitle.length >= 2) add(cleanBaseTitle)
+                        val stripped2 = cleanBaseTitle.replace(Regex("""(?i)^(مسلسل|سلسلة)\s+"""), "").trim()
+                        if (stripped2.length >= 2 && stripped2 != cleanBaseTitle && stripped2 != strippedTitle) add(stripped2)
+                    }.distinct()
+                    val discoveredEpisodes = mutableListOf<Triple<String, String, Int?>>()
+                    for (query in searchCandidates) {
+                        try {
+                            val results = search(query)
+                            for (sr in results) {
+                                val srEpNum = SeriesCatalogParser.episodeNumber(sr.title, sr.pageUrl)
+                                if (srEpNum != null && SeriesCatalogParser.isEpisode(sr.title, sr.pageUrl)) {
+                                    val srBase = SeriesCatalogParser.cleanSeriesTitle(sr.title)
+                                    val normalizedBase = SeriesCatalogParser.normalizedSeriesTitle(sr.title)
+                                    val currentNormalized = SeriesCatalogParser.normalizedSeriesTitle(item.title)
+                                    // Relaxed matching: check cleaned titles too
+                                    val titlesMatch = normalizedBase.contains(currentNormalized) ||
+                                        currentNormalized.contains(normalizedBase) ||
+                                        srBase.contains(cleanBaseTitle, ignoreCase = true) ||
+                                        cleanBaseTitle.contains(srBase, ignoreCase = true) ||
+                                        (strippedTitle.length >= 2 && (
+                                            sr.title.contains(strippedTitle, ignoreCase = true) ||
+                                            srBase.contains(strippedTitle, ignoreCase = true) ||
+                                            strippedTitle.contains(srBase, ignoreCase = true)
+                                        ))
+                                    if (titlesMatch) {
+                                        val sNum = SeriesCatalogParser.seasonNumber(sr.title, sr.pageUrl) ?: 1
+                                        discoveredEpisodes += Triple(sr.title, sr.pageUrl, sNum)
+                                    }
+                                }
+                            }
+                            if (discoveredEpisodes.isNotEmpty()) break
+                        } catch (_: Exception) {}
+                    }
+                    if (discoveredEpisodes.isNotEmpty()) {
+                        val newSeasons = mutableListOf<ArabseedSeason>()
+                        discoveredEpisodes.distinctBy { SeriesCatalogParser.normalizedUrl(it.second) }
+                            .groupBy { it.third ?: 1 }
+                            .toSortedMap()
+                            .forEach { (sNum, eps) ->
+                                val sorted = eps.mapNotNull { (title, url, _) ->
+                                    val epNum = SeriesCatalogParser.episodeNumber(title, url) ?: return@mapNotNull null
+                                    ArabseedEpisode(
+                                        number = epNum,
+                                        title = "الحلقة $epNum",
+                                        pageUrl = url,
+                                        seasonNumber = sNum,
+                                        providerName = item.providerName
+                                    )
+                                }.distinctBy { it.number }.sortedBy { it.number }
+                                if (sorted.isNotEmpty()) {
+                                    newSeasons += ArabseedSeason(
+                                        number = sNum,
+                                        title = SeriesCatalogParser.seasonTitle(sNum),
+                                        episodes = sorted,
+                                        pageUrl = item.pageUrl
+                                    )
+                                }
+                            }
+                        if (newSeasons.isNotEmpty()) {
+                            seasons.clear()
+                            seasons.addAll(newSeasons)
+                        }
+                    } else if (isEpisodePage) {
+                        // Current page itself is an episode (e.g. Episode 30)
+                        val epNum = SeriesCatalogParser.episodeNumber(item.title, item.pageUrl) ?: 1
+                        val sNum = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) ?: 1
+                        seasons.clear()
+                        seasons += ArabseedSeason(
+                            number = sNum,
+                            title = SeriesCatalogParser.seasonTitle(sNum),
+                            episodes = listOf(
+                                ArabseedEpisode(
+                                    number = epNum,
+                                    title = "الحلقة $epNum",
+                                    pageUrl = item.pageUrl,
+                                    seasonNumber = sNum,
+                                    providerName = item.providerName
+                                )
+                            ),
+                            pageUrl = item.pageUrl
+                        )
                     }
                 }
 

@@ -358,11 +358,13 @@ object MultiProviderRepository {
             mirrorDomains = listOf("https://akwam.cx"),
             moviesPath = "/movies?page={page}",
             seriesPath = "/series?page={page}",
-            searchPath = "/?s={q}",
+            searchPath = "/search?q={q}",
             cardSelectors = listOf(
                 "a.br-card-link[href*='/akfilm-']",
+                "a.br-card-link[href*='/akdrama-']",
                 "a.br-card-link[href*='/akseries-']",
                 "a[href*='/akfilm-']",
+                "a[href*='/akdrama-']",
                 "a[href*='/akseries-']",
                 ".br-card a",
             ),
@@ -2086,7 +2088,10 @@ object MultiProviderRepository {
                         )
                         match = items.asSequence()
                             .filter { it.type == type }
-                            .filter { requestedYear.isBlank() || it.year.isBlank() || it.year == requestedYear }
+                            .filter {
+                                requestedYear.isBlank() || it.year.isBlank() ||
+                                    Math.abs((it.year.toIntOrNull() ?: 0) - (requestedYear.toIntOrNull() ?: 0)) <= 1
+                            }
                             .filter { item -> matchesProviderTitle(normalizedTitle, item) }
                             .sortedByDescending { it.year.isNotBlank() && it.year == requestedYear }
                             .firstOrNull()
@@ -2200,7 +2205,14 @@ object MultiProviderRepository {
         if (targetKey in candidateKeys) return true
 
         val targetTokens = targetKey.split(' ').filter { it.length > 1 }.toSet()
-        if (targetTokens.size < 2) return false
+        if (targetTokens.isEmpty()) return false
+        if (targetTokens.size == 1) {
+            val single = targetTokens.first()
+            if (single.length >= 3) {
+                return candidateKeys.any { key -> key.split(' ').any { it == single } }
+            }
+            return false
+        }
         return candidateKeys.any { key ->
             val candidateTokens = key.split(' ').filter { it.length > 1 }.toSet()
             val shared = targetTokens.intersect(candidateTokens).size
@@ -3003,13 +3015,34 @@ object MultiProviderRepository {
                     seasonPageUrlByNumber[seasonNumber].orEmpty(),
                 )
             }
-            val seasonsWithLinks = (seasons + seasonPages.mapNotNull { (number, url) ->
+            val baseSeasonsWithLinks = (seasons + seasonPages.mapNotNull { (number, url) ->
                 if (seasons.any { it.number == number }) null
                 else ArabseedSeason(number, SeriesCatalogParser.seasonTitle(number), emptyList(), url)
             }).map { season ->
                 if (season.pageUrl.isNotBlank()) season
                 else season.copy(pageUrl = seasonPageUrlByNumber[season.number].orEmpty())
             }
+
+            val seasonsWithLinks = if ((baseSeasonsWithLinks.isEmpty() || baseSeasonsWithLinks.all { it.episodes.isEmpty() }) && isEpisodePage) {
+                val epNum = SeriesCatalogParser.episodeNumber(item.title, item.pageUrl) ?: 1
+                val sNum = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) ?: 1
+                listOf(
+                    ArabseedSeason(
+                        number = sNum,
+                        title = SeriesCatalogParser.seasonTitle(sNum),
+                        episodes = listOf(
+                            ArabseedEpisode(
+                                number = epNum,
+                                title = "الحلقة $epNum",
+                                pageUrl = item.pageUrl,
+                                seasonNumber = sNum,
+                                providerName = getProviderForUrl(item.pageUrl)?.name ?: item.providerName,
+                            )
+                        ),
+                        pageUrl = item.pageUrl,
+                    )
+                )
+            } else baseSeasonsWithLinks
 
             val relatedParts = linkedMapOf<String, ArabseedItem>()
             val explicitPartSectionUrls = mutableSetOf<String>()
@@ -3774,6 +3807,39 @@ object MultiProviderRepository {
                         && !SeriesCatalogParser.isEpisode(it.title, it.pageUrl)
                         && it.pageUrl != selected.pageUrl
                 }
+
+            if (sameProviderSeriesPage == null && entries.size > 1) {
+                val episodeEntries = entries.map { it.second }.filter { SeriesCatalogParser.isEpisode(it.title, it.pageUrl) }
+                if (episodeEntries.isNotEmpty()) {
+                    val seasonMap = mutableMapOf<Int, MutableList<ArabseedEpisode>>()
+                    for (entry in episodeEntries) {
+                        val epNum = SeriesCatalogParser.episodeNumber(entry.title, entry.pageUrl) ?: continue
+                        val sNum = SeriesCatalogParser.seasonNumber(entry.title, entry.pageUrl) ?: 1
+                        val list = seasonMap.getOrPut(sNum) { mutableListOf() }
+                        if (list.none { it.number == epNum }) {
+                            list.add(ArabseedEpisode(
+                                number = epNum,
+                                title = "الحلقة $epNum",
+                                pageUrl = entry.pageUrl,
+                                seasonNumber = sNum,
+                                providerName = entry.providerName
+                            ))
+                        }
+                    }
+                    val synthesizedSeasons = seasonMap.toSortedMap().map { (sNum, eps) ->
+                        eps.sortBy { it.number }
+                        ArabseedSeason(
+                            number = sNum,
+                            title = SeriesCatalogParser.seasonTitle(sNum),
+                            episodes = eps,
+                            pageUrl = selected.pageUrl
+                        )
+                    }
+                    if (synthesizedSeasons.isNotEmpty()) {
+                        ArabseedRepository.saveSynthesizedBundle(selected.pageUrl, ArabseedSeasonBundle(seasons = synthesizedSeasons))
+                    }
+                }
+            }
 
             entries.first().first to selected.copy(
                 title = baseTitle,

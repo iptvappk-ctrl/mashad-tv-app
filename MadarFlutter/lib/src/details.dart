@@ -1411,19 +1411,20 @@ class _DetailPageState extends State<DetailPage> {
           final embed = _text(server['embedUrl']).trim();
           final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
           if (!_isUsablePlaybackUrl(candidateUrl)) return;
-          final resolved = _text(
-            await _native
-                .invokeMethod<String>('media.resolve', {
-                  'url': candidateUrl,
-                  'referer': _text(server['sourcePageUrl']).ifEmpty(referer),
-                })
-                .timeout(const Duration(seconds: 8)),
-          ).trim();
-          if (!_isUsablePlaybackUrl(resolved)) return;
+          final resolved = await _native
+              .invokeMethod<String>('media.resolve', {
+                'url': candidateUrl,
+                'referer': _text(server['sourcePageUrl']).ifEmpty(referer),
+              })
+              .timeout(const Duration(seconds: 8))
+              .then((v) => _text(v).trim())
+              .catchError((_) => '');
+          // إذا نجح resolve استخدمه، وإذا فشل اقبل candidateUrl (embed) مباشرةً
+          final streamUrl = _isUsablePlaybackUrl(resolved) ? resolved : candidateUrl;
           final row = {
             ...server,
-            'directStreamUrl': resolved,
-            'playableVerified': true,
+            'directStreamUrl': streamUrl,
+            'playableVerified': _isUsablePlaybackUrl(resolved),
           };
           verified.add(row);
           if (!firstPlayable.isCompleted) firstPlayable.complete(row);
@@ -1458,6 +1459,19 @@ class _DetailPageState extends State<DetailPage> {
             );
           }
         } catch (_) {}
+      }
+      if (candidateRows.isNotEmpty) {
+        final fallback = candidateRows.firstWhere(
+          (s) =>
+              _isUsablePlaybackUrl(_text(s['directStreamUrl']).trim()) ||
+              _isUsablePlaybackUrl(_text(s['embedUrl']).trim()),
+          orElse: () => candidateRows.first,
+        );
+        return {
+          ...fallback,
+          'playableVerified': false,
+          'fallbackServers': candidateRows,
+        };
       }
       return null;
     }
@@ -1538,11 +1552,19 @@ class _DetailPageState extends State<DetailPage> {
           ? null
           : _seasons[_seasonIndex.clamp(0, _seasons.length - 1)];
       final episodes = _orderedEpisodes(season?['episodes']);
-      if (episodes.isEmpty) {
-        _message(context, 'لا توجد حلقات جاهزة للتشغيل بعد.');
+      if (episodes.isNotEmpty) {
+        _openEpisode(episodes, _currentEpisodeIndex(episodes) ?? 0, season);
         return;
       }
-      _openEpisode(episodes, _currentEpisodeIndex(episodes) ?? 0, season);
+      if (_servers.isNotEmpty) {
+        final selected = await _findWorkingServer(_servers, widget.item.pageUrl);
+        if (!mounted) return;
+        if (selected != null) {
+          await _openServer(selected, widget.item.title, widget.item.pageUrl);
+          return;
+        }
+      }
+      _message(context, 'لا توجد حلقات جاهزة للتشغيل بعد.');
       return;
     }
 
@@ -1575,16 +1597,24 @@ class _DetailPageState extends State<DetailPage> {
     final sourcePage = _text(server['sourcePageUrl']).ifEmpty(referer);
 
     final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
-    final url =
-        server['playableVerified'] == true && _isUsablePlaybackUrl(direct)
-        ? direct
-        : await _resolveServerStream({
-            ...server,
-            'directStreamUrl': '',
-            'embedUrl': candidateUrl,
-          }, referer: sourcePage);
+
+    // إذا كان السيرفر محقَّقاً مسبقاً استخدم directStreamUrl مباشرة
+    // وإلا حاول الـ resolve — لو فشل استخدم candidateUrl كـ embed في WebView
+    final String url;
+    if (server['playableVerified'] == true && _isUsablePlaybackUrl(direct)) {
+      url = direct;
+    } else {
+      final resolvedViaStream = await _resolveServerStream({
+        ...server,
+        'directStreamUrl': '',
+        'embedUrl': candidateUrl,
+      }, referer: sourcePage).catchError((_) => '');
+      url = _isUsablePlaybackUrl(resolvedViaStream) ? resolvedViaStream : '';
+    }
     if (!mounted) return;
-    final playableUrl = _isUsablePlaybackUrl(url) ? url : '';
+
+    // استخدم url المُحلَّل إذا كان صالحاً، وإلا اقبل candidateUrl (embed) ليُفتح في WebView
+    final playableUrl = _isUsablePlaybackUrl(url) ? url : candidateUrl;
     if (!_isUsablePlaybackUrl(playableUrl)) {
       final failedUrl = candidateUrl;
       final alternatives =

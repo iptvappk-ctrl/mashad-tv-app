@@ -411,16 +411,22 @@ class _EpisodePageState extends State<EpisodePage> {
         .ifEmpty(_text(_episode['pageUrl']));
 
     final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
-    final url =
-        server['playableVerified'] == true && _isUsablePlaybackUrl(direct)
-        ? direct
-        : await _resolveServerStream({
-            ...server,
-            'directStreamUrl': '',
-            'embedUrl': candidateUrl,
-          }, referer: sourcePage);
+
+    // إذا كان السيرفر محقَّقاً مسبقاً استخدم directStreamUrl مباشرة
+    // وإلا حاول الـ resolve — لو فشل استخدم candidateUrl كـ embed في WebView
+    final String url;
+    if (server['playableVerified'] == true && _isUsablePlaybackUrl(direct)) {
+      url = direct;
+    } else {
+      final resolvedViaStream = await _resolveServerStream({
+        ...server,
+        'directStreamUrl': '',
+        'embedUrl': candidateUrl,
+      }, referer: sourcePage).catchError((_) => '');
+      url = _isUsablePlaybackUrl(resolvedViaStream) ? resolvedViaStream : '';
+    }
     if (!mounted) return;
-    final playableUrl = _isUsablePlaybackUrl(url) ? url : '';
+    final playableUrl = _isUsablePlaybackUrl(url) ? url : candidateUrl;
     if (!_isUsablePlaybackUrl(playableUrl)) {
       final failedUrl = candidateUrl;
       final alternatives =
@@ -487,20 +493,21 @@ class _EpisodePageState extends State<EpisodePage> {
           final embed = _text(server['embedUrl']).trim();
           final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
           if (!_isUsablePlaybackUrl(candidateUrl)) return;
-          final stream = _text(
-            await _native
-                .invokeMethod<String>('media.resolve', {
-                  'url': candidateUrl,
-                  'referer': _text(server['sourcePageUrl'])
-                      .ifEmpty(_text(_episode['pageUrl'])),
-                })
-                .timeout(const Duration(seconds: 8)),
-          ).trim();
-          if (!_isUsablePlaybackUrl(stream)) return;
+          final stream = await _native
+              .invokeMethod<String>('media.resolve', {
+                'url': candidateUrl,
+                'referer': _text(server['sourcePageUrl'])
+                    .ifEmpty(_text(_episode['pageUrl'])),
+              })
+              .timeout(const Duration(seconds: 8))
+              .then((v) => _text(v).trim())
+              .catchError((_) => '');
+          // اقبل candidateUrl كـ embed إذا فشل الـ resolve
+          final streamUrl = _isUsablePlaybackUrl(stream) ? stream : candidateUrl;
           final row = {
             ...server,
-            'directStreamUrl': stream,
-            'playableVerified': true,
+            'directStreamUrl': streamUrl,
+            'playableVerified': _isUsablePlaybackUrl(stream),
           };
           verified.add(row);
           if (!firstPlayable.isCompleted) firstPlayable.complete(row);
@@ -533,6 +540,19 @@ class _EpisodePageState extends State<EpisodePage> {
             );
           }
         } catch (_) {}
+      }
+      if (candidates.isNotEmpty) {
+        final fallback = candidates.firstWhere(
+          (s) =>
+              _isUsablePlaybackUrl(_text(s['directStreamUrl']).trim()) ||
+              _isUsablePlaybackUrl(_text(s['embedUrl']).trim()),
+          orElse: () => candidates.first,
+        );
+        return {
+          ...fallback,
+          'playableVerified': false,
+          'fallbackServers': candidates,
+        };
       }
       return null;
     }
@@ -737,6 +757,8 @@ class _SmartEpisodePlayState extends State<_SmartEpisodePlay> {
     setState(() => _resolving = false);
     if (selected != null) {
       await widget.onOpen(selected);
+    } else if (widget.servers.isNotEmpty) {
+      await widget.onOpen(widget.servers.first);
     } else {
       _message(context, 'لم يستجب أي رابط فيديو صالح لهذه الحلقة.');
     }

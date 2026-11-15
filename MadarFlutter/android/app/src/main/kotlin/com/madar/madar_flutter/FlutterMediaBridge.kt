@@ -111,7 +111,7 @@ class FlutterMediaBridge(context: Context) {
                 fetchSeasons(seriesItem, force)
             }
             if (!method.endsWith("cached")) {
-                val sourceHost = runCatching { java.net.URI(seriesItem.pageUrl).host }.getOrNull().orEmpty()
+                val sourceHost = safeHttpUri(seriesItem.pageUrl)?.host.orEmpty()
                 val seasons = bundle?.seasons.orEmpty()
                 val counts = seasons.joinToString(",") { season ->
                     "${season.number}:${season.episodes.size}"
@@ -145,7 +145,7 @@ class FlutterMediaBridge(context: Context) {
             val seriesItem = item.asParentSeries()
             val seasonUrl = call.argument<String>("seasonUrl").orEmpty().trim()
             val seasonNumber = call.argument<Number>("seasonNumber")?.toInt() ?: 0
-            val uri = runCatching { java.net.URI(seasonUrl) }.getOrNull()
+            val uri = safeHttpUri(seasonUrl)
                 ?: throw IllegalArgumentException("رابط الموسم غير صالح")
             val host = uri.host?.lowercase().orEmpty()
             val isArabseed = isArabseedUrl(seasonUrl)
@@ -220,7 +220,7 @@ class FlutterMediaBridge(context: Context) {
             android.util.Log.i(
                 "FlutterMediaBridge",
                 "media.servers scheme=${safeUri?.scheme.orEmpty()} host=${safeUri?.host.orEmpty()} " +
-                    "authority=${safeUri?.rawAuthority.orEmpty()} urlLength=${url.length} " +
+                    "authority=${safeUri?.authority.orEmpty()} urlLength=${url.length} " +
                     "rawWhitespace=${rawUrl.any { it.isWhitespace() }} " +
                     "parser=${if (arabseedSource) "primary" else "multi"}",
             )
@@ -262,13 +262,18 @@ class FlutterMediaBridge(context: Context) {
                     source.contains("arabseed", ignoreCase = true) ||
                     source.contains("vids.php", ignoreCase = true)
                 val resolved = if (isArabseedEmbed) {
-                    ArabseedRepository.resolveDirectStream(source, referer)
-                        ?.takeIf { MultiProviderRepository.isVerifiedPlayableStream(it, referer) }
+                    val direct = ArabseedRepository.resolveDirectStream(source, referer)
+                    if (!direct.isNullOrBlank() && isAllowedResolverInput(direct)) direct
+                    else null
                 } else {
                     // Try MultiProvider resolver first (handles Voe, Dood, Streamtape, etc.)
-                    MultiProviderRepository.resolveStream(source, referer)
-                        ?: ArabseedRepository.resolveDirectStream(source, referer)
-                            ?.takeIf { MultiProviderRepository.isVerifiedPlayableStream(it, referer) }
+                    val multi = MultiProviderRepository.resolveStream(source, referer)
+                    if (!multi.isNullOrBlank() && isAllowedResolverInput(multi)) multi
+                    else {
+                        val direct = ArabseedRepository.resolveDirectStream(source, referer)
+                        if (!direct.isNullOrBlank() && isAllowedResolverInput(direct)) direct
+                        else null
+                    }
                 }
                 resolved?.takeIf(::isAllowedResolverInput)
             }
@@ -279,17 +284,17 @@ class FlutterMediaBridge(context: Context) {
         "live.categories.fetch" -> YacineRepository.getCategories(forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
         "live.channels.cached" -> {
             val catId = call.argument<String>("categoryId").orEmpty()
+            val fallbackList = if (catId == "sports_arab") YacineRepository.ARAB_SPORTS_CHANNELS else YacineRepository.BEIN_FALLBACK_CHANNELS
             val cached = YacineRepository.getCachedChannels(catId) ?: emptyList()
-            // If cached is empty and category looks like beIN sports, return fallback channels
-            val result = if (cached.isEmpty()) YacineRepository.BEIN_FALLBACK_CHANNELS else cached
+            val result = if (cached.isEmpty()) fallbackList else cached
             result.map { it.toMap() }
         }
         "live.channels.fetch" -> {
             val catId = call.argument<String>("categoryId").orEmpty()
             val force = call.argument<Boolean>("force") ?: false
+            val fallbackList = if (catId == "sports_arab") YacineRepository.ARAB_SPORTS_CHANNELS else YacineRepository.BEIN_FALLBACK_CHANNELS
             val fetched = YacineRepository.getChannels(catId, forceRefresh = force)
-            // Always include beIN fallback channels merged in
-            val merged = (fetched + YacineRepository.BEIN_FALLBACK_CHANNELS).distinctBy { it.id }
+            val merged = (fetched + fallbackList).distinctBy { it.id }
             merged.map { it.toMap() }
         }
         "live.eventStreams" -> YacineRepository.getEventStreams(call.argument<String>("id").orEmpty()).map { it.toMap() }
@@ -391,9 +396,13 @@ class FlutterMediaBridge(context: Context) {
         val bundle = MultiProviderRepository.loadSeasonBundleAndRefreshInBackground(seriesItem, forceRefresh)
         if (bundle.seasons.any { it.episodes.isNotEmpty() }) return bundle
         return if (seriesItem.isArabseedSource()) {
-            ArabseedRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
+            val primary = ArabseedRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
+            if (primary.seasons.any { it.episodes.isNotEmpty() }) primary
+            else MultiProviderRepository.fetchSeasonBundleAcrossProviders(seriesItem, primary, forceRefresh = true)
         } else {
-            MultiProviderRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
+            val primary = MultiProviderRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
+            if (primary.seasons.any { it.episodes.isNotEmpty() }) primary
+            else ArabseedRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
         }
     }
 }
@@ -417,13 +426,16 @@ private fun isArabseedUrl(value: String): Boolean {
     return host == "myseed.tv" || host.endsWith(".myseed.tv")
 }
 
-private fun safeHttpUri(value: String): java.net.URI? =
-    runCatching { java.net.URI(value.trim()) }.getOrNull()
+private fun safeHttpUri(value: String): android.net.Uri? {
+    val trimmed = value.trim()
+    val uri = runCatching { android.net.Uri.parse(trimmed) }.getOrNull() ?: return null
+    if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) return null
+    return uri
+}
 
 private fun isAllowedResolverInput(value: String): Boolean {
-    val uri = runCatching { java.net.URI(value.trim()) }.getOrNull() ?: return false
-    if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) return false
-    val host = uri.host.lowercase()
+    val uri = safeHttpUri(value) ?: return false
+    val host = uri.host?.lowercase().orEmpty()
     val redirectDomains = listOf("google.com", "googleadservices.com", "doubleclick.net", "googlesyndication.com")
     return redirectDomains.none { host == it || host.endsWith(".$it") }
 }
