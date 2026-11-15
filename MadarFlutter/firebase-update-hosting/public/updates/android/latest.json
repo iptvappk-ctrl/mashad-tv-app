@@ -1,9 +1,9 @@
 {
-  "packageName": "com.madar.madar_flutter",
-  "versionCode": 59,
-  "versionName": "1.0.54",
-  "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.54-59/zaqzouka-1.0.54-59.apk",
-  "sha256": "1d5f4825f0d6919cbd7fc8fd82e7e0347e0e9f6585cecd735abd207fc2abd081",
-  "mandatory": false,
-  "releaseNotes": "إصلاح شامل لقنوات وسيرفرات البث الرياضي، حل مشكلة الحلقات والمواسم الطويلة مع تحميل المزيد، وتحسين المشغل ضد أخطاء السيرفرات وإعادة المحاولة التلقائية"
+    "packageName":  "com.madar.madar_flutter",
+    "versionCode":  63,
+    "versionName":  "1.0.58",
+    "apkUrl":  "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.58-63/zaqzouka-1.0.58-63.apk",
+    "sha256":  "e14f74157e62d65c65843a792055813d2769f19c8c014d32f1a177f5924283a3",
+    "mandatory":  false,
+    "releaseNotes":  "إصلاح جذري لمحرك الروابط العربي (Unicode URIs)، دعم السيرفرات البديلة والتلقائية، دعم مطابقة العناوين الفردية، وتحديث مشغل الفيديو"
 }

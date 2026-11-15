@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
     [string]$ApkPath,
@@ -52,7 +52,7 @@ if (-not (Test-Path -LiteralPath $aapt) -or -not (Test-Path -LiteralPath $apksig
     throw "Android build tools aapt/apksigner were not found."
 }
 
-$badging = (& $aapt dump badging $apk | Select-Object -First 1)
+$badging = (& $aapt dump badging $apk)[0]
 if ($LASTEXITCODE -ne 0 -or $badging -notmatch "package: name='(?<package>[^']+)' versionCode='(?<code>[^']+)' versionName='(?<version>[^']+)'") {
     throw "Unable to read APK package/version metadata."
 }
