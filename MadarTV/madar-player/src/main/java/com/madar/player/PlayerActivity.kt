@@ -305,7 +305,7 @@ class PlayerActivity : ComponentActivity() {
             ?: intent.getStringExtra("video_url")).orEmpty()
         val title = (intent.getStringExtra(EXTRA_TITLE)
             ?: intent.getStringExtra(android.content.Intent.EXTRA_TITLE)
-            ?: intent.getStringExtra("title")).orEmpty().ifBlank { "زقزوقة بلاير" }
+            ?: intent.getStringExtra("title")).orEmpty().ifBlank { "ZAG Player" }
         val userAgent = intent.getStringExtra(EXTRA_USER_AGENT).orEmpty()
         val referer = intent.getStringExtra(EXTRA_REFERER).orEmpty()
         val streamHeaders = runCatching {
@@ -2187,7 +2187,7 @@ private fun PlayerScreen(
                                     .background(Color(0xFF22C55E))
                             )
                             Text(
-                                text = "زقزوقة TV",
+                                text = "ZAG Player",
                                 color = Color.White.copy(alpha = 0.85f),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
@@ -2321,7 +2321,7 @@ private fun PlayerScreen(
                             .background(Color(0xFF22C55E))
                     )
                     Text(
-                        text = "زقزوقة TV",
+                        text = "ZAG Player",
                         color = Color.White.copy(alpha = 0.82f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
