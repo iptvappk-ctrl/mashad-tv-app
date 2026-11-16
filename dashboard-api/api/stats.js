@@ -125,6 +125,61 @@ module.exports = async (req, res) => {
       }))
       .sort((a, b) => b.count - a.count);
 
+    // 6.b Detailed Cities Breakdown (المواقع والمدن بالتفصيل)
+    const cityMap = {};
+    for (const s of sessions) {
+      let loc = s.location || (s.city ? `${s.city}، ${s.region || ''} ${s.country || ''}` : s.country || 'مصر (EG)');
+      loc = loc.replace(/،\s*،/g, '،').trim();
+      cityMap[loc] = (cityMap[loc] || 0) + 1;
+    }
+    const topCities = Object.entries(cityMap)
+      .map(([name, count]) => ({
+        name,
+        count,
+        percent: totalSessions > 0 ? Math.round((count / totalSessions) * 100) : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // 6.c Audience Segments Breakdown (شرائح الجمهور المصنفة للإعلانات)
+    const segMap = {};
+    for (const s of sessions) {
+      const segName = s.audienceSegmentName || 'عشاق سينما الأكشن والإثارة 🎬';
+      segMap[segName] = (segMap[segName] || 0) + 1;
+    }
+    const audienceSegments = Object.entries(segMap)
+      .map(([name, count]) => ({
+        name,
+        count,
+        percent: totalSessions > 0 ? Math.round((count / totalSessions) * 100) : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // 6.d Real Data Monetization & Video Ad Valuation (تسييل البيانات والأرباح التقديرية)
+    const plays = stats.totalPlays || 0;
+    const activeProfiles = totalSessions;
+    const estDailyVastImpressions = plays;
+    const ecpmAvgUsd = 5.0; // Market average eCPM for MENA pre-rolls ($3 - $8)
+    const egpUsdRate = 50.0;
+    const estDailyRevenueUsd = Number(((estDailyVastImpressions * ecpmAvgUsd) / 1000).toFixed(2));
+    const estMonthlyRevenueUsd = Number((estDailyRevenueUsd * 30).toFixed(2));
+    const estDailyRevenueEgp = Math.round(estDailyRevenueUsd * egpUsdRate);
+    const estMonthlyRevenueEgp = Math.round(estMonthlyRevenueUsd * egpUsdRate);
+    const dmpProfileRatePer1k = 1.5; // $1.50 per 1k profiles (LiveRamp, Lotame)
+    const dmpMonthlyRevenueUsd = Number(((activeProfiles * dmpProfileRatePer1k) / 1000).toFixed(2));
+
+    const monetization = {
+      totalPlays: plays,
+      activeProfiles,
+      estDailyVastImpressions,
+      ecpmAvgUsd,
+      estDailyRevenueUsd,
+      estMonthlyRevenueUsd,
+      estDailyRevenueEgp,
+      estMonthlyRevenueEgp,
+      dmpMonthlyRevenueUsd,
+      trendReportPriceUsd: 1000,
+    };
+
     // 7. Hourly traffic
     const hourlyTraffic = Array(24).fill(0);
     for (const s of sessions) {
@@ -199,6 +254,8 @@ module.exports = async (req, res) => {
       analytics: {
         deviceBrands,
         topCountries,
+        topCities,
+        audienceSegments,
         hourlyTraffic,
         osList,
         webBrowsers,
@@ -207,6 +264,7 @@ module.exports = async (req, res) => {
           { name: 'الموقع الإلكتروني (Web Portal) 🌐', count: webSessions.length, active: webActiveNow },
         ],
       },
+      monetization,
       sessions,
       topContent,
       searches: searchesList,

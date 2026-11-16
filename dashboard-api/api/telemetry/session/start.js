@@ -1,4 +1,4 @@
-const { db, resolveCountry, sendJson, handleCors } = require('../../_lib');
+const { db, resolveDetailedLocation, resolveAudienceSegment, sendJson, handleCors } = require('../../_lib');
 
 function formatClockTime(d) {
   d = d || new Date();
@@ -16,10 +16,17 @@ module.exports = async (req, res) => {
     const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     const rawDevice = (body.device || body.deviceModel || '').trim();
     const device = rawDevice.length > 0 ? rawDevice : 'Android Device';
-    const remoteIp = (req.headers && req.headers['x-forwarded-for']) || '';
-    const { code: countryCode, name: country } = resolveCountry(body.countryCode, body.timezone);
+
+    // Detailed Geolocation resolution (City + Governorate + Country + ISP)
+    const geo = resolveDetailedLocation(body, req);
 
     const isWeb = body.platform === 'web' || body.deviceType === 'web';
+    const lastSection = (body.currentSection || (isWeb ? 'الموقع 🌐' : 'الرئيسية 🏠')).trim();
+    const lastContent = body.currentContent || '';
+
+    // Classify user into IAB Audience Segment
+    const audience = resolveAudienceSegment(lastContent, lastSection);
+
     const newSession = {
       id: sessionId,
       deviceId: body.deviceId || sessionId,
@@ -29,14 +36,23 @@ module.exports = async (req, res) => {
       browser: body.browser || '',
       osVersion: body.osVersion || (isWeb ? 'Web Browser' : 'Android'),
       appVersion: body.appVersion || (isWeb ? 'Web Portal v1.0' : ''),
-      country,
-      countryCode,
+      country: geo.country,
+      countryCode: geo.countryCode,
+      city: geo.city,
+      region: geo.region,
+      location: geo.location,
+      isp: geo.isp,
+      audienceSegmentId: audience.id,
+      audienceSegmentName: audience.name,
+      audienceCategory: audience.category,
+      audienceAdValueTier: audience.adValueTier,
+      targetAdvertisers: audience.targetAdvertisers,
       openTime: formatClockTime(now),
       closeTime: 'نشط الآن...',
       durationText: 'مستمر (1 د)',
       durationMinutes: 1,
-      lastSection: (body.currentSection || (isWeb ? 'الموقع 🌐' : 'الرئيسية 🏠')).trim(),
-      lastContent: body.currentContent || '',
+      lastSection,
+      lastContent,
       status: 'active',
       openedAt: now.toISOString(),
       lastSeen: now.toISOString(),
@@ -60,13 +76,13 @@ module.exports = async (req, res) => {
     const actLabel = isWeb ? 'زيارة للموقع الإلكتروني' : 'فتح تطبيق زقزوقة';
     await db.ref('activityLog').push({
       type: 'open',
-      text: `${actLabel} من ${device} (${country})`,
+      text: `${actLabel} من ${device} (${geo.location})`,
       icon: actIcon,
       time: formatClockTime(now),
       timestamp: now.toISOString(),
     });
 
-    return sendJson(res, 200, { ok: true, sessionId });
+    return sendJson(res, 200, { ok: true, sessionId, location: geo.location });
   } catch (err) {
     console.error('session/start error:', err);
     return sendJson(res, 500, { ok: false, error: err.message });

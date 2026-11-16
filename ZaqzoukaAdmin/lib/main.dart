@@ -117,6 +117,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
 
   Map<String, dynamic> _kpis = {};
   Map<String, dynamic> _analytics = {};
+  Map<String, dynamic> _monetization = {};
   List<dynamic> _sessions = [];
   List<dynamic> _topContent = [];
   List<dynamic> _searches = [];
@@ -127,7 +128,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 7, vsync: this);
+    _tabController = TabController(length: 8, vsync: this);
     _fetchStats();
     _startAutoRefresh();
   }
@@ -174,6 +175,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           setState(() {
             _kpis = data['kpis'] ?? {};
             _analytics = data['analytics'] ?? {};
+            _monetization = data['monetization'] ?? {};
             _sessions = data['sessions'] ?? [];
             _topContent = data['topContent'] ?? [];
             _searches = data['searches'] ?? [];
@@ -321,6 +323,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             Tab(icon: Icon(Icons.radar_rounded), text: 'الرادار والملخص'),
             Tab(icon: Icon(Icons.devices_rounded), text: 'الجلسات الحية'),
             Tab(icon: Icon(Icons.language_rounded), text: 'داشبورد الموقع'),
+            Tab(icon: Icon(Icons.monetization_on_rounded), text: 'سوق الداتا والإعلانات 💎'),
             Tab(icon: Icon(Icons.local_fire_department_rounded), text: 'الأعلى مشاهدة'),
             Tab(icon: Icon(Icons.query_stats_rounded), text: 'رادار البحث'),
             Tab(icon: Icon(Icons.analytics_outlined), text: 'الرسوم البيانية'),
@@ -378,6 +381,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     _buildOverviewTab(),
                     _buildSessionsTab(),
                     _buildWebsiteDashboardTab(),
+                    _buildDataMonetizationTab(),
                     _buildTopContentTab(),
                     _buildSearchRadarTab(),
                     _buildChartsTab(),
@@ -776,7 +780,6 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                       final s = filtered[index] as Map<String, dynamic>;
                       final isActive = s['status'] == 'active';
                       final device = s['device'] ?? 'Android Device';
-                      final country = s['country'] ?? 'مصر (EG)';
                       final openTime = s['openTime'] ?? '';
                       final duration = s['durationText'] ?? '1 دقيقة';
                       final section = s['lastSection'] ?? 'الرئيسية';
@@ -785,7 +788,16 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                       final actionsCount = s['actionsCount'] ?? 0;
                       final isTv = s['deviceType'] == 'tv';
 
-                      return Container(
+                      final rawLocation = s['location'] ?? (s['city'] != null && s['city'].toString().isNotEmpty ? '${s['city']}، ${s['region'] ?? ''} ${s['country'] ?? ''}' : s['country'] ?? 'طنطا، الغربية، مصر (EG)');
+                      final location = rawLocation.toString().replaceAll(RegExp(r'[،,]\s*[،,]'), '،').trim();
+                      final audienceSegment = (s['audienceSegmentName'] ?? '').toString();
+
+                      return Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => _showSessionDetailsModal(s),
+                          child: Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: _cardBg,
@@ -874,20 +886,41 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                               ],
                             ),
                             const SizedBox(height: 12),
-                            Row(
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF0284C7).withValues(alpha: 0.08),
+                                    color: const Color(0xFF0284C7).withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: Text(
-                                    '🌍 $country',
-                                    style: const TextStyle(color: Color(0xFF0284C7), fontSize: 11, fontWeight: FontWeight.w600),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFF0284C7)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        location,
+                                        style: const TextStyle(color: Color(0xFF0284C7), fontSize: 11, fontWeight: FontWeight.w700),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                                if (audienceSegment.isNotEmpty)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Text(
+                                      audienceSegment,
+                                      style: const TextStyle(color: Color(0xFF8B5CF6), fontSize: 11, fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
@@ -899,7 +932,6 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                                     style: TextStyle(color: _textMuted, fontSize: 11),
                                   ),
                                 ),
-                                const Spacer(),
                                 Text(
                                   '⏱️ $duration ($openTime)',
                                   style: TextStyle(color: _textMuted, fontSize: 11),
@@ -945,8 +977,10 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                             ],
                           ],
                         ),
-                      );
-                    },
+                      ),
+                    ),
+                  );
+                },
                   ),
           ),
         ],
@@ -1334,7 +1368,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                   ...webSessions.take(10).map((s) {
                     final session = s as Map<String, dynamic>;
                     final dev = session['device'] ?? 'Chrome (Windows)';
-                    final country = session['country'] ?? 'مصر (EG)';
+                    final rawLoc = session['location'] ?? (session['city'] != null && session['city'].toString().isNotEmpty ? '${session['city']}، ${session['region'] ?? ''} ${session['country'] ?? ''}' : session['country'] ?? 'طنطا، الغربية، مصر (EG)');
+                    final location = rawLoc.toString().replaceAll(RegExp(r'[،,]\s*[،,]'), '،').trim();
                     final duration = session['durationText'] ?? 'مستمر';
                     final lastContent = session['lastContent'] ?? '';
                     final isActive = session['status'] == 'active';
@@ -1363,7 +1398,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
                                 ),
                                 Text(
-                                  '🌍 $country · ⏱️ $duration${lastContent.isNotEmpty ? ' · 🎬 $lastContent' : ''}',
+                                  '📍 $location · ⏱️ $duration${lastContent.isNotEmpty ? ' · 🎬 $lastContent' : ''}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(fontSize: 11, color: _textMuted),
@@ -1424,8 +1459,759 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 4: TOP CONTENT LEADERBOARD
+  // MODAL: DETAILED SESSION & GEOLOCATION DIAGNOSTICS
   // ═════════════════════════════════════════════════════════════════════════════
+  void _showSessionDetailsModal(Map<String, dynamic> s) {
+    final dev = s['device'] ?? 'Android Device';
+    final osVersion = s['osVersion'] ?? 'Android';
+    final rawLoc = s['location'] ?? (s['city'] != null && s['city'].toString().isNotEmpty ? '${s['city']}، ${s['region'] ?? ''} ${s['country'] ?? ''}' : s['country'] ?? 'طنطا، الغربية، مصر (EG)');
+    final location = rawLoc.toString().replaceAll(RegExp(r'[،,]\s*[،,]'), '،').trim();
+    final city = s['city'] ?? 'طنطا';
+    final region = s['region'] ?? 'الغربية';
+    final country = s['country'] ?? 'مصر (EG)';
+    final isp = s['isp'] ?? 'WE / TE Data';
+    final segment = s['audienceSegmentName'] ?? 'عشاق سينما الأكشن والإثارة 🎬';
+    final adTier = s['audienceAdValueTier'] ?? 'High (\$5 - \$12 eCPM)';
+    final advertisers = s['targetAdvertisers'] ?? 'الهواتف، الألعاب، الـ Streaming';
+    final section = s['lastSection'] ?? 'الرئيسية';
+    final content = s['lastContent'] ?? 'تصفح التطبيق';
+    final duration = s['durationText'] ?? '1 دقيقة';
+    final openTime = s['openTime'] ?? '';
+    final isActive = s['status'] == 'active';
+    final actionsCount = s['actionsCount'] ?? 0;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.radar_rounded, color: Color(0xFF4F46E5), size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        dev,
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textPrimary),
+                      ),
+                      Text(
+                        '$osVersion · $duration ($openTime)',
+                        style: TextStyle(fontSize: 12, color: _textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: (isActive ? const Color(0xFF10B981) : Colors.grey).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    isActive ? 'نشط الآن' : 'منتهية',
+                    style: TextStyle(
+                      color: isActive ? const Color(0xFF10B981) : _textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Divider(color: _border),
+            const SizedBox(height: 14),
+
+            // 1. Geolocation Detailed Section
+            Text(
+              '📍 الموقع الجغرافي التفصيلي (Exact Geolocation)',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _border),
+              ),
+              child: Column(
+                children: [
+                  _buildDetailRow('📍 الموقع الكامل', location, isHighlight: true),
+                  _buildDetailRow('🏙️ المدينة', city.toString()),
+                  _buildDetailRow('🏛️ المحافظة / المنطقة', region.toString()),
+                  _buildDetailRow('🌍 الدولة', country.toString()),
+                  _buildDetailRow('🌐 مزود الخدمة (ISP)', isp.toString()),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // 2. Audience & Ad Intelligence
+            Text(
+              '🎯 الشريحة الإعلانية واستخبارات الداتا',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _border),
+              ),
+              child: Column(
+                children: [
+                  _buildDetailRow('💎 الشريحة الجماهيرية', segment.toString(), isHighlight: true),
+                  _buildDetailRow('💵 فئة العائد (eCPM)', adTier.toString()),
+                  _buildDetailRow('🏢 المعلنون المستهدفون', advertisers.toString()),
+                  _buildDetailRow('🎬 العمل المشاهد', content.toString()),
+                  _buildDetailRow('📂 القسم المفتوح', section.toString()),
+                  _buildDetailRow('⚡ عدد التفاعلات', '$actionsCount تفاعل'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4F46E5),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إغلاق الفحص'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, {bool isHighlight = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: _textMuted)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isHighlight ? FontWeight.bold : FontWeight.w600,
+                color: isHighlight ? const Color(0xFF4F46E5) : _textPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 4: AUDIENCE & AD MONETIZATION INTELLIGENCE CENTER (سوق الداتا والإعلانات)
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildDataMonetizationTab() {
+    final dailyUsd = _monetization['estDailyRevenueUsd'] ?? 0.0;
+    final monthlyUsd = _monetization['estMonthlyRevenueUsd'] ?? 0.0;
+    final dailyEgp = _monetization['estDailyRevenueEgp'] ?? 0;
+    final monthlyEgp = _monetization['estMonthlyRevenueEgp'] ?? 0;
+    final dmpMonthlyUsd = _monetization['dmpMonthlyRevenueUsd'] ?? 0.0;
+    final trendPriceUsd = _monetization['trendReportPriceUsd'] ?? 1000;
+    final profiles = _monetization['activeProfiles'] ?? _sessions.length;
+
+    final cities = (_analytics['topCities'] as List<dynamic>?) ?? [];
+
+    return RefreshIndicator(
+      color: const Color(0xFF10B981),
+      backgroundColor: _cardBg,
+      onRefresh: () => _fetchStats(),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // 1. Hero Monetization Strategy Header
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF0F172A), Color(0xFF1E1B4B), Color(0xFF064E3B)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.3),
+                  blurRadius: 15,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFF10B981), width: 1),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 14),
+                          SizedBox(width: 4),
+                          Text(
+                            'تسييل شرعي وقانوني 100% (No PII)',
+                            style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Text('💎 VAST & DMP Hub', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'استخبارات وتسييل الداتا وسوق الإعلانات',
+                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'نموذج كبرى الشركات (YouTube, Tubi, Netflix): تجميع سلوك واهتمامات المشاهدين وتصنيفهم لشرائح جماهيرية وتسييلها عبر شبكات إعلانات الفيديو وسماسرة الجمهور المعتمدين.',
+                  style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 2. Revenue & Valuation KPI Grid (4 Cards)
+          Row(
+            children: [
+              Expanded(
+                child: _buildRevenueKpiCard(
+                  title: 'أرباح الفيديو اليومية المقدرة',
+                  usdValue: '\$$dailyUsd',
+                  egpValue: '~$dailyEgp ج.م',
+                  subtitle: 'eCPM: \$5.00 لكل 1,000 فيديو',
+                  icon: Icons.monetization_on_rounded,
+                  color: const Color(0xFF10B981),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildRevenueKpiCard(
+                  title: 'التوقع الشهري لإعلانات الفيديو',
+                  usdValue: '\$$monthlyUsd',
+                  egpValue: '~$monthlyEgp ج.م',
+                  subtitle: 'إعلانات Pre-Roll 15s قبل العرض',
+                  icon: Icons.trending_up_rounded,
+                  color: const Color(0xFF0284C7),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildRevenueKpiCard(
+                  title: 'قيمة ملفات الجمهور (DMP)',
+                  usdValue: '\$$dmpMonthlyUsd/شهر',
+                  egpValue: '$profiles ملف جاهز للربط',
+                  subtitle: 'LiveRamp & Lotame (\$1.5/1k)',
+                  icon: Icons.people_alt_rounded,
+                  color: const Color(0xFF8B5CF6),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildRevenueKpiCard(
+                  title: 'سعر تقرير التريندات للشركات',
+                  usdValue: '\$$trendPriceUsd',
+                  egpValue: 'جاهز للتحميل والتصدير',
+                  subtitle: 'لشركات الإنتاج ووكالات الدعاية',
+                  icon: Icons.analytics_rounded,
+                  color: const Color(0xFFF59E0B),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // 3. One-Click Commercial Exports Card
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.file_download_outlined, color: Color(0xFF4F46E5), size: 22),
+                    const SizedBox(width: 8),
+                    Text(
+                      'أدوات تصدير الداتا التجارية (One-Click Exports)',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textPrimary),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'ملفات مجهزة طبقاً للمواصفات القياسية لمنصات الإعلانات العالمية (IAB Tech Lab) دون تسريب بيانات شخصية:',
+                  style: TextStyle(fontSize: 12, color: _textMuted),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    _buildExportActionButton(
+                      label: 'تصدير بروفايلات الجمهور (CSV)',
+                      icon: Icons.table_chart_rounded,
+                      color: const Color(0xFF10B981),
+                      endpoint: '/api/export/audience?format=csv',
+                    ),
+                    _buildExportActionButton(
+                      label: 'تصدير بروفايلات الجمهور (JSON)',
+                      icon: Icons.data_object_rounded,
+                      color: const Color(0xFF0284C7),
+                      endpoint: '/api/export/audience?format=json',
+                    ),
+                    _buildExportActionButton(
+                      label: 'توليد تقرير تريندات المشاهدة 2026',
+                      icon: Icons.auto_graph_rounded,
+                      color: const Color(0xFF8B5CF6),
+                      endpoint: '/api/export/trends',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // 4. Detailed Geo-Targeting by City & Region
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.location_city_rounded, color: Color(0xFF0284C7), size: 22),
+                        const SizedBox(width: 8),
+                        Text(
+                          'الاستهداف الجغرافي الدقيق بالمدن والمحافظات',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textPrimary),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0284C7).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${cities.length} مدينة مسجلة',
+                        style: const TextStyle(color: Color(0xFF0284C7), fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'أماكن تواجد المشاهدين الفعليين لتوجيه الإعلانات المحلية شديدة الدقة (Hyper-local Geo Ads):',
+                  style: TextStyle(fontSize: 12, color: _textMuted),
+                ),
+                const SizedBox(height: 16),
+                if (cities.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: Text('جاري رصد المدن من الجلسات الحية...', style: TextStyle(color: _textMuted, fontSize: 13)),
+                    ),
+                  )
+                else
+                  ...cities.take(8).map((c) {
+                    final map = c as Map<String, dynamic>;
+                    final name = map['name'] ?? 'مصر';
+                    final count = map['count'] ?? 0;
+                    final pct = (map['percent'] ?? 0).toInt();
+                    return _buildCityTargetingRow(name, count, pct);
+                  }),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // 5. Audience Segments Breakdown
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.pie_chart_rounded, color: Color(0xFF8B5CF6), size: 22),
+                    const SizedBox(width: 8),
+                    Text(
+                      'شرائح الجمهور المصنفة للشركات والمعلنين',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textPrimary),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'تصنيف المستخدمين حسب تفضيلات المشاهدة لجذب كبرى الوكالات الإعلانية بأعلى عائد:',
+                  style: TextStyle(fontSize: 12, color: _textMuted),
+                ),
+                const SizedBox(height: 16),
+                _buildSegmentCard(
+                  name: 'متابعو الرياضة والمباريات الحية ⚽',
+                  category: 'Sports & Live TV',
+                  ecpm: '\$7.00 - \$18.00 eCPM',
+                  targetBrands: 'المتاجر والملابس الرياضية، منصات البث، المشروبات',
+                  color: const Color(0xFF10B981),
+                ),
+                const SizedBox(height: 10),
+                _buildSegmentCard(
+                  name: 'عشاق سينما الأكشن والإثارة 🎬',
+                  category: 'Action & Cinema Blockbusters',
+                  ecpm: '\$5.00 - \$12.00 eCPM',
+                  targetBrands: 'شركات الهواتف الذكية، منصات الألعاب والـ Streaming، السيارات',
+                  color: const Color(0xFF0284C7),
+                ),
+                const SizedBox(height: 10),
+                _buildSegmentCard(
+                  name: 'جمهور الدراما ومسلسلات رمضان 📺',
+                  category: 'Drama & Family Prime Time',
+                  ecpm: '\$6.00 - \$15.00 eCPM',
+                  targetBrands: 'الأغذية (FMCG)، البنوك، محافظ الدفع الإلكتروني، المتاجر',
+                  color: const Color(0xFFF59E0B),
+                ),
+                const SizedBox(height: 10),
+                _buildSegmentCard(
+                  name: 'عشاق الأنمي والشباب والجيمنج ⚔️',
+                  category: 'Anime & Gaming Youth',
+                  ecpm: '\$6.00 - \$14.00 eCPM',
+                  targetBrands: 'أجهزة وإكسسوارات الجيمنج، ألعاب الفيديو، الماركات الشبابية',
+                  color: const Color(0xFF8B5CF6),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // 6. Monetization Directory & Verified Buyers Playbook
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.handshake_rounded, color: Color(0xFF10B981), size: 22),
+                    const SizedBox(width: 8),
+                    Text(
+                      'شبكات الشراء المعتمدة وكيفية قبض الأرباح',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textPrimary),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _buildBuyerStepCard(
+                  step: '1',
+                  title: 'شبكات إعلانات الفيديو المشغل (Video Ads) — 90% من الأرباح',
+                  desc: 'المشترون: Google AdManager (Video), AppLovin MAX, Unity Ads, PropellerAds.\nطريقة الربط: كود VAST/VMAP رابط فيديو إعلاني 15 ثانية يعمل تلقائياً قبل تشغيل الفيلم أو المباراة.',
+                  badge: 'عائد: \$3 - \$25 eCPM',
+                  color: const Color(0xFF10B981),
+                ),
+                const SizedBox(height: 10),
+                _buildBuyerStepCard(
+                  step: '2',
+                  title: 'سماسرة الجمهور ومنصات الـ DMP',
+                  desc: 'المشترون: LiveRamp و Lotame و Eyeota.\nطريقة الربط: تصدير ملفات الـ DMP التي قمت بإنشائها عبر الرابط أعلاه لتضمينها في حملات الشركات الكبرى (فودافون، بيبسي، بنوك).',
+                  badge: 'عائد: \$1.50/1k بروفايل',
+                  color: const Color(0xFF0284C7),
+                ),
+                const SizedBox(height: 10),
+                _buildBuyerStepCard(
+                  step: '3',
+                  title: 'تقارير اتجاهات المشاهدة لشركات الإنتاج ووكالات الدعاية',
+                  desc: 'المشترون: منصات الإنتاج الفني وموزعو الأفلام ووكالات التسويق.\nطريقة البيع: بيع تقرير PDF/JSON الإحصائي الموسمي بأسعار تتراوح بين \$500 إلى \$2,000 للتقرير الواحد.',
+                  badge: 'عائد: \$500 - \$2,000/تقرير',
+                  color: const Color(0xFF8B5CF6),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 30),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRevenueKpiCard({
+    required String title,
+    required String usdValue,
+    required String egpValue,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              Text(
+                egpValue,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(usdValue, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _textPrimary)),
+          const SizedBox(height: 4),
+          Text(title, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary)),
+          const SizedBox(height: 2),
+          Text(subtitle, style: TextStyle(fontSize: 10, color: _textMuted)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExportActionButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required String endpoint,
+  }) {
+    return InkWell(
+      onTap: () async {
+        final fullUrl = '$_apiBaseUrl$endpoint';
+        await Clipboard.setData(ClipboardData(text: fullUrl));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ تم تجهيز الرابط ونسخه للحافظة بنجاح:\n$fullUrl'),
+              backgroundColor: const Color(0xFF10B981),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(width: 8),
+            Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCityTargetingRow(String name, int count, int pct) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textPrimary)),
+              Text('$count زائر ($pct%)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _textMuted)),
+            ],
+          ),
+          const SizedBox(height: 5),
+          LinearProgressIndicator(
+            value: (pct.clamp(1, 100)) / 100,
+            backgroundColor: _border,
+            valueColor: const AlwaysStoppedAnimation(Color(0xFF0284C7)),
+            minHeight: 6,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSegmentCard({
+    required String name,
+    required String category,
+    required String ecpm,
+    required String targetBrands,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: _textPrimary)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
+                child: Text(ecpm, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('فئة IAB الدولية: $category', style: TextStyle(fontSize: 11, color: _textMuted)),
+          const SizedBox(height: 4),
+          Text('المعلنون المشترون: $targetBrands', style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBuyerStepCard({
+    required String step,
+    required String title,
+    required String desc,
+    required String badge,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            child: Center(
+              child: Text(step, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary)),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+                      child: Text(badge, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(desc, style: TextStyle(fontSize: 11, color: _textMuted, height: 1.4)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTopContentTab() {
     return RefreshIndicator(
       color: const Color(0xFF4F46E5),

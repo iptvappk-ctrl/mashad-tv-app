@@ -100,6 +100,26 @@ export async function initWebTelemetry(): Promise<void> {
     const os = detectOS();
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Cairo";
 
+    let city = "طنطا";
+    let region = "الغربية";
+    let isp = "WE / TE Data";
+    let location = "طنطا، الغربية، مصر (EG)";
+
+    try {
+      const geoRes = await fetch("https://ipapi.co/json/", { signal: AbortSignal.timeout(2000) });
+      if (geoRes.ok) {
+        const geoData = await geoRes.json();
+        if (geoData?.city) {
+          city = geoData.city === "Tanta" ? "طنطا" : (geoData.city === "Cairo" ? "القاهرة" : geoData.city);
+          region = geoData.region === "Gharbia" ? "الغربية" : (geoData.region || "");
+          isp = geoData.org || isp;
+          location = `${city}، ${region ? region + "، " : ""}مصر (${geoData.country_code || "EG"})`;
+        }
+      }
+    } catch {
+      // Fallback to local default
+    }
+
     const payload = {
       deviceId,
       device: `${browser} (${os})`,
@@ -108,6 +128,10 @@ export async function initWebTelemetry(): Promise<void> {
       browser,
       osVersion: os,
       countryCode: "EG",
+      city,
+      region,
+      location,
+      isp,
       timezone,
       currentSection: "الموقع الإلكتروني 🌐",
       isNewInstall: false,

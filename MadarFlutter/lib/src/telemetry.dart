@@ -13,6 +13,10 @@ class AppTelemetry {
   static String _osVersion = 'Android';
   static String _countryCode = 'EG';
   static String _timezone = 'Africa/Cairo';
+  static String _city = 'طنطا';
+  static String _region = 'الغربية';
+  static String _isp = 'WE / TE Data';
+  static String _location = 'طنطا، الغربية، مصر (EG)';
   static bool _isNewInstall = false;
 
   static String _currentSection = 'الرئيسية 🏠';
@@ -54,8 +58,70 @@ class AppTelemetry {
       }
     } catch (_) {}
 
+    // Detect exact real location (City, Governorate, ISP) non-blockingly
+    await _detectRealLocation();
+
     // Find reachable telemetry host in background without blocking startup
     unawaited(_discoverHostAndStartSession());
+  }
+
+  static Future<void> _detectRealLocation() async {
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+      final req = await client.getUrl(Uri.parse('http://ip-api.com/json'));
+      final res = await req.close().timeout(const Duration(seconds: 2));
+      if (res.statusCode == 200) {
+        final body = await res.transform(utf8.decoder).join();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        if (data['status'] == 'success') {
+          final rawCity = data['city']?.toString() ?? '';
+          final rawRegion = data['regionName']?.toString() ?? '';
+          final code = data['countryCode']?.toString() ?? 'EG';
+          final isp = data['isp']?.toString() ?? 'WE / TE Data';
+
+          _countryCode = code;
+          _city = _translateCity(rawCity);
+          _region = _translateRegion(rawRegion);
+          _isp = isp;
+          if (_city.isNotEmpty && _region.isNotEmpty && _city != _region) {
+            _location = '$_city، $_region، مصر ($code)';
+          } else if (_city.isNotEmpty) {
+            _location = '$_city، مصر ($code)';
+          }
+        }
+      }
+      client.close();
+    } catch (_) {}
+  }
+
+  static String _translateCity(String raw) {
+    final c = raw.trim().toLowerCase();
+    const map = {
+      'tanta': 'طنطا', 'cairo': 'القاهرة', 'giza': 'الجيزة', 'alexandria': 'الإسكندرية',
+      'mansoura': 'المنصورة', 'el mansoura': 'المنصورة', 'zagazig': 'الزقازيق',
+      'ismailia': 'الإسماعيلية', 'suez': 'السويس', 'port said': 'بورسعيد',
+      'fayoum': 'الفيوم', 'beni suef': 'بني سويف', 'minya': 'المنيا',
+      'asyut': 'أسيوط', 'sohag': 'سوهاج', 'qena': 'قنا', 'luxor': 'الأقصر',
+      'aswan': 'أسوان', 'hurghada': 'الغردقة', 'sharm el sheikh': 'شرم الشيخ',
+      'damanhur': 'دمنهور', 'kafr el sheikh': 'كفر الشيخ', 'banha': 'بنها',
+      'damietta': 'دمياط', 'shibin el kom': 'شبين الكوم', 'arish': 'العريش',
+      'marsa matruh': 'مرسى مطروح', '6th of october': '6 أكتوبر',
+      'riyadh': 'الرياض', 'jeddah': 'جدة', 'dammam': 'الدمام', 'dubai': 'دبي',
+    };
+    return map[c] ?? raw;
+  }
+
+  static String _translateRegion(String raw) {
+    final r = raw.trim().toLowerCase();
+    const map = {
+      'gharbia': 'الغربية', 'cairo': 'القاهرة', 'giza': 'الجيزة', 'alexandria': 'الإسكندرية',
+      'dakahlia': 'الدقهلية', 'sharqia': 'الشرقية', 'monufia': 'المنوفية',
+      'qalyubia': 'القليوبية', 'beheira': 'البحيرة', 'kafr el sheikh': 'كفر الشيخ',
+      'damietta': 'دمياط', 'port said': 'بورسعيد', 'ismailia': 'الإسماعيلية',
+      'suez': 'السويس', 'red sea': 'البحر الأحمر', 'south sinai': 'جنوب سيناء',
+      'riyadh': 'منطقة الرياض', 'makkah': 'منطقة مكة', 'dubai': 'إمارة دبي',
+    };
+    return map[r] ?? raw;
   }
 
   static Future<void> _discoverHostAndStartSession() async {
@@ -91,6 +157,10 @@ class AppTelemetry {
         'deviceType': _deviceType,
         'osVersion': _osVersion,
         'countryCode': _countryCode,
+        'city': _city,
+        'region': _region,
+        'location': _location,
+        'isp': _isp,
         'timezone': _timezone,
         'currentSection': _currentSection,
         'currentContent': _currentContent,
