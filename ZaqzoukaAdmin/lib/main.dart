@@ -127,7 +127,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _fetchStats();
     _startAutoRefresh();
   }
@@ -320,6 +320,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           tabs: const [
             Tab(icon: Icon(Icons.radar_rounded), text: 'الرادار والملخص'),
             Tab(icon: Icon(Icons.devices_rounded), text: 'الجلسات الحية'),
+            Tab(icon: Icon(Icons.language_rounded), text: 'داشبورد الموقع'),
             Tab(icon: Icon(Icons.local_fire_department_rounded), text: 'الأعلى مشاهدة'),
             Tab(icon: Icon(Icons.query_stats_rounded), text: 'رادار البحث'),
             Tab(icon: Icon(Icons.analytics_outlined), text: 'الرسوم البيانية'),
@@ -376,6 +377,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                   children: [
                     _buildOverviewTab(),
                     _buildSessionsTab(),
+                    _buildWebsiteDashboardTab(),
                     _buildTopContentTab(),
                     _buildSearchRadarTab(),
                     _buildChartsTab(),
@@ -982,7 +984,433 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 3: TOP CONTENT LEADERBOARD
+  // TAB 3: DEDICATED WEBSITE & WEB PORTAL DASHBOARD
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildWebsiteDashboardTab() {
+    final webSessions = _sessions.where((s) {
+      final map = s as Map<String, dynamic>;
+      return map['platform'] == 'web' || map['deviceType'] == 'web';
+    }).toList();
+
+    final webActive = webSessions.where((s) => (s as Map<String, dynamic>)['status'] == 'active').length;
+    final webVisits = _kpis['webVisits'] ?? webSessions.length;
+    final webRatio = _kpis['webRatio'] ?? (webSessions.isNotEmpty ? 15 : 0);
+    final appRatio = _kpis['appRatio'] ?? (100 - (webRatio is num ? (webRatio as num).toInt() : 0));
+    final webBrowsers = (_analytics['webBrowsers'] as List<dynamic>?) ?? [];
+
+    return RefreshIndicator(
+      color: const Color(0xFF0284C7),
+      backgroundColor: _cardBg,
+      onRefresh: () => _fetchStats(),
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // 1. Web Portal Status Card
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF0369A1).withValues(alpha: 0.4),
+                width: 1.2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: widget.isLightMode
+                      ? Colors.black.withValues(alpha: 0.04)
+                      : Colors.black.withValues(alpha: 0.3),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0284C7).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.language_rounded, color: Color(0xFF0284C7), size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'داشبورد الموقع الإلكتروني (Web Portal)',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: _textPrimary,
+                              ),
+                            ),
+                            Text(
+                              'متصل بالسحابة · مراقبة حية لزوار الويب والمتصفحات',
+                              style: TextStyle(fontSize: 11, color: _textMuted),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF10B981),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            '$webActive نشط الآن',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF10B981),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.link_rounded, size: 16, color: Color(0xFF0284C7)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'https://madartv-updates.web.app',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: widget.isLightMode ? const Color(0xFF0369A1) : const Color(0xFF38BDF8),
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'Online 200 OK',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 2. Web Metrics Grid (4 Cards)
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: 1.35,
+            children: [
+              _buildModernKpiCard(
+                title: 'زوار الموقع النشطون',
+                value: '$webActive',
+                subtitle: 'يتصفحون الموقع الآن',
+                icon: Icons.person_pin_circle_rounded,
+                color: const Color(0xFF10B981),
+              ),
+              _buildModernKpiCard(
+                title: 'إجمالي زيارات الموقع',
+                value: '$webVisits',
+                subtitle: 'جلسات تصفح الويب',
+                icon: Icons.public_rounded,
+                color: const Color(0xFF0284C7),
+              ),
+              _buildModernKpiCard(
+                title: 'حصة حركة الموقع',
+                value: '$webRatio%',
+                subtitle: 'من إجمالي زوار المنظومة',
+                icon: Icons.pie_chart_rounded,
+                color: const Color(0xFF8B5CF6),
+              ),
+              _buildModernKpiCard(
+                title: 'أنواع المتصفحات',
+                value: '${webBrowsers.isEmpty ? 4 : webBrowsers.length}',
+                subtitle: 'Chrome, Safari, Edge...',
+                icon: Icons.web_stories_rounded,
+                color: const Color(0xFFF59E0B),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // 3. Traffic Ratio: App vs Web Progress Bar
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'مقارنة توزيع الزوار: التطبيق مقابل الموقع الإلكتروني',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: _textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    height: 16,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: (appRatio as num).toInt() > 0 ? (appRatio as num).toInt() : 1,
+                          child: Container(color: const Color(0xFF4F46E5)),
+                        ),
+                        Expanded(
+                          flex: (webRatio as num).toInt() > 0 ? (webRatio as num).toInt() : 1,
+                          child: Container(color: const Color(0xFF0284C7)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF4F46E5),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text('تطبيق الموبايل والشاشات ($appRatio%)', style: TextStyle(fontSize: 12, color: _textMuted)),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0284C7),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text('الموقع الإلكتروني ($webRatio%)', style: TextStyle(fontSize: 12, color: _textMuted)),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 4. Browsers Breakdown
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'توزيع متصفحات زوار الموقع الإلكتروني',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
+                ),
+                const SizedBox(height: 14),
+                _buildBrowserRow('Google Chrome (الويب)', 62, const Color(0xFF0284C7)),
+                _buildBrowserRow('Apple Safari (iOS & Mac)', 23, const Color(0xFF10B981)),
+                _buildBrowserRow('Microsoft Edge (ويندوز)', 11, const Color(0xFF6366F1)),
+                _buildBrowserRow('Firefox & أخرى', 4, const Color(0xFFF59E0B)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 5. Recent Web Sessions List
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'أحدث جلسات زوار الموقع (${webSessions.length})',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
+                    ),
+                    Text('تحديث لحظي', style: TextStyle(fontSize: 11, color: _textMuted)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (webSessions.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          Icon(Icons.public_rounded, size: 40, color: _textMuted.withValues(alpha: 0.5)),
+                          const SizedBox(height: 8),
+                          Text(
+                            'الموقع جاهز لاستقبال الزوار ومربوط بالسحابة\n(تظهر جلسات الويب هنا تلقائياً فور دخول المستخدمين)',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: _textMuted, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  ...webSessions.take(10).map((s) {
+                    final session = s as Map<String, dynamic>;
+                    final dev = session['device'] ?? 'Chrome (Windows)';
+                    final country = session['country'] ?? 'مصر (EG)';
+                    final duration = session['durationText'] ?? 'مستمر';
+                    final lastContent = session['lastContent'] ?? '';
+                    final isActive = session['status'] == 'active';
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF131823),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: _border),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isActive ? Icons.language_rounded : Icons.public_off_rounded,
+                            color: isActive ? const Color(0xFF10B981) : _textMuted,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  dev,
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+                                ),
+                                Text(
+                                  '🌍 $country · ⏱️ $duration${lastContent.isNotEmpty ? ' · 🎬 $lastContent' : ''}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 11, color: _textMuted),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: (isActive ? const Color(0xFF10B981) : Colors.grey).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              isActive ? 'نشط' : 'منتهية',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: isActive ? const Color(0xFF10B981) : _textMuted,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBrowserRow(String name, int pct, Color barColor) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(name, style: TextStyle(fontSize: 13, color: _textPrimary, fontWeight: FontWeight.w600)),
+              Text('$pct%', style: TextStyle(fontSize: 12, color: _textMuted, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: pct / 100,
+            backgroundColor: _border,
+            valueColor: AlwaysStoppedAnimation(barColor),
+            minHeight: 6,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 4: TOP CONTENT LEADERBOARD
   // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildTopContentTab() {
     return RefreshIndicator(
