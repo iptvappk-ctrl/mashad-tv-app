@@ -10,7 +10,7 @@ import {
 export class ArabseedProvider implements BaseProvider {
   id = "arabseed";
   name = "عرب سيد";
-  baseUrl = "https://arabseed.health";
+  baseUrl = "https://m.myseed.tv";
   isEnabled = true;
 
   async search(query: string): Promise<UnifiedMediaItem[]> {

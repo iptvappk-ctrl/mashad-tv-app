@@ -119,7 +119,7 @@ export class MultiProviderAggregator {
     return arabseedProvider;
   }
 
-  async searchAll(query: string, timeoutMs = 3000): Promise<UnifiedMediaItem[]> {
+  async searchAll(query: string, timeoutMs = 6000): Promise<UnifiedMediaItem[]> {
     const q = query.trim();
     if (!q) return [];
 
@@ -177,7 +177,7 @@ export class MultiProviderAggregator {
     return merged;
   }
 
-  async getCategory(slug: string, page = 1, timeoutMs = 3500): Promise<UnifiedMediaItem[]> {
+  async getCategory(slug: string, page = 1, timeoutMs = 6000): Promise<UnifiedMediaItem[]> {
     const cacheKey = `cat:${slug}:${page}`;
     const cached = categoryCache.get(cacheKey);
     if (cached && Date.now() - cached.time < CATEGORY_TTL) return cached.items;
@@ -245,7 +245,9 @@ export class MultiProviderAggregator {
     const provider = this.getProviderForUrl(pageUrl);
     try {
       const detail = await provider.getDetail(pageUrl);
-      if (detail) detailCache.set(pageUrl, { detail, time: Date.now() });
+      if (detail && ((detail.servers && detail.servers.length > 0) || (detail.episodes && detail.episodes.length > 0))) {
+        detailCache.set(pageUrl, { detail, time: Date.now() });
+      }
       return detail;
     } catch (err) {
       console.error(`[Aggregator] getDetail error for ${pageUrl}:`, err);

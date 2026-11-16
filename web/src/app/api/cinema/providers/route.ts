@@ -30,7 +30,7 @@ export const PROVIDERS_DATABASE: ProviderInfo[] = [
     id: "arabseed",
     name: "عرب سيد",
     nameEn: "ArabSeed",
-    url: "https://arabseed.health",
+    url: "https://m.myseed.tv",
     category: "mixed",
     contentTypes: ["movies", "series"],
     languages: ["ar", "dubbed", "subbed"],

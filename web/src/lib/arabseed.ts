@@ -43,7 +43,7 @@ export interface ArabseedDetail {
   proxiedStream?: string;
 }
 
-const BASE_URL = "https://arabseed.health";
+const BASE_URL = "https://m.myseed.tv";
 const GOVID_URL = "https://govid.live";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -87,7 +87,7 @@ function parseListing(html: string): ArabseedItem[] {
   const items: ArabseedItem[] = [];
 
   const elements = $(
-    "a.movie__block, .item__contents a, .movie-item a, article a, .postDiv a, .MovieBlock a, .Block--Item a, a.BlockItem, .Movie--Block a, .item a, .Movie--Block, .Film--Block, .Series--Block, .BlockItem, a.episode__item"
+    "a.movie__block, .item__contents a, .movie-item a, article a, .postDiv a, .innov-series-card a, .innov-series-card, [class*='series-card'] a, .MovieBlock a, .Block--Item a, a.BlockItem, .Movie--Block a, .item a, .Movie--Block, .Film--Block, .Series--Block, .BlockItem, a.episode__item"
   );
 
   elements.each((_, el) => {
@@ -154,22 +154,28 @@ function parseListing(html: string): ArabseedItem[] {
   });
 }
 
-// Category mappings for Arabseed
+// Category mappings for Arabseed (Mobile Endpoint)
 const CATEGORY_MAP: Record<string, string> = {
-  movies: "/%d8%a7%d9%81%d9%84%d8%a7%d9%85/",
-  series: "/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/",
-  foreign_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/",
-  arabic_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%b9%d8%b1%d8%a8%d9%8a/",
-  turkish_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/",
-  asian_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/",
-  indian_movies: "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a/",
-  foreign_series: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/",
-  arabic_series: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b9%d8%b1%d8%a8%d9%8a/",
-  turkish_series: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/",
-  asian_series: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/",
-  ramadan: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b1%d9%85%d8%b6%d8%a7%d9%86-2026/",
-  anime: "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d9%86%d9%85%d9%8a/",
-  wrestling: "/category/%d8%b9%d8%b1%d9%88%d8%b6-%d9%85%d8%b5%d8%a7%d8%b1%d8%b9%d8%a9/",
+  movies: "movies/",
+  series: "series/",
+  foreign_movies: "category/foreign-movies/",
+  arabic_movies: "category/arabic-movies/",
+  turkish_movies: "category/turkish-movies/",
+  asian_movies: "category/asian-movies/",
+  indian_movies: "category/indian-movies/",
+  animation_movies: "category/animation-movies/",
+  dubbed_movies: "category/dubbed-movies/",
+  foreign_series: "category/foreign-series/",
+  arabic_series: "category/arabic-series/",
+  turkish_series: "category/turkish-series/",
+  asian_series: "category/مسلسلات-كوريه/",
+  indian_series: "category/مسلسلات-هندية/",
+  dubbed_series: "category/dubbed-series/",
+  ramadan: "category/مسلسلات-رمضان/",
+  anime: "category/animation-movies/",
+  anime_movies: "category/animation-movies/",
+  anime_series: "category/cartoon-series/",
+  wrestling: "category/wwe-shows/",
 };
 
 const GENRE_SEARCH_MAP: Record<string, string> = {
@@ -192,11 +198,11 @@ export async function getArabseedCategory(slug: string, page = 1, force = false)
     let url: string;
     if (GENRE_SEARCH_MAP[slug]) {
       const q = encodeURIComponent(GENRE_SEARCH_MAP[slug]);
-      url = page <= 1 ? `${BASE_URL}/?s=${q}` : `${BASE_URL}/page/${page}/?s=${q}`;
+      url = page <= 1 ? `${BASE_URL}/find/?word=${q}` : `${BASE_URL}/find/page/${page}/?word=${q}`;
     } else {
-      const path = CATEGORY_MAP[slug] || CATEGORY_MAP["movies"];
-      const cleanPath = path.replace(/\/$/, "");
-      url = page <= 1 ? `${BASE_URL}${cleanPath}/` : `${BASE_URL}${cleanPath}/page/${page}/`;
+      const rawPath = CATEGORY_MAP[slug] || CATEGORY_MAP["movies"];
+      const cleanPath = rawPath.replace(/^\/+|\/+$/g, "");
+      url = page <= 1 ? `${BASE_URL}/${cleanPath}/` : `${BASE_URL}/${cleanPath}/page/${page}/`;
     }
 
     const html = await fetchHtml(url);
@@ -224,7 +230,7 @@ export async function searchArabseed(query: string): Promise<ArabseedItem[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
     const encoded = encodeURIComponent(trimmed);
-    const url = `${BASE_URL}/?s=${encoded}`;
+    const url = `${BASE_URL}/find/?word=${encoded}`;
     const html = await fetchHtml(url);
 
     // Soft-404 / 0 search results check: prevent WordPress fallback to recent/featured posts
@@ -255,7 +261,7 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
 
   try {
     const cleanUrl = pageUrl.trim().replace(/\/$/, "");
-    const watchUrl = `${cleanUrl}/watch`;
+    const watchUrl = `${cleanUrl}/watch/`;
 
     // Fetch detail page and watch page IN PARALLEL for maximum speed
     const [pageHtml, watchHtml] = await Promise.all([
@@ -308,24 +314,55 @@ export async function getArabseedDetail(pageUrl: string, force = false): Promise
     const sourceHtml = watchHtml || pageHtml;
     const $watch = cheerio.load(sourceHtml);
 
+    function cleanServerName(rawName: string, url: string): string {
+      const u = url.toLowerCase();
+      if (u.includes("vids.php") || u.includes("player-gateway")) return "سيرفر ماي سيد (فائق السرعة ⚡)";
+      if (u.includes("bysezejataos") || u.includes("vidsharing")) return "Vidsharing (فائق السرعة ⚡)";
+      if (u.includes("uqload")) return "uqload (سريع)";
+      if (u.includes("voe.")) return "voe (سريع)";
+      if (u.includes("vidara.") || u.includes("sugbaioug.")) return "vidara (سريع)";
+      if (u.includes("vinvo.")) return "Vinvo (سريع)";
+      if (u.includes("vidmoly.")) return "Vidmoly (سريع)";
+      if (u.includes("playtube.")) return "Playtube";
+      if (u.includes("dsvplay.")) return "DSV Play";
+      if (rawName && !rawName.startsWith("سيرفر")) return rawName;
+      return "سيرفر";
+    }
+
     $watch(
-      "#watch li, ul.servers li, .watch-servers li, #servers li, [data-link], [data-embed], [data-url], iframe#videoIframe, iframe"
+      "#watch li, ul.servers li, .watch-servers li, #servers li, [data-link], [data-embed], [data-url], [data-server], iframe#videoIframe, iframe"
     ).each((_, el) => {
       const s = $watch(el);
-      const embedUrl =
+      let embedUrl =
         s.attr("data-link") ||
         s.attr("data-embed") ||
         s.attr("data-url") ||
         s.attr("data-server") ||
         s.attr("src") ||
         "";
-      let name = s.text().trim() || s.attr("title") || "";
+      const rawName = s.text().trim() || s.attr("title") || s.attr("data-server-name") || "";
 
-      if (embedUrl && embedUrl.startsWith("http") && !servers.some((x) => x.embedUrl === embedUrl)) {
-        if (!name || name === "undefined") {
-          name = `سيرفر ${servers.length + 1}`;
+      if (!embedUrl) return;
+
+      // Extract Base64 encoded target URLs if wrapped (e.g. vid/?id=...)
+      if (embedUrl.includes("id=")) {
+        const b64 = embedUrl.split("id=")[1]?.split("&")[0];
+        if (b64) {
+          try {
+            const decoded = Buffer.from(b64, "base64").toString("utf8").trim();
+            if (decoded.startsWith("http")) embedUrl = decoded;
+          } catch (_) {}
         }
-        servers.push({ name, embedUrl });
+      }
+
+      let fullUrl = embedUrl;
+      if (fullUrl.startsWith("//")) fullUrl = `https:${fullUrl}`;
+      else if (fullUrl.startsWith("/")) fullUrl = `${BASE_URL.replace(/\/$/, "")}${fullUrl}`;
+
+      if (fullUrl.startsWith("http") && !servers.some((x) => x.embedUrl === fullUrl)) {
+        const cleaned = cleanServerName(rawName, fullUrl);
+        const name = cleaned === "سيرفر" ? `سيرفر ${servers.length + 1}` : cleaned;
+        servers.push({ name, embedUrl: fullUrl });
       }
     });
 
@@ -342,7 +379,7 @@ function isEpisodeUrlOrTitle(title: string, url: string): boolean {
 
     // Check for Seasons (strictly filtering out individual episodes)
     const seasons: ArabseedSeason[] = [];
-    $("a[href*='/series/'], .Seasons--List a, .seasons-list a, .SeasonBlock a").each((_, el) => {
+    $("a[href*='/series/'], a[href*='/selary/'], .seasons__list a, .Seasons--List a, .seasons-list a, .SeasonBlock a").each((_, el) => {
       const a = $(el);
       const sUrl = a.attr("href");
       if (sUrl && sUrl.startsWith("http") && sUrl !== pageUrl) {
@@ -362,7 +399,7 @@ function isEpisodeUrlOrTitle(title: string, url: string): boolean {
 
     // Check for Episodes (Real Arabseed selectors & proper sorting)
     const episodes: ArabseedEpisode[] = [];
-    $("a.episode__item, .episode__item a, a[href*='/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-'], a[href*='الحلقة'], .Episodes--List a, .EpisodeBlock a").each((_, el) => {
+    $(".episodes__list a, .episodes__section a, a.episode__item, .episode__item a, a[href*='-eps'], a[href*='/%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-'], a[href*='الحلقة'], .Episodes--List a, .EpisodeBlock a").each((_, el) => {
       const a = $(el);
       const epUrl = a.attr("href");
       if (epUrl && epUrl.startsWith("http") && !episodes.some((e) => e.pageUrl === epUrl)) {
@@ -421,7 +458,9 @@ function isEpisodeUrlOrTitle(title: string, url: string): boolean {
       episodes,
     };
 
-    detailCache.set(pageUrl, { data: detail, time: now });
+    if (servers.length > 0 || episodes.length > 0) {
+      detailCache.set(pageUrl, { data: detail, time: now });
+    }
     return detail;
   } catch (err) {
     console.error("Arabseed detail error:", err);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { aggregator } from "@/lib/providers/aggregator";
+import { superAggregator } from "@/lib/providers/super-aggregator";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const results = await aggregator.searchAll(q);
+    const results = await superAggregator.searchAll(q, 6000);
     return NextResponse.json({ success: true, data: results });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
