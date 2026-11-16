@@ -398,7 +398,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     final streamHealth = _kpis['streamHealth'] ?? '100.0';
     final bounceRate = _kpis['bounceRate'] ?? 0;
     final tvRatio = _kpis['tvRatio'] ?? 0;
-    final phoneRatio = _kpis['phoneRatio'] ?? 100;
+    final phoneRatio = _kpis['phoneRatio'] ?? (_sessions.isNotEmpty ? 100 : 0);
     final totalSearches = _kpis['totalSearches'] ?? 0;
     final totalPlays = _kpis['totalPlays'] ?? 0;
 
@@ -994,8 +994,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
 
     final webActive = webSessions.where((s) => (s as Map<String, dynamic>)['status'] == 'active').length;
     final webVisits = _kpis['webVisits'] ?? webSessions.length;
-    final webRatio = _kpis['webRatio'] ?? (webSessions.isNotEmpty ? 15 : 0);
-    final appRatio = _kpis['appRatio'] ?? (100 - (webRatio is num ? (webRatio as num).toInt() : 0));
+    final webRatio = _kpis['webRatio'] ?? 0;
+    final appRatio = _kpis['appRatio'] ?? (_sessions.isNotEmpty ? 100 : 0);
     final webBrowsers = (_analytics['webBrowsers'] as List<dynamic>?) ?? [];
 
     return RefreshIndicator(
@@ -1166,8 +1166,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
               ),
               _buildModernKpiCard(
                 title: 'أنواع المتصفحات',
-                value: '${webBrowsers.isEmpty ? 4 : webBrowsers.length}',
-                subtitle: 'Chrome, Safari, Edge...',
+                value: '${webBrowsers.length}',
+                subtitle: webBrowsers.isEmpty ? 'لا توجد متصفحات مسجلة' : 'الأنواع النشطة',
                 icon: Icons.web_stories_rounded,
                 color: const Color(0xFFF59E0B),
               ),
@@ -1206,7 +1206,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                           child: Container(color: const Color(0xFF4F46E5)),
                         ),
                         Expanded(
-                          flex: (webRatio as num).toInt() > 0 ? (webRatio as num).toInt() : 1,
+                          flex: (webRatio as num).toInt() > 0 ? (webRatio as num).toInt() : (appRatio > 0 ? 0 : 1),
                           child: Container(color: const Color(0xFF0284C7)),
                         ),
                       ],
@@ -1268,10 +1268,24 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
                 ),
                 const SizedBox(height: 14),
-                _buildBrowserRow('Google Chrome (الويب)', 62, const Color(0xFF0284C7)),
-                _buildBrowserRow('Apple Safari (iOS & Mac)', 23, const Color(0xFF10B981)),
-                _buildBrowserRow('Microsoft Edge (ويندوز)', 11, const Color(0xFF6366F1)),
-                _buildBrowserRow('Firefox & أخرى', 4, const Color(0xFFF59E0B)),
+                if (webBrowsers.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20),
+                    child: Center(
+                      child: Text(
+                        'لا توجد بيانات متصفحات مسجلة حتى الآن\n(يتم الرصد لحظياً من السحابة مع أول زيارة حقيقية للموقع)',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: _textMuted),
+                      ),
+                    ),
+                  )
+                else
+                  ...webBrowsers.map((b) {
+                    final name = (b['browser'] ?? 'متصفح غير معروف').toString();
+                    final count = b['count'] ?? 0;
+                    final pct = (b['percent'] ?? 0) as num;
+                    return _buildBrowserRow(name, pct.toInt(), '$count زيارة', const Color(0xFF0284C7));
+                  }),
               ],
             ),
           ),
@@ -1384,7 +1398,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     );
   }
 
-  Widget _buildBrowserRow(String name, int pct, Color barColor) {
+  Widget _buildBrowserRow(String name, int pct, String countText, Color barColor) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -1393,7 +1407,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(name, style: TextStyle(fontSize: 13, color: _textPrimary, fontWeight: FontWeight.w600)),
-              Text('$pct%', style: TextStyle(fontSize: 12, color: _textMuted, fontWeight: FontWeight.bold)),
+              Text('$countText ($pct%)', style: TextStyle(fontSize: 12, color: _textMuted, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 6),
@@ -1438,7 +1452,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 final category = item['category'] ?? 'منوعات';
                 final icon = item['categoryIcon'] ?? '🎬';
                 final views = item['views'] ?? 0;
-                final completionRate = (item['completionRate'] ?? 85).toInt();
+                final completionRate = (item['completionRate'] ?? 0).toInt();
 
                 final rankMedal = index == 0
                     ? '🥇'
@@ -1555,7 +1569,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
               itemBuilder: (context, index) {
                 final s = _searches[index] as Map<String, dynamic>;
                 final query = s['query'] ?? '';
-                final count = s['count'] ?? 1;
+                final count = s['count'] ?? 0;
                 final isFound = s['status'] == 'available';
 
                 return Container(
