@@ -7,6 +7,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.jsoup.parser.Parser
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
@@ -889,6 +890,11 @@ object MultiProviderRepository {
                 coolDownProviderRoute(provider, root, PROVIDER_BAD_ROUTE_COOLDOWN_MS)
                 continue
             }
+            val doc = try { Jsoup.parse(html, effectiveBase) } catch (_: Exception) { null }
+            if (doc != null && isSearchEmptyResultPage(html, path, finalUrl, doc)) {
+                android.util.Log.i(TAG, "Search returned 0 results for provider=${provider.id} path=$path")
+                return emptyList()
+            }
             val rows = parseItems(html, provider, type, effectiveBase)
             if (rows.isNotEmpty()) {
                 providerRouteCooldownUntil.remove(providerRouteKey(provider, root))
@@ -1721,47 +1727,39 @@ object MultiProviderRepository {
         try {
 
             // 1. Akwam Servers (watch/.../servers)
-
             if (pageUrl.contains("akw")) {
-
-                val watchUrl = pageUrl.replace("/akfilm-", "/watch/akfilm-")
-
+                val watchUrl = pageUrl
+                    .replace("/akfilm-", "/watch/akfilm-")
+                    .replace("/akdrama-", "/watch/akdrama-")
                     .replace("/akseries-", "/watch/akseries-")
-
                     .trimEnd('/') + "/servers"
 
                 val watchReferer = pageOrigin(watchUrl, "https://akw.cam")
                 val watchHtml = fetchHtml(watchUrl, "$watchReferer/")
 
                 val wDoc = Jsoup.parse(watchHtml, watchUrl)
+                if (isHomePageOrListingPage(wDoc, watchUrl)) {
+                    android.util.Log.w(TAG, "Rejected Akwam home page in fetchServers for: $watchUrl")
+                } else {
+                    val primaryIframe = wDoc.select("iframe[src]")
+                        .firstOrNull { !insideNonPlaybackContainer(it) }
+                        ?.attr("abs:src")?.trim().orEmpty()
 
-                val primaryIframe = wDoc.select("iframe[src]")
-                    .firstOrNull { !insideNonPlaybackContainer(it) }
-                    ?.attr("abs:src")?.trim().orEmpty()
-
-                if (isServerCandidateUrl(primaryIframe)) {
-
-                    servers += ArabseedServer("سيرفر 1 (فائق السرعة)", primaryIframe)
-
-                }
-
-                for (el in wDoc.select("[data-url], [data-src], a.server, .watchServers a, iframe[src]")) {
-
-                    val rawUrl = el.attr("data-url").ifBlank { el.attr("data-src").ifBlank { el.attr("src").ifBlank { el.attr("href") } } }.trim()
-                    val sUrl = absoluteServerUrl(rawUrl, watchUrl)
-
-                    val sName = el.text().trim().replace(Regex("(?i)(أكوام|akwam)"), "").trim()
-
-                    if (isServerCandidateUrl(sUrl) && !isSeriesNavigationLink(el, sUrl) && servers.none { it.embedUrl == sUrl }) {
-
-                        val label = if (sName.isNotBlank() && sName.length < 25) " ($sName)" else ""
-
-                        servers += ArabseedServer("سيرفر ${servers.size + 1}$label", sUrl)
-
+                    if (isServerCandidateUrl(primaryIframe)) {
+                        servers += ArabseedServer("سيرفر 1 (فائق السرعة)", primaryIframe)
                     }
 
+                    for (el in wDoc.select("[data-url], [data-src], a.server, .watchServers a, iframe[src]")) {
+                        if (insideNonPlaybackContainer(el)) continue
+                        val rawUrl = el.attr("data-url").ifBlank { el.attr("data-src").ifBlank { el.attr("src").ifBlank { el.attr("href") } } }.trim()
+                        val sUrl = absoluteServerUrl(rawUrl, watchUrl)
+                        val sName = el.text().trim().replace(Regex("(?i)(أكوام|akwam)"), "").trim()
+                        if (isServerCandidateUrl(sUrl) && !isSeriesNavigationLink(el, sUrl) && servers.none { it.embedUrl == sUrl }) {
+                            val label = if (sName.isNotBlank() && sName.length < 25) " ($sName)" else ""
+                            servers += ArabseedServer("سيرفر ${servers.size + 1}$label", sUrl)
+                        }
+                    }
                 }
-
             }
 
 
@@ -2046,7 +2044,7 @@ object MultiProviderRepository {
         requestedYear: String = "",
     ): List<ArabseedServer> {
         if (title.isBlank()) return emptyList()
-        val normalizedTitle = normalizeProviderMatchTitle(title)
+        val normalizedTitle = normalizeTitleForTokenization(title)
         if (normalizedTitle.isBlank()) return emptyList()
         val searchQueries = listOf(normalizedTitle, title.trim()).distinct()
 
@@ -2092,28 +2090,42 @@ object MultiProviderRepository {
                                 requestedYear.isBlank() || it.year.isBlank() ||
                                     Math.abs((it.year.toIntOrNull() ?: 0) - (requestedYear.toIntOrNull() ?: 0)) <= 1
                             }
-                            .filter { item -> matchesProviderTitle(normalizedTitle, item) }
+                            .filter { item -> matchesProviderTitle(title, item) }
                             .sortedByDescending { it.year.isNotBlank() && it.year == requestedYear }
                             .firstOrNull()
                         if (match != null) break
                     }
                     if (match != null && match.pageUrl != originalPageUrl) {
-                        val providerBase = pageOrigin(match.pageUrl, provider.baseUrl)
-                        val pageServers = fetchServersFromPage(
-                            match.pageUrl,
-                            "$providerBase/",
-                            providerPageHttp,
-                        )
-                        pageServers.forEachIndexed { idx, server ->
-                            if (server.embedUrl != originalPageUrl) {
-                                val key = server.embedUrl
-                                val tagged = server.copy(
-                                    name = "${provider.name} - سيرفر ${idx + 1}",
-                                    sourcePageUrl = match.pageUrl,
-                                    sourceProviderName = provider.name,
-                                )
-                                if (allServers.putIfAbsent(key, tagged) == null) {
-                                    serverOrder.add(key)
+                        val isEpisodeTarget = type == ArabseedType.SERIES && 
+                            (SeriesCatalogParser.isEpisode(title, originalPageUrl) || originalPageUrl.contains("-ep") || originalPageUrl.contains("/watch/"))
+                        val targetEpisodeUrl = if (isEpisodeTarget) {
+                            val epNum = SeriesCatalogParser.episodeNumber(title, originalPageUrl)
+                            val sNum = SeriesCatalogParser.seasonNumber(title, originalPageUrl) ?: 1
+                            if (epNum != null) {
+                                val bundle = fetchSeasonsAndEpisodes(match, forceRefresh = false, seasonNumbersOnly = setOf(sNum))
+                                val targetSeason = bundle.seasons.firstOrNull { it.number == sNum } ?: bundle.seasons.firstOrNull()
+                                targetSeason?.episodes?.firstOrNull { it.number == epNum }?.pageUrl
+                            } else null
+                        } else match.pageUrl
+
+                        if (!targetEpisodeUrl.isNullOrBlank() && targetEpisodeUrl != originalPageUrl) {
+                            val providerBase = pageOrigin(targetEpisodeUrl, provider.baseUrl)
+                            val pageServers = fetchServersFromPage(
+                                targetEpisodeUrl,
+                                "$providerBase/",
+                                providerPageHttp,
+                            )
+                            pageServers.forEachIndexed { idx, server ->
+                                if (server.embedUrl != originalPageUrl) {
+                                    val key = server.embedUrl
+                                    val tagged = server.copy(
+                                        name = "${provider.name} - سيرفر ${idx + 1}",
+                                        sourcePageUrl = targetEpisodeUrl,
+                                        sourceProviderName = provider.name,
+                                    )
+                                    if (allServers.putIfAbsent(key, tagged) == null) {
+                                        serverOrder.add(key)
+                                    }
                                 }
                             }
                         }
@@ -2134,24 +2146,38 @@ object MultiProviderRepository {
                         .asSequence()
                         .filter { it.type == type }
                         .filter { requestedYear.isBlank() || it.year.isBlank() || it.year == requestedYear }
-                        .filter { item -> matchesProviderTitle(normalizedTitle, item) }
+                        .filter { item -> matchesProviderTitle(title, item) }
                         .sortedByDescending { it.year.isNotBlank() && it.year == requestedYear }
                         .firstOrNull()
                     if (match != null && match.pageUrl != originalPageUrl) {
-                        ArabseedRepository.fetchServersFast(match.pageUrl)
-                            .filter { isServerCandidateUrl(it.embedUrl) }
-                            .forEachIndexed { index, server ->
-                                if (server.embedUrl != originalPageUrl) {
-                                    val tagged = server.copy(
-                                        name = "عرب سيد - سيرفر ${index + 1}",
-                                        sourcePageUrl = match.pageUrl,
-                                        sourceProviderName = "عرب سيد",
-                                    )
-                                    if (allServers.putIfAbsent(tagged.embedUrl, tagged) == null) {
-                                        serverOrder.add(tagged.embedUrl)
+                        val isEpisodeTarget = type == ArabseedType.SERIES && 
+                            (SeriesCatalogParser.isEpisode(title, originalPageUrl) || originalPageUrl.contains("-ep") || originalPageUrl.contains("/watch/"))
+                        val targetEpisodeUrl = if (isEpisodeTarget) {
+                            val epNum = SeriesCatalogParser.episodeNumber(title, originalPageUrl)
+                            val sNum = SeriesCatalogParser.seasonNumber(title, originalPageUrl) ?: 1
+                            if (epNum != null) {
+                                val bundle = ArabseedRepository.fetchSeasonsAndEpisodes(match, forceRefresh = false, seasonNumbersOnly = setOf(sNum))
+                                val targetSeason = bundle.seasons.firstOrNull { it.number == sNum } ?: bundle.seasons.firstOrNull()
+                                targetSeason?.episodes?.firstOrNull { it.number == epNum }?.pageUrl
+                            } else null
+                        } else match.pageUrl
+
+                        if (!targetEpisodeUrl.isNullOrBlank() && targetEpisodeUrl != originalPageUrl) {
+                            ArabseedRepository.fetchServersFast(targetEpisodeUrl)
+                                .filter { isServerCandidateUrl(it.embedUrl) }
+                                .forEachIndexed { index, server ->
+                                    if (server.embedUrl != originalPageUrl) {
+                                        val tagged = server.copy(
+                                            name = "عرب سيد - سيرفر ${index + 1}",
+                                            sourcePageUrl = targetEpisodeUrl,
+                                            sourceProviderName = "عرب سيد",
+                                        )
+                                        if (allServers.putIfAbsent(tagged.embedUrl, tagged) == null) {
+                                            serverOrder.add(tagged.embedUrl)
+                                        }
                                     }
                                 }
-                            }
+                        }
                     }
                 } catch (_: Exception) {}
             }
@@ -2189,38 +2215,157 @@ object MultiProviderRepository {
         return ordered
     }
 
-    private fun normalizeProviderMatchTitle(title: String): String = normalizeArabicTitle(title)
-        .replace(Regex("\\b(19|20)\\d{2}\\b"), " ")
-        .replace(Regex("\\b(فيلم|مسلسل|مترجم|مدبلج|اونلاين|online|movie|series)\\b"), " ")
-        .replace(Regex("\\s+"), " ")
-        .trim()
+    val TITLE_STOP_WORDS = setOf(
+        "موسم", "الموسم", "حلقة", "الحلقة", "جزء", "الجزء", "مسلسل", "فيلم", "سلسلة",
+        "انمي", "أنمي", "كرتون", "برنامج", "مترجم", "مدبلج", "اونلاين", "مشاهدة", "تحميل",
+        "كامل", "كاملة", "حصريا", "حصري", "جديد", "عربي", "اجنبي", "تركي", "كوري", "اسيوي",
+        "هندي", "مدبلجة", "مترجمة", "نسخة", "اصلية", "اصلي", "جودة", "عالية", "فيديو", "مشاهده",
+        "بجودة", "بالجودة", "عاليه", "بدقة", "والاخيرة", "والاخير",
+        "الاول", "الاولى", "الثاني", "الثانية", "الثالث", "الثالثة", "الرابع", "الرابعة",
+        "الخامس", "الخامسة", "السادس", "السادسة", "السابع", "السابعة", "الثامن", "الثامنة",
+        "التاسع", "التاسعة", "العاشر", "العاشرة", "الاخير", "الاخيرة",
+        "season", "episode", "episodes", "ep", "series", "movie", "film", "watch",
+        "download", "online", "full", "hd", "fhd", "4k", "1080p", "720p", "480p",
+        "bluray", "blueray", "webdl", "web-dl", "web", "dl", "dvd", "rip", "cam",
+        "sub", "dub", "arabic", "english", "korean", "turkish", "anime", "action",
+        "the", "of", "and", "in", "on", "at", "to", "a", "an", "is", "vs",
+        "akwam", "arabseed", "wecima", "fasel", "faselhd", "shahid4u", "cima4u", "egybest"
+    )
 
-    private fun matchesProviderTitle(targetKey: String, candidate: ArabseedItem): Boolean {
-        if (targetKey.isBlank()) return false
-        val candidateKeys = listOfNotNull(
+    fun normalizeTitleForTokenization(title: String): String {
+        return normalizeArabicTitle(title)
+            .replace(Regex("""(?<!\d)(?:19|20)\d{2}(?!\d)"""), " ")
+            .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
+            .trim()
+    }
+
+    data class TitleTokens(val all: Set<String>, val latin: Set<String>, val arabic: Set<String>)
+
+    fun extractTitleTokens(title: String): TitleTokens {
+        val norm = normalizeTitleForTokenization(title)
+        val tokens = mutableListOf<String>()
+        val latinRegex = Regex("^[a-z0-9]+$")
+        for (rawWord in norm.split(" ")) {
+            val w = rawWord.trim()
+            if (w.length < 2 || w.toIntOrNull() != null || w in TITLE_STOP_WORDS) continue
+            if ((w.startsWith("ب") || w.startsWith("و")) && w.length > 2 && w.substring(1) in TITLE_STOP_WORDS) continue
+            tokens.add(w)
+        }
+        val allSet = tokens.toSet()
+        val latSet = tokens.filter { latinRegex.matches(it) }.toSet()
+        val arSet = tokens.filter { !latinRegex.matches(it) }.toSet()
+        return TitleTokens(allSet, latSet, arSet)
+    }
+
+    fun titlesStrictlyMatch(target: String, candidate: String): Boolean {
+        if (target.isBlank() || candidate.isBlank()) return false
+        val (tAll, tLat, tAr) = extractTitleTokens(target)
+        val (cAll, cLat, cAr) = extractTitleTokens(candidate)
+        if (tAll.isEmpty() || cAll.isEmpty()) return false
+
+        // 1. Latin tokens matching (Foreign, English, Anime, Korean titles)
+        if (tLat.isNotEmpty() && cLat.isNotEmpty()) {
+            val sharedLat = tLat.intersect(cLat)
+            when (tLat.size) {
+                1 -> if (sharedLat.size == 1 && cLat.size == 1) return true
+                2 -> if (sharedLat.size == 2 && cLat.size <= 3) return true
+                else -> if (sharedLat.size == tLat.size || (sharedLat.size >= tLat.size - 1 && (sharedLat.size.toDouble() / cLat.size) >= 0.55)) return true
+            }
+        }
+
+        // 2. Arabic tokens matching (Arabic, Turkish, Dubbed titles)
+        if (tAr.isNotEmpty() && cAr.isNotEmpty()) {
+            val sharedAr = tAr.intersect(cAr)
+            when (tAr.size) {
+                1 -> if (sharedAr.size == 1 && cAr.size == 1) return true
+                2 -> if (sharedAr.size == 2 && cAr.size <= 4) return true
+                else -> if (sharedAr.size == tAr.size || (sharedAr.size >= tAr.size - 1 && (sharedAr.size.toDouble() / cAr.size) >= 0.55)) return true
+            }
+        }
+
+        // 3. Combined exact token match
+        if (tAll == cAll) return true
+
+        return false
+    }
+
+    private fun matchesProviderTitle(targetTitle: String, candidate: ArabseedItem): Boolean {
+        if (targetTitle.isBlank()) return false
+        val candidateTitles = listOfNotNull(
             candidate.parentSeriesTitle,
             candidate.title,
             candidate.arabicTitle,
-        ).map(::normalizeProviderMatchTitle).filter { it.length >= 3 }.distinct()
-        if (targetKey in candidateKeys) return true
+        )
+        return candidateTitles.any { cand -> titlesStrictlyMatch(targetTitle, cand) }
+    }
 
-        val targetTokens = targetKey.split(' ').filter { it.length > 1 }.toSet()
-        if (targetTokens.isEmpty()) return false
-        if (targetTokens.size == 1) {
-            val single = targetTokens.first()
-            if (single.length >= 3) {
-                return candidateKeys.any { key -> key.split(' ').any { it == single } }
+    /** تحقق مما إذا كانت الصفحة هي الصفحة الرئيسية أو صفحة تصنيفات بدلاً من صفحة المادة المطلوبة */
+    fun isHomePageOrListingPage(doc: Document, pageUrl: String): Boolean {
+        val title = doc.title().lowercase().trim()
+        val homeMarkers = listOf(
+            "موقع التحميل و المشاهدة العربي الاول",
+            "موقع التحميل والمشاهدة العربي الأول",
+            "السينما للجميع",
+            "عرب سيد - الرئيسية",
+            "الصفحة الرئيسية",
+            "اكوام - akwam",
+            "wecima",
+            "cima4u",
+            "shahid4u",
+            "faselhd",
+            "egybest"
+        )
+        if (homeMarkers.any { title == it || (title.startsWith(it) && !title.contains("مشاهدة") && !title.contains("فيلم") && !title.contains("مسلسل") && !title.contains("حلقة")) }) {
+            return true
+        }
+
+        if (pageUrl.isNotBlank()) {
+            val uriPath = try { java.net.URI.create(pageUrl).path.orEmpty().trim('/') } catch (_: Exception) { "" }
+            if (uriPath.isEmpty() || uriPath.equals("home", ignoreCase = true) || uriPath.equals("main", ignoreCase = true) || uriPath.equals("index.html", ignoreCase = true) || uriPath.equals("index.php", ignoreCase = true)) {
+                return true
             }
-            return false
         }
-        return candidateKeys.any { key ->
-            val candidateTokens = key.split(' ').filter { it.length > 1 }.toSet()
-            val shared = targetTokens.intersect(candidateTokens).size
-            val smaller = minOf(targetTokens.size, candidateTokens.size)
-            val larger = maxOf(targetTokens.size, candidateTokens.size)
-            shared >= 2 && shared.toDouble() / smaller.coerceAtLeast(1) >= .8 &&
-                shared.toDouble() / larger.coerceAtLeast(1) >= .6
+
+        val cardsCount = doc.select(".br-card, .MovieBlock, .GridItem, .postDiv, article.MovieItem, a.movie-card").size
+        val hasPlayer = doc.select(
+            "iframe, .watch-box, #watch-player, .player-container, .watchServers, a.btn-watch, " +
+            "[data-link], [data-url], [data-src], [data-embed], ul.servers, .servers, #servers, .watch-servers"
+        ).isNotEmpty()
+        if (cardsCount > 25 && !hasPlayer) {
+            return true
         }
+
+        return false
+    }
+
+    /** تحقق مما إذا كانت صفحة نتائج البحث فارغة (0 نتائج) وتعود بمقترحات/شائع فقط */
+    fun isSearchEmptyResultPage(html: String, path: String, finalUrl: String, doc: Document): Boolean {
+        val isSearch = path.contains("search") || path.contains("?s=") || path.contains("?q=") || path.contains("find")
+        if (!isSearch) return false
+
+        val finalPath = try { java.net.URI.create(finalUrl).path.orEmpty().trim('/') } catch (_: Exception) { "" }
+        if (finalPath.isEmpty() || finalPath == "home" || finalPath == "main") return true
+
+        val title = doc.title().trim()
+        if (title.contains("السينما للجميع | سيما فور يو") ||
+            (title.contains("موقع التحميل و المشاهدة العربي الاول") && !title.contains("نتائج البحث"))
+        ) return true
+
+        val text = doc.body()?.text().orEmpty()
+        val emptyMarkers = listOf(
+            "لم يتم العثور على أي نتائج",
+            "لا توجد نتائج",
+            "لم نجد أي نتائج",
+            "0 نتائج",
+            "0 results",
+            "no results found",
+            "not found any",
+            "عذرا لا توجد نتائج",
+            "عذراً، لم يتم العثور",
+            "لا يوجد نتائج للبحث",
+            "لا توجد اي نتائج تطابق",
+        )
+        return emptyMarkers.any { text.contains(it, ignoreCase = true) }
     }
 
     private fun isArabseedPage(url: String): Boolean =
@@ -2239,13 +2384,19 @@ object MultiProviderRepository {
             val html = fetchHtmlWithClient(pageUrl, referer, client)
             if (html.isBlank()) return result
             val doc = Jsoup.parse(html, pageUrl)
+            if (isHomePageOrListingPage(doc, pageUrl)) {
+                android.util.Log.w(TAG, "Rejected home/listing page in fetchServersFromPage: $pageUrl")
+                return result
+            }
             for (ifr in doc.select("iframe[src]")) {
+                if (insideNonPlaybackContainer(ifr)) continue
                 val src = ifr.attr("abs:src").ifBlank { ifr.attr("src") }.trim()
                 if (isServerCandidateUrl(src) && result.none { it.embedUrl == src }) {
                     result += ArabseedServer("سيرفر ", src)
                 }
             }
             for (el in doc.select("[data-embed],[data-src],[data-url],[data-video],.servers a,a.server-btn")) {
+                if (insideNonPlaybackContainer(el)) continue
                 val link = el.attr("data-embed").ifBlank { el.attr("data-src").ifBlank { el.attr("data-url").ifBlank { el.attr("data-video").ifBlank { el.attr("href") } } } }.trim()
                 val abs = serverUrlFromAttribute(link, pageUrl)
                 if (isServerCandidateUrl(abs) && result.none { it.embedUrl == abs }) {
@@ -2259,17 +2410,21 @@ object MultiProviderRepository {
                     val watchHtml = fetchHtmlWithClient(watchLink, pageUrl, client)
                     if (watchHtml.isNotBlank()) {
                         val wDoc = Jsoup.parse(watchHtml, watchLink)
-                        for (ifr in wDoc.select("iframe[src]")) {
-                            val src = ifr.attr("abs:src").ifBlank { ifr.attr("src") }.trim()
-                            if (isServerCandidateUrl(src) && result.none { it.embedUrl == src }) {
-                                result += ArabseedServer("سيرفر ", src)
+                        if (!isHomePageOrListingPage(wDoc, watchLink)) {
+                            for (ifr in wDoc.select("iframe[src]")) {
+                                if (insideNonPlaybackContainer(ifr)) continue
+                                val src = ifr.attr("abs:src").ifBlank { ifr.attr("src") }.trim()
+                                if (isServerCandidateUrl(src) && result.none { it.embedUrl == src }) {
+                                    result += ArabseedServer("سيرفر ", src)
+                                }
                             }
-                        }
-                        for (el in wDoc.select("[data-embed],[data-src],[data-url],[data-video],.servers a,a.server-btn")) {
-                            val link = el.attr("data-embed").ifBlank { el.attr("data-src").ifBlank { el.attr("data-url").ifBlank { el.attr("data-video").ifBlank { el.attr("href") } } } }.trim()
-                            val abs = serverUrlFromAttribute(link, watchLink)
-                            if (isServerCandidateUrl(abs) && result.none { it.embedUrl == abs }) {
-                                result += ArabseedServer("سيرفر ", abs)
+                            for (el in wDoc.select("[data-embed],[data-src],[data-url],[data-video],.servers a,a.server-btn")) {
+                                if (insideNonPlaybackContainer(el)) continue
+                                val link = el.attr("data-embed").ifBlank { el.attr("data-src").ifBlank { el.attr("data-url").ifBlank { el.attr("data-video").ifBlank { el.attr("href") } } } }.trim()
+                                val abs = serverUrlFromAttribute(link, watchLink)
+                                if (isServerCandidateUrl(abs) && result.none { it.embedUrl == abs }) {
+                                    result += ArabseedServer("سيرفر ", abs)
+                                }
                             }
                         }
                     }
@@ -3533,22 +3688,14 @@ object MultiProviderRepository {
         return true
     }
 
-    private fun matchesSeriesTitle(targetKey: String, candidate: ArabseedItem): Boolean {
-        val keys = seriesIdentityKeys(candidate)
-            .filter { it.length >= 3 }
-            .distinct()
-        if (targetKey in keys) return true
-        if (keys.any { candidateKey ->
-                val shorter = minOf(targetKey.length, candidateKey.length)
-                shorter >= 7 && (targetKey.contains(candidateKey) || candidateKey.contains(targetKey))
-            }) return true
-
-        val targetTokens = targetKey.split(' ').filter { it.length > 1 }.toSet()
-        return keys.any { key ->
-            val candidateTokens = key.split(' ').filter { it.length > 1 }.toSet()
-            val shared = targetTokens.intersect(candidateTokens).size
-            shared >= 2 && shared.toDouble() / minOf(targetTokens.size, candidateTokens.size).coerceAtLeast(1) >= .8
-        }
+    private fun matchesSeriesTitle(targetTitle: String, candidate: ArabseedItem): Boolean {
+        if (targetTitle.isBlank()) return false
+        val candidateTitles = listOfNotNull(
+            candidate.parentSeriesTitle,
+            candidate.title,
+            candidate.arabicTitle,
+        )
+        return candidateTitles.any { cand -> titlesStrictlyMatch(targetTitle, cand) }
     }
 
     /**

@@ -624,7 +624,7 @@ object ArabseedRepository {
         val pageFutures = urls.map { url ->
             completion.submit(Callable {
                 val isCanonicalWatchPage = url == watchUrl
-                url to parseServersFast(fetchHtml(url), allowGenericIframes = isCanonicalWatchPage)
+                url to parseServersFast(fetchHtml(url), pageUrl = url, allowGenericIframes = isCanonicalWatchPage)
             })
         }
         val pageResults = mutableMapOf<String, List<ArabseedServer>>()
@@ -679,11 +679,12 @@ object ArabseedRepository {
             .replace("-", " ").trim()
         if (titleFromSlug.length < 2) return emptyList()
         val searchResults = try { search(titleFromSlug) } catch (_: Exception) { emptyList() }
-        if (searchResults.isEmpty()) return emptyList()
+        val matchingResults = searchResults.filter { MultiProviderRepository.titlesStrictlyMatch(titleFromSlug, it.title) }
+        if (matchingResults.isEmpty()) return emptyList()
         val epNum = Regex("""-eps?(\d+)""", RegexOption.IGNORE_CASE).find(originalUrl)?.groupValues?.get(1)?.toIntOrNull()
         val sNum  = Regex("""-s(\d+)-""",  RegexOption.IGNORE_CASE).find(originalUrl)?.groupValues?.get(1)?.toIntOrNull()
         if (epNum != null) {
-            for (result in searchResults.take(3)) {
+            for (result in matchingResults.take(3)) {
                 try {
                     val bundle = fetchSeasonsAndEpisodes(result)
                     val targetSeason = if (sNum != null)
@@ -693,8 +694,8 @@ object ArabseedRepository {
                     if (episode != null) {
                         val epServers = try {
                             val w = episode.pageUrl.trimEnd('/') + "/watch/"
-                            parseServersFast(fetchHtml(w)).ifEmpty {
-                                parseServersFast(fetchHtml(episode.pageUrl), allowGenericIframes = false)
+                            parseServersFast(fetchHtml(w), pageUrl = w).ifEmpty {
+                                parseServersFast(fetchHtml(episode.pageUrl), pageUrl = episode.pageUrl, allowGenericIframes = false)
                             }
                         } catch (_: Exception) { emptyList() }
                         if (epServers.isNotEmpty()) return epServers
@@ -702,11 +703,11 @@ object ArabseedRepository {
                 } catch (_: Exception) {}
             }
         }
-        for (result in searchResults.take(3)) {
+        for (result in matchingResults.take(3)) {
             val s = try {
                 val w = result.pageUrl.trimEnd('/') + "/watch/"
-                parseServersFast(fetchHtml(w)).ifEmpty {
-                    parseServersFast(fetchHtml(result.pageUrl), allowGenericIframes = false)
+                parseServersFast(fetchHtml(w), pageUrl = w).ifEmpty {
+                    parseServersFast(fetchHtml(result.pageUrl), pageUrl = result.pageUrl, allowGenericIframes = false)
                 }
             } catch (_: Exception) { emptyList() }
             if (s.isNotEmpty()) return s
@@ -2013,10 +2014,14 @@ object ArabseedRepository {
 
     private fun parseServersFast(
         html: String,
+        pageUrl: String = "",
         allowGenericIframes: Boolean = true,
     ): List<ArabseedServer> {
         val servers = mutableListOf<ArabseedServer>()
         val doc = Jsoup.parse(html)
+        if (MultiProviderRepository.isHomePageOrListingPage(doc, pageUrl)) {
+            return emptyList()
+        }
 
         fun isSeriesNavigationElement(element: org.jsoup.nodes.Element, url: String): Boolean {
             val label = listOf(

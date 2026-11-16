@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:http/http.dart' as http;
 
@@ -9,25 +10,64 @@ void main() {
   runApp(const ZaqzoukaAdminApp());
 }
 
-class ZaqzoukaAdminApp extends StatelessWidget {
+class ZaqzoukaAdminApp extends StatefulWidget {
   const ZaqzoukaAdminApp({super.key});
+
+  @override
+  State<ZaqzoukaAdminApp> createState() => _ZaqzoukaAdminAppState();
+}
+
+class _ZaqzoukaAdminAppState extends State<ZaqzoukaAdminApp> {
+  // Theme Mode: Light by default as requested by the user, with one-tap toggle!
+  bool _isLightMode = true;
+
+  void _toggleTheme() {
+    setState(() {
+      _isLightMode = !_isLightMode;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'تحليلات زقزوقة TV',
       debugShowCheckedModeBanner: false,
+      themeMode: _isLightMode ? ThemeMode.light : ThemeMode.dark,
       theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0C0A15),
-        primaryColor: const Color(0xFF8B5CF6),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF8B5CF6),
-          secondary: Color(0xFF00E5FF),
-          surface: Color(0xFF161226),
+        brightness: Brightness.light,
+        scaffoldBackgroundColor: const Color(0xFFF8FAFC), // Ultra-clean executive slate white
+        primaryColor: const Color(0xFF4F46E5), // Indigo
+        colorScheme: const ColorScheme.light(
+          primary: Color(0xFF4F46E5),
+          secondary: Color(0xFF0284C7),
+          surface: Colors.white,
+          error: Color(0xFFEF4444),
         ),
-        cardColor: const Color(0xFF161226),
+        cardColor: Colors.white,
         fontFamily: 'Roboto',
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          foregroundColor: Color(0xFF0F172A),
+          elevation: 0.5,
+        ),
+      ),
+      darkTheme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF0B0E14),
+        primaryColor: const Color(0xFF818CF8),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF818CF8),
+          secondary: Color(0xFF38BDF8),
+          surface: Color(0xFF161B26),
+          error: Color(0xFFF87171),
+        ),
+        cardColor: const Color(0xFF161B26),
+        fontFamily: 'Roboto',
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF111622),
+          foregroundColor: Colors.white,
+          elevation: 0.5,
+        ),
       ),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
@@ -36,13 +76,23 @@ class ZaqzoukaAdminApp extends StatelessWidget {
       ],
       supportedLocales: const [Locale('ar', 'EG')],
       locale: const Locale('ar', 'EG'),
-      home: const DashboardHomeScreen(),
+      home: DashboardHomeScreen(
+        isLightMode: _isLightMode,
+        onToggleTheme: _toggleTheme,
+      ),
     );
   }
 }
 
 class DashboardHomeScreen extends StatefulWidget {
-  const DashboardHomeScreen({super.key});
+  final bool isLightMode;
+  final VoidCallback onToggleTheme;
+
+  const DashboardHomeScreen({
+    super.key,
+    required this.isLightMode,
+    required this.onToggleTheme,
+  });
 
   @override
   State<DashboardHomeScreen> createState() => _DashboardHomeScreenState();
@@ -54,10 +104,16 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   String _adminSecret = 'zaqzouka_secret_2026';
 
   bool _isLoading = true;
-  final bool _isAutoRefresh = true;
+  int _autoRefreshSeconds = 15; // 0 = off, 5, 15, 30
   String? _errorMessage;
   DateTime? _lastUpdated;
   Timer? _refreshTimer;
+  int? _cloudLatencyMs;
+
+  // Filter States
+  String _sessionSearchQuery = '';
+  String _sessionFilterStatus = 'all'; // 'all', 'active', 'closed'
+  String _logFilterType = 'all'; // 'all', 'play', 'search', 'install'
 
   Map<String, dynamic> _kpis = {};
   Map<String, dynamic> _analytics = {};
@@ -71,7 +127,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _fetchStats();
     _startAutoRefresh();
   }
@@ -85,8 +141,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
 
   void _startAutoRefresh() {
     _refreshTimer?.cancel();
-    if (_isAutoRefresh) {
-      _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    if (_autoRefreshSeconds > 0) {
+      _refreshTimer = Timer.periodic(Duration(seconds: _autoRefreshSeconds), (_) {
         _fetchStats(isBackground: true);
       });
     }
@@ -100,6 +156,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       });
     }
 
+    final stopwatch = Stopwatch()..start();
     try {
       final url = Uri.parse('$_apiBaseUrl/api/stats');
       final res = await http.get(
@@ -109,6 +166,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           'Accept': 'application/json',
         },
       ).timeout(const Duration(seconds: 12));
+      stopwatch.stop();
 
       if (res.statusCode == 200) {
         final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
@@ -120,6 +178,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             _topContent = data['topContent'] ?? [];
             _searches = data['searches'] ?? [];
             _activityLog = data['activityLog'] ?? [];
+            _cloudLatencyMs = stopwatch.elapsedMilliseconds;
             _lastUpdated = DateTime.now();
             _isLoading = false;
             _errorMessage = null;
@@ -138,42 +197,58 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     }
   }
 
+  // Color & Theme Helpers
+  Color get _bg => widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF0B0E14);
+  Color get _cardBg => widget.isLightMode ? Colors.white : const Color(0xFF161B26);
+  Color get _border => widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF262D3D);
+  Color get _textPrimary => widget.isLightMode ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
+  Color get _textMuted => widget.isLightMode ? const Color(0xFF64748B) : const Color(0xFF94A3B8);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF130F22),
-        elevation: 0,
+        titleSpacing: 16,
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                color: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
+                ),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF8B5CF6), width: 1.2),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF4F46E5).withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: const Text(
                 'ZQ',
                 style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF8B5CF6),
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
                   fontSize: 16,
+                  letterSpacing: 1,
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'تحليلات زقزوقة TV',
+                  Text(
+                    'لوحة تحليلات زقزوقة TV',
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: _textPrimary,
                     ),
                   ),
                   Row(
@@ -183,19 +258,22 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                         height: 7,
                         decoration: BoxDecoration(
                           color: _errorMessage == null
-                              ? const Color(0xFF00E676)
-                              : Colors.redAccent,
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFEF4444),
                           shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 5),
                       Text(
                         _errorMessage == null
-                            ? 'متصل بالسحابة (Firebase/Vercel)'
+                            ? 'متصل بالسحابة · ${_cloudLatencyMs != null ? "$_cloudLatencyMs ms" : "مستقر"}'
                             : 'فشل الاتصال',
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.white.withValues(alpha: 0.7),
+                          fontWeight: FontWeight.w500,
+                          color: _errorMessage == null
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFEF4444),
                         ),
                       ),
                     ],
@@ -206,40 +284,60 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           ],
         ),
         actions: [
+          // Theme Toggle Button (فاتح / ليلي)
+          IconButton(
+            tooltip: widget.isLightMode ? 'التبديل إلى الوضع الليلي' : 'التبديل إلى الوضع الفاتح',
+            icon: Icon(
+              widget.isLightMode ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
+              color: widget.isLightMode ? const Color(0xFF4F46E5) : const Color(0xFFFBBF24),
+            ),
+            onPressed: widget.onToggleTheme,
+          ),
+          // Refresh Button
           IconButton(
             tooltip: 'تحديث فوري',
-            icon: const Icon(Icons.refresh, color: Color(0xFF00E5FF)),
+            icon: Icon(Icons.refresh_rounded, color: widget.isLightMode ? const Color(0xFF0284C7) : const Color(0xFF38BDF8)),
             onPressed: () => _fetchStats(),
           ),
+          // Settings Dialog
           IconButton(
-            tooltip: 'إعدادات الاتصال',
-            icon: const Icon(Icons.tune, color: Colors.white70),
+            tooltip: 'إعدادات الربط',
+            icon: Icon(Icons.tune_rounded, color: _textMuted),
             onPressed: _showSettingsDialog,
           ),
+          const SizedBox(width: 4),
         ],
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: const Color(0xFF00E5FF),
-          labelColor: const Color(0xFF00E5FF),
-          unselectedLabelColor: Colors.white60,
+          indicatorColor: const Color(0xFF4F46E5),
+          indicatorWeight: 3,
+          labelColor: const Color(0xFF4F46E5),
+          unselectedLabelColor: _textMuted,
+          labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           tabs: const [
-            Tab(icon: Icon(Icons.dashboard_outlined), text: 'نظرة عامة'),
-            Tab(icon: Icon(Icons.phone_android_outlined), text: 'الجلسات الحية'),
-            Tab(icon: Icon(Icons.bar_chart_outlined), text: 'الرسوم البيانية'),
-            Tab(icon: Icon(Icons.history_outlined), text: 'سجل النشاط'),
+            Tab(icon: Icon(Icons.radar_rounded), text: 'الرادار والملخص'),
+            Tab(icon: Icon(Icons.devices_rounded), text: 'الجلسات الحية'),
+            Tab(icon: Icon(Icons.local_fire_department_rounded), text: 'الأعلى مشاهدة'),
+            Tab(icon: Icon(Icons.query_stats_rounded), text: 'رادار البحث'),
+            Tab(icon: Icon(Icons.analytics_outlined), text: 'الرسوم البيانية'),
+            Tab(icon: Icon(Icons.admin_panel_settings_rounded), text: 'أدوات الإدارة'),
           ],
         ),
       ),
       body: _isLoading && _sessions.isEmpty
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircularProgressIndicator(color: Color(0xFF8B5CF6)),
-                  SizedBox(height: 16),
-                  Text('جاري تحميل بيانات السيرفر الحي...'),
+                  const CircularProgressIndicator(color: Color(0xFF4F46E5)),
+                  const SizedBox(height: 16),
+                  Text(
+                    'جاري تحميل تحليلات زقزوقة السحابية...',
+                    style: TextStyle(color: _textMuted, fontSize: 14),
+                  ),
                 ],
               ),
             )
@@ -250,17 +348,20 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.cloud_off, size: 64, color: Colors.redAccent),
+                        const Icon(Icons.cloud_off_rounded, size: 64, color: Color(0xFFEF4444)),
                         const SizedBox(height: 16),
                         Text(
                           'تعذر جلب البيانات:\n$_errorMessage',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white70),
+                          style: TextStyle(color: _textPrimary, fontSize: 14),
                         ),
                         const SizedBox(height: 20),
                         ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF8B5CF6),
+                            backgroundColor: const Color(0xFF4F46E5),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           onPressed: () => _fetchStats(),
                           icon: const Icon(Icons.refresh),
@@ -275,14 +376,18 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                   children: [
                     _buildOverviewTab(),
                     _buildSessionsTab(),
+                    _buildTopContentTab(),
+                    _buildSearchRadarTab(),
                     _buildChartsTab(),
-                    _buildActivityLogTab(),
+                    _buildAdminToolkitTab(),
                   ],
                 ),
     );
   }
 
-  // ─── TAB 1: OVERVIEW ────────────────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 1: EXECUTIVE OVERVIEW & RADAR
+  // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildOverviewTab() {
     final activeNow = _kpis['activeNow'] ?? 0;
     final totalOpens = _kpis['firstOpens'] ?? 0;
@@ -296,86 +401,184 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     final totalPlays = _kpis['totalPlays'] ?? 0;
 
     return RefreshIndicator(
-      color: const Color(0xFF00E5FF),
-      backgroundColor: const Color(0xFF161226),
+      color: const Color(0xFF4F46E5),
+      backgroundColor: _cardBg,
       onRefresh: () => _fetchStats(),
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Banner: Active Now
+          // Hero Live Pulse Radar Card
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF2A1550), Color(0xFF17112C)],
-                begin: Alignment.topRight,
-                end: Alignment.bottomLeft,
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF312E81).withValues(alpha: 0.5),
+                width: 1.2,
               ),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.4)),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                  color: widget.isLightMode
+                      ? Colors.black.withValues(alpha: 0.04)
+                      : const Color(0xFF4F46E5).withValues(alpha: 0.15),
                   blurRadius: 18,
-                  offset: const Offset(0, 8),
+                  offset: const Offset(0, 6),
                 ),
               ],
             ),
-            child: Row(
+            child: Column(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF00E676).withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFF00E676), width: 2),
-                  ),
-                  child: const Icon(Icons.sensors, color: Color(0xFF00E676), size: 32),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'المتصلون الآن بالتطبيق',
-                        style: TextStyle(fontSize: 14, color: Colors.white70),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFF10B981).withValues(alpha: 0.2),
+                            const Color(0xFF059669).withValues(alpha: 0.1),
+                          ],
+                        ),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: const Color(0xFF10B981), width: 2),
                       ),
-                      const SizedBox(height: 4),
-                      Row(
+                      child: const Icon(Icons.sensors_rounded, color: Color(0xFF10B981), size: 30),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            '$activeNow',
-                            style: const TextStyle(
-                              fontSize: 36,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF00E676),
-                            ),
+                          Row(
+                            children: [
+                              Text(
+                                'المتصلون الآن بالتطبيق',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: _textMuted,
+                                ),
+                              ),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF10B981),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    const Text(
+                                      'رادار مباشر',
+                                      style: TextStyle(
+                                        color: Color(0xFF10B981),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'مستخدم نشط',
-                            style: TextStyle(fontSize: 14, color: Colors.white54),
+                          const SizedBox(height: 4),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                '$activeNow',
+                                style: TextStyle(
+                                  fontSize: 40,
+                                  fontWeight: FontWeight.w900,
+                                  color: activeNow > 0 ? const Color(0xFF10B981) : _textPrimary,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'مستخدم نشط حاليًا',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: _textMuted,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      if (_lastUpdated != null)
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.schedule_rounded, size: 14, color: _textMuted),
+                        const SizedBox(width: 4),
                         Text(
-                          'آخر فحص: ${_lastUpdated!.hour.toString().padLeft(2, '0')}:${_lastUpdated!.minute.toString().padLeft(2, '0')}:${_lastUpdated!.second.toString().padLeft(2, '0')}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.white.withValues(alpha: 0.4),
-                          ),
+                          _lastUpdated != null
+                              ? 'آخر تحديث: ${_lastUpdated!.hour.toString().padLeft(2, '0')}:${_lastUpdated!.minute.toString().padLeft(2, '0')}:${_lastUpdated!.second.toString().padLeft(2, '0')}'
+                              : 'جارٍ الفحص...',
+                          style: TextStyle(fontSize: 11, color: _textMuted),
                         ),
-                    ],
-                  ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Text(
+                          'تحديث تلقائي:',
+                          style: TextStyle(fontSize: 11, color: _textMuted),
+                        ),
+                        const SizedBox(width: 6),
+                        DropdownButton<int>(
+                          value: _autoRefreshSeconds,
+                          isDense: true,
+                          underline: const SizedBox(),
+                          dropdownColor: _cardBg,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF4F46E5),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 5, child: Text('5 ثوان')),
+                            DropdownMenuItem(value: 15, child: Text('15 ثانية')),
+                            DropdownMenuItem(value: 30, child: Text('30 ثانية')),
+                            DropdownMenuItem(value: 0, child: Text('إيقاف')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() {
+                                _autoRefreshSeconds = val;
+                              });
+                              _startAutoRefresh();
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
 
-          // KPIs Grid
+          // 8 Executive KPI Cards Grid
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
@@ -384,104 +587,364 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             mainAxisSpacing: 12,
             childAspectRatio: 1.35,
             children: [
-              _buildKpiCard(
-                title: 'إجمالي الفتح والزيارات',
+              _buildModernKpiCard(
+                title: 'إجمالي الزيارات والفتح',
                 value: '$totalOpens',
-                subtitle: 'منها $totalInstalls تثبيت جديد',
-                icon: Icons.install_mobile,
-                color: const Color(0xFF00E5FF),
+                subtitle: 'منها $totalInstalls تثبيت محتفظ به',
+                icon: Icons.install_mobile_rounded,
+                color: const Color(0xFF0284C7),
               ),
-              _buildKpiCard(
+              _buildModernKpiCard(
                 title: 'متوسط وقت المشاهدة',
                 value: '$avgDuration د',
                 subtitle: 'لكل جلسة مكتملة',
                 icon: Icons.timer_outlined,
-                color: const Color(0xFFFFB800),
+                color: const Color(0xFFD97706),
               ),
-              _buildKpiCard(
+              _buildModernKpiCard(
                 title: 'صحة واستقرار البث',
                 value: '$streamHealth%',
                 subtitle: 'بثوث بدون أعطال',
-                icon: Icons.verified_outlined,
-                color: const Color(0xFF00E676),
+                icon: Icons.verified_rounded,
+                color: const Color(0xFF10B981),
               ),
-              _buildKpiCard(
+              _buildModernKpiCard(
                 title: 'معدل الارتداد',
                 value: '$bounceRate%',
                 subtitle: 'خروج فوري دون تصفح',
                 icon: Icons.warning_amber_rounded,
-                color: const Color(0xFFFF5757),
+                color: bounceRate > 50 ? const Color(0xFFEF4444) : const Color(0xFF64748B),
               ),
-              _buildKpiCard(
+              _buildModernKpiCard(
                 title: 'شاشات TV مقابل هواتف',
                 value: 'TV: $tvRatio%',
                 subtitle: 'هواتف: $phoneRatio%',
-                icon: Icons.tv,
-                color: const Color(0xFFB388FF),
+                icon: Icons.tv_rounded,
+                color: const Color(0xFF7C3AED),
               ),
-              _buildKpiCard(
-                title: 'عمليات التشغيل والبحث',
-                value: '$totalPlays تشغيل',
-                subtitle: '$totalSearches عملية بحث',
-                icon: Icons.play_circle_outline,
-                color: const Color(0xFFEC407A),
+              _buildModernKpiCard(
+                title: 'عمليات التشغيل المكتملة',
+                value: '$totalPlays',
+                subtitle: 'مرات تشغيل فيديو ناجحة',
+                icon: Icons.play_circle_fill_rounded,
+                color: const Color(0xFFEC4899),
+              ),
+              _buildModernKpiCard(
+                title: 'رادار البحث والتنقيب',
+                value: '$totalSearches',
+                subtitle: 'عمليات بحث مستخدمين',
+                icon: Icons.search_rounded,
+                color: const Color(0xFF6366F1),
+              ),
+              _buildModernKpiCard(
+                title: 'سرعة استجابة السحابة',
+                value: _cloudLatencyMs != null ? '$_cloudLatencyMs ms' : 'سريعة',
+                subtitle: 'Vercel / Firebase API',
+                icon: Icons.bolt_rounded,
+                color: const Color(0xFF14B8A6),
               ),
             ],
           ),
 
           const SizedBox(height: 20),
-          // Quick Top Content Preview
-          _buildCardContainer(
-            title: 'المحتوى الأكثر مشاهدة 🍿',
-            child: _topContent.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(16.0),
-                    child: Center(
-                      child: Text('لا توجد مشاهدات مسجلة بعد',
-                          style: TextStyle(color: Colors.white54)),
+
+          // Quick Action Bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4F46E5),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                    onPressed: _exportReportToClipboard,
+                    icon: const Icon(Icons.share_rounded, size: 18),
+                    label: const Text('تصدير تقرير واتساب / تيليجرام', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'فحص اتصال السحابة',
+                  icon: const Icon(Icons.network_check_rounded, color: Color(0xFF0284C7)),
+                  onPressed: () => _fetchStats(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 2: LIVE SESSIONS & DEVICE INSPECTOR
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildSessionsTab() {
+    // Filter sessions based on search query and status filter
+    final filtered = _sessions.where((item) {
+      final s = item as Map<String, dynamic>;
+      final device = (s['device'] ?? '').toString().toLowerCase();
+      final country = (s['country'] ?? '').toString().toLowerCase();
+      final content = (s['lastContent'] ?? '').toString().toLowerCase();
+      final q = _sessionSearchQuery.toLowerCase().trim();
+
+      final matchesQuery = q.isEmpty || device.contains(q) || country.contains(q) || content.contains(q);
+
+      final status = s['status'] ?? '';
+      if (_sessionFilterStatus == 'active' && status != 'active') return false;
+      if (_sessionFilterStatus == 'closed' && status == 'active') return false;
+
+      return matchesQuery;
+    }).toList();
+
+    return RefreshIndicator(
+      color: const Color(0xFF4F46E5),
+      backgroundColor: _cardBg,
+      onRefresh: () => _fetchStats(),
+      child: Column(
+        children: [
+          // Filter Bar
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: _cardBg,
+            child: Column(
+              children: [
+                TextField(
+                  style: TextStyle(color: _textPrimary, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'ابحث عن جهاز أو دولة أو اسم فيلم...',
+                    hintStyle: TextStyle(color: _textMuted, fontSize: 13),
+                    prefixIcon: Icon(Icons.search, size: 20, color: _textMuted),
+                    filled: true,
+                    fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  onChanged: (val) {
+                    setState(() {
+                      _sessionSearchQuery = val;
+                    });
+                  },
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _buildFilterChip('الكل (${_sessions.length})', 'all'),
+                    const SizedBox(width: 6),
+                    _buildFilterChip('🟢 نشط الآن', 'active'),
+                    const SizedBox(width: 6),
+                    _buildFilterChip('⚪ منتهية', 'closed'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.device_unknown_rounded, size: 48, color: _textMuted),
+                        const SizedBox(height: 12),
+                        Text('لا توجد جلسات تطابق البحث', style: TextStyle(color: _textMuted)),
+                      ],
                     ),
                   )
-                : Column(
-                    children: _topContent.take(5).map((item) {
-                      return ListTile(
-                        dense: true,
-                        leading: CircleAvatar(
-                          backgroundColor: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
-                          child: Text(item['categoryIcon'] ?? '🎬',
-                              style: const TextStyle(fontSize: 16)),
-                        ),
-                        title: Text(
-                          item['title'] ?? 'محتوى غير مسمى',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final s = filtered[index] as Map<String, dynamic>;
+                      final isActive = s['status'] == 'active';
+                      final device = s['device'] ?? 'Android Device';
+                      final country = s['country'] ?? 'مصر (EG)';
+                      final openTime = s['openTime'] ?? '';
+                      final duration = s['durationText'] ?? '1 دقيقة';
+                      final section = s['lastSection'] ?? 'الرئيسية';
+                      final content = s['lastContent'] ?? '';
+                      final osVersion = s['osVersion'] ?? '';
+                      final actionsCount = s['actionsCount'] ?? 0;
+                      final isTv = s['deviceType'] == 'tv';
+
+                      return Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: _cardBg,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isActive ? const Color(0xFF10B981) : _border,
+                            width: isActive ? 1.5 : 1.0,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Text(
-                          item['category'] ?? '',
-                          style: const TextStyle(color: Colors.white54, fontSize: 11),
-                        ),
-                        trailing: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF00E5FF).withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            '${item['views'] ?? 0} مشاهدة',
-                            style: const TextStyle(
-                              color: Color(0xFF00E5FF),
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: widget.isLightMode ? 0.03 : 0.2),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
                             ),
-                          ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: (isTv ? const Color(0xFF7C3AED) : const Color(0xFF0284C7)).withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(
+                                    isTv ? Icons.tv_rounded : Icons.phone_android_rounded,
+                                    color: isTv ? const Color(0xFF7C3AED) : const Color(0xFF0284C7),
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        device,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14,
+                                          color: _textPrimary,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        osVersion.isNotEmpty ? osVersion : 'نظام أندرويد',
+                                        style: TextStyle(fontSize: 11, color: _textMuted),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isActive
+                                        ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                                        : Colors.grey.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 6,
+                                        height: 6,
+                                        decoration: BoxDecoration(
+                                          color: isActive ? const Color(0xFF10B981) : Colors.grey,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        isActive ? 'نشط الآن' : 'منتهية',
+                                        style: TextStyle(
+                                          color: isActive ? const Color(0xFF10B981) : _textMuted,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0284C7).withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '🌍 $country',
+                                    style: const TextStyle(color: Color(0xFF0284C7), fontSize: 11, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    '⚡ $actionsCount تفاعل',
+                                    style: TextStyle(color: _textMuted, fontSize: 11),
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '⏱️ $duration ($openTime)',
+                                  style: TextStyle(color: _textMuted, fontSize: 11),
+                                ),
+                              ],
+                            ),
+                            if (content.isNotEmpty || section.isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: _border),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.play_circle_outline_rounded, size: 16, color: Color(0xFF4F46E5)),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'القسم: $section',
+                                      style: TextStyle(color: _textMuted, fontSize: 11, fontWeight: FontWeight.bold),
+                                    ),
+                                    if (content.isNotEmpty) ...[
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          '• $content',
+                                          style: const TextStyle(
+                                            color: Color(0xFFD97706),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       );
-                    }).toList(),
+                    },
                   ),
           ),
         ],
@@ -489,262 +952,289 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     );
   }
 
-  // ─── TAB 2: LIVE SESSIONS ───────────────────────────────────────────────────
-  Widget _buildSessionsTab() {
-    if (_sessions.isEmpty) {
-      return const Center(
-        child: Text('لا توجد جلسات مسجلة حتى الآن'),
-      );
-    }
-
-    return RefreshIndicator(
-      color: const Color(0xFF00E5FF),
-      backgroundColor: const Color(0xFF161226),
-      onRefresh: () => _fetchStats(),
-      child: ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: _sessions.length,
-        separatorBuilder: (_, index) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final s = _sessions[index] as Map<String, dynamic>;
-          final isActive = s['status'] == 'active';
-          final device = s['device'] ?? 'Android Device';
-          final country = s['country'] ?? 'مصر EG';
-          final openTime = s['openTime'] ?? '';
-          final duration = s['durationText'] ?? '1 دقيقة';
-          final section = s['lastSection'] ?? 'الرئيسية';
-          final content = s['lastContent'] ?? '';
-          final osVersion = s['osVersion'] ?? '';
-
-          return Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFF161226),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: isActive
-                    ? const Color(0xFF00E676).withValues(alpha: 0.6)
-                    : const Color(0xFF2A2346),
-                width: isActive ? 1.5 : 1.0,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Row(
-                        children: [
-                          Icon(
-                            s['deviceType'] == 'tv' ? Icons.tv : Icons.phone_android,
-                            color: const Color(0xFF8B5CF6),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              device,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: Colors.white,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: isActive
-                            ? const Color(0xFF00E676).withValues(alpha: 0.15)
-                            : Colors.white.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isActive
-                              ? const Color(0xFF00E676)
-                              : Colors.white24,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: isActive ? const Color(0xFF00E676) : Colors.white38,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                          Text(
-                            isActive ? 'نشط الآن' : 'منتهية',
-                            style: TextStyle(
-                              color: isActive ? const Color(0xFF00E676) : Colors.white60,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF00E5FF).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        '🌍 $country',
-                        style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 11),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (osVersion.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          osVersion,
-                          style: const TextStyle(color: Colors.white70, fontSize: 11),
-                        ),
-                      ),
-                    const Spacer(),
-                    Text(
-                      '⏱️ $duration ($openTime)',
-                      style: const TextStyle(color: Colors.white54, fontSize: 11),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0E0B1A),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.explore_outlined,
-                          size: 14, color: Colors.white38),
-                      const SizedBox(width: 6),
-                      Text(
-                        'القسم: $section',
-                        style: const TextStyle(color: Colors.white70, fontSize: 11),
-                      ),
-                      if (content.isNotEmpty) ...[
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '• $content',
-                            style: const TextStyle(
-                                color: Color(0xFFFFB800), fontSize: 11),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
+  Widget _buildFilterChip(String label, String status) {
+    final isSelected = _sessionFilterStatus == status;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _sessionFilterStatus = status;
+        });
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF4F46E5)
+              : (widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433)),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? Colors.white : _textMuted,
+          ),
+        ),
       ),
     );
   }
 
-  // ─── TAB 3: CHARTS & ANALYTICS ──────────────────────────────────────────────
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 3: TOP CONTENT LEADERBOARD
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildTopContentTab() {
+    return RefreshIndicator(
+      color: const Color(0xFF4F46E5),
+      backgroundColor: _cardBg,
+      onRefresh: () => _fetchStats(),
+      child: _topContent.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.movie_filter_rounded, size: 48, color: _textMuted),
+                  const SizedBox(height: 12),
+                  Text('لا توجد مشاهدات مسجلة بعد', style: TextStyle(color: _textMuted)),
+                ],
+              ),
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: _topContent.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final item = _topContent[index] as Map<String, dynamic>;
+                final title = item['title'] ?? 'عمل غير مسمى';
+                final category = item['category'] ?? 'منوعات';
+                final icon = item['categoryIcon'] ?? '🎬';
+                final views = item['views'] ?? 0;
+                final completionRate = (item['completionRate'] ?? 85).toInt();
+
+                final rankMedal = index == 0
+                    ? '🥇'
+                    : index == 1
+                        ? '🥈'
+                        : index == 2
+                            ? '🥉'
+                            : '#${index + 1}';
+
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _cardBg,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: widget.isLightMode ? 0.03 : 0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Text(rankMedal, style: const TextStyle(fontSize: 22)),
+                      const SizedBox(width: 12),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(icon, style: const TextStyle(fontSize: 18)),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: _textPrimary,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Text(
+                                  category,
+                                  style: TextStyle(fontSize: 11, color: _textMuted),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '• إكمال المشاهدة: $completionRate%',
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '$views مشاهدة',
+                          style: const TextStyle(
+                            color: Color(0xFF4F46E5),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 4: SEARCH RADAR
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildSearchRadarTab() {
+    return RefreshIndicator(
+      color: const Color(0xFF4F46E5),
+      backgroundColor: _cardBg,
+      onRefresh: () => _fetchStats(),
+      child: _searches.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.saved_search_rounded, size: 48, color: _textMuted),
+                  const SizedBox(height: 12),
+                  Text('لا توجد عمليات بحث مسجلة بعد', style: TextStyle(color: _textMuted)),
+                ],
+              ),
+            )
+          : ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: _searches.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final s = _searches[index] as Map<String, dynamic>;
+                final query = s['query'] ?? '';
+                final count = s['count'] ?? 1;
+                final isFound = s['status'] == 'available';
+
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _cardBg,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _border),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(Icons.search_rounded, color: Color(0xFF6366F1), size: 20),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              query,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: _textPrimary,
+                              ),
+                            ),
+                            Text(
+                              'تم البحث عنها $count مرة',
+                              style: TextStyle(fontSize: 11, color: _textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: (isFound ? const Color(0xFF10B981) : const Color(0xFFEF4444)).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          isFound ? 'متوفر الآن' : 'مطلوب بقوة 🔥',
+                          style: TextStyle(
+                            color: isFound ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 5: CHARTS & ANALYTICS
+  // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildChartsTab() {
     final deviceBrands = (_analytics['deviceBrands'] as List<dynamic>?) ?? [];
     final topCountries = (_analytics['topCountries'] as List<dynamic>?) ?? [];
     final hourlyTraffic = (_analytics['hourlyTraffic'] as List<dynamic>?) ?? [];
+    final osList = (_analytics['osList'] as List<dynamic>?) ?? [];
 
     return RefreshIndicator(
-      color: const Color(0xFF00E5FF),
-      backgroundColor: const Color(0xFF161226),
+      color: const Color(0xFF4F46E5),
+      backgroundColor: _cardBg,
       onRefresh: () => _fetchStats(),
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // 1. Countries Breakdown
+          // 1. Peak Hours Bar Chart
           _buildCardContainer(
-            title: '🌍 التوزيع الجغرافي (أعلى الدول مشاهدة)',
-            child: topCountries.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(
-                      child: Text('لا توجد بيانات دول بعد',
-                          style: TextStyle(color: Colors.white54)),
-                    ),
-                  )
-                : Column(
-                    children: topCountries.map((c) {
-                      final name = c['name'] ?? '';
-                      final count = c['count'] ?? 0;
-                      final percent = (c['percent'] ?? 0).toDouble();
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 6, horizontal: 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(name,
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 13)),
-                                Text('$count جلسة ($percent%)',
-                                    style: const TextStyle(
-                                        color: Color(0xFF00E5FF),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: percent / 100.0,
-                                minHeight: 6,
-                                backgroundColor: const Color(0xFF2A2346),
-                                valueColor: const AlwaysStoppedAnimation<Color>(
-                                    Color(0xFF00E5FF)),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
+            title: '📊 ساعات الذروة والنشاط (على مدار 24 ساعة)',
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                height: 140,
+                child: CustomPaint(
+                  size: const Size(double.infinity, 140),
+                  painter: ModernHourlyChartPainter(
+                    hourlyTraffic: hourlyTraffic.map((e) => (e as num).toInt()).toList(),
+                    barColor: const Color(0xFF4F46E5),
+                    peakColor: const Color(0xFF10B981),
+                    gridColor: _border,
                   ),
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 16),
 
-          // 2. Device Brands
+          // 2. Device Brands Breakdown
           _buildCardContainer(
-            title: '📱 ماركات وموديلات الأجهزة الفعلية',
+            title: '📱 توزيع موديلات وماركات الأجهزة',
             child: deviceBrands.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
+                ? Padding(
+                    padding: const EdgeInsets.all(16),
                     child: Center(
-                      child: Text('لا توجد أجهزة مسجلة',
-                          style: TextStyle(color: Colors.white54)),
+                      child: Text('لا توجد أجهزة مسجلة بعد', style: TextStyle(color: _textMuted)),
                     ),
                   )
                 : Column(
@@ -753,33 +1243,25 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                       final count = b['count'] ?? 0;
                       final percent = (b['percent'] ?? 0).toDouble();
                       return Padding(
-                        padding: const EdgeInsets.symmetric(
-                            vertical: 6, horizontal: 12),
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(brand,
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 13)),
-                                Text('$count جهاز ($percent%)',
-                                    style: const TextStyle(
-                                        color: Color(0xFF8B5CF6),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold)),
+                                Text(brand, style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                                Text('$count جهاز ($percent%)', style: const TextStyle(color: Color(0xFF4F46E5), fontSize: 12, fontWeight: FontWeight.bold)),
                               ],
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 6),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: LinearProgressIndicator(
                                 value: percent / 100.0,
-                                minHeight: 6,
-                                backgroundColor: const Color(0xFF2A2346),
-                                valueColor: const AlwaysStoppedAnimation<Color>(
-                                    Color(0xFF8B5CF6)),
+                                minHeight: 7,
+                                backgroundColor: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF262D3D),
+                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF4F46E5)),
                               ),
                             ),
                           ],
@@ -790,78 +1272,82 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           ),
           const SizedBox(height: 16),
 
-          // 3. Hourly Activity
-          _buildCardContainer(
-            title: '📊 ساعات الذروة والنشاط (خلال اليوم)',
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: SizedBox(
-                height: 120,
-                child: CustomPaint(
-                  size: const Size(double.infinity, 120),
-                  painter: HourlyChartPainter(
-                    hourlyTraffic: hourlyTraffic.map((e) => (e as num).toInt()).toList(),
-                  ),
-                ),
+          // 3. Android OS Versions
+          if (osList.isNotEmpty) ...[
+            _buildCardContainer(
+              title: '🤖 إصدارات نظام التشغيل (Android OS)',
+              child: Column(
+                children: osList.map((o) {
+                  final os = o['os'] ?? '';
+                  final count = o['count'] ?? 0;
+                  final percent = (o['percent'] ?? 0).toDouble();
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(os, style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                            Text('$count جهاز ($percent%)', style: const TextStyle(color: Color(0xFF0284C7), fontSize: 12, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: percent / 100.0,
+                            minHeight: 7,
+                            backgroundColor: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF262D3D),
+                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0284C7)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
+          ],
 
-          // 4. Searches Radar
+          // 4. Geographic Countries
           _buildCardContainer(
-            title: '🔍 رادار عمليات البحث وطلبات المستخدمين',
-            child: _searches.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
+            title: '🌍 التوزيع الجغرافي (أعلى الدول مشاهدة)',
+            child: topCountries.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(16),
                     child: Center(
-                      child: Text('لا توجد عمليات بحث مسجلة بعد',
-                          style: TextStyle(color: Colors.white54)),
+                      child: Text('لا توجد بيانات دول بعد', style: TextStyle(color: _textMuted)),
                     ),
                   )
                 : Column(
-                    children: _searches.take(8).map((s) {
-                      final query = s['query'] ?? '';
-                      final count = s['count'] ?? 1;
-                      final isFound = s['status'] == 'available';
-
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.search,
-                            size: 18, color: Colors.white38),
-                        title: Text(
-                          query,
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 13),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
+                    children: topCountries.map((c) {
+                      final name = c['name'] ?? '';
+                      final count = c['count'] ?? 0;
+                      final percent = (c['percent'] ?? 0).toDouble();
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: isFound
-                                    ? const Color(0xFF00E676).withValues(alpha: 0.15)
-                                    : const Color(0xFFFF5757).withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                isFound ? 'متوفر' : 'مطلوب بقوة',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: isFound
-                                      ? const Color(0xFF00E676)
-                                      : const Color(0xFFFF5757),
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(name, style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                                Text('$count جلسة ($percent%)', style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold)),
+                              ],
                             ),
-                            const SizedBox(width: 8),
-                            Text(
-                              '$count مرة',
-                              style: const TextStyle(
-                                  color: Colors.white54, fontSize: 12),
+                            const SizedBox(height: 6),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: percent / 100.0,
+                                minHeight: 7,
+                                backgroundColor: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF262D3D),
+                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF10B981)),
+                              ),
                             ),
                           ],
                         ),
@@ -874,67 +1360,150 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     );
   }
 
-  // ─── TAB 4: ACTIVITY LOG ───────────────────────────────────────────────────
-  Widget _buildActivityLogTab() {
-    if (_activityLog.isEmpty) {
-      return const Center(
-        child: Text('لا توجد أنشطة مسجلة حتى الآن'),
-      );
-    }
-
-    return RefreshIndicator(
-      color: const Color(0xFF00E5FF),
-      backgroundColor: const Color(0xFF161226),
-      onRefresh: () => _fetchStats(),
-      child: ListView.separated(
-        padding: const EdgeInsets.all(16),
-        itemCount: _activityLog.length,
-        separatorBuilder: (_, index) => const SizedBox(height: 8),
-        itemBuilder: (context, index) {
-          final act = _activityLog[index] as Map<String, dynamic>;
-          final icon = act['icon'] ?? '📱';
-          final text = act['text'] ?? '';
-          final time = act['time'] ?? '';
-          final type = act['type'] ?? 'info';
-
-          Color typeColor = Colors.white54;
-          if (type == 'open') typeColor = const Color(0xFF00E676);
-          if (type == 'play') typeColor = const Color(0xFF00E5FF);
-          if (type == 'bounce') typeColor = const Color(0xFFFF5757);
-          if (type == 'search') typeColor = const Color(0xFFFFB800);
-
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF161226),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF2A2346)),
-            ),
-            child: Row(
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 6: ADMIN TOOLKIT & MANAGEMENT
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildAdminToolkitTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // 1. Export Report
+        _buildCardContainer(
+          title: '📤 تصدير تقرير الإدارة التنفيذي',
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(icon, style: const TextStyle(fontSize: 18)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    text,
-                    style: const TextStyle(color: Colors.white, fontSize: 12.5),
-                  ),
-                ),
-                const SizedBox(width: 8),
                 Text(
-                  time,
-                  style: TextStyle(color: typeColor, fontSize: 11),
+                  'تجهيز تقرير نصي شامل ومنسق بنقرة واحدة للمشاركة على واتساب وتيليجرام مع مسؤولي التطبيق:',
+                  style: TextStyle(color: _textMuted, fontSize: 13),
+                ),
+                const SizedBox(height: 14),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4F46E5),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  ),
+                  onPressed: _exportReportToClipboard,
+                  icon: const Icon(Icons.copy_rounded, size: 18),
+                  label: const Text('نسخ التقرير إلى الحافظة 📋', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
-          );
-        },
-      ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // 2. Cloud Ping Benchmark
+        _buildCardContainer(
+          title: '⚡ فحص سرعة واستجابة السيرفر السحابي',
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.speed_rounded, color: Color(0xFF10B981), size: 28),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _cloudLatencyMs != null ? 'زمن الاستجابة: $_cloudLatencyMs ms' : 'لم يتم الفحص بعد',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
+                      ),
+                      Text('سحابة Vercel + Firebase Firestore', style: TextStyle(fontSize: 11, color: _textMuted)),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
+                    foregroundColor: const Color(0xFF4F46E5),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => _fetchStats(),
+                  child: const Text('فحص الآن'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // 3. Raw JSON Viewer
+        _buildCardContainer(
+          title: '🔍 مستعرض البيانات الخام (Raw Payload)',
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'استعراض نص الـ JSON الكامل القادم من السحابة لمراجعة أدق تفاصيل الجلسات والـ Device IDs:',
+                  style: TextStyle(color: _textMuted, fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
+                    foregroundColor: _textPrimary,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: _showRawJsonDialog,
+                  icon: const Icon(Icons.code_rounded, size: 18),
+                  label: const Text('فتح مستعرض الـ JSON'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // 4. Cloud Settings
+        _buildCardContainer(
+          title: '⚙️ إعدادات الربط والمفتاح السري',
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('رابط السيرفر السحابي:', style: TextStyle(fontSize: 12, color: _textMuted)),
+                      Text(_apiBaseUrl, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit_rounded, color: Color(0xFF4F46E5)),
+                  onPressed: _showSettingsDialog,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  // ─── Helper Widgets ────────────────────────────────────────────────────────
-  Widget _buildKpiCard({
+  // ═════════════════════════════════════════════════════════════════════════════
+  // UI WIDGET HELPERS
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildModernKpiCard({
     required String title,
     required String value,
     required String subtitle,
@@ -944,9 +1513,16 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF161226),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: widget.isLightMode ? 0.02 : 0.15),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -955,24 +1531,45 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                title,
-                style: const TextStyle(fontSize: 11, color: Colors.white70),
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
               ),
-              Icon(icon, color: color, size: 18),
+              Flexible(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: _textMuted,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
           Text(
             value,
             style: TextStyle(
               fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: color,
+              fontWeight: FontWeight.w900,
+              color: _textPrimary,
             ),
           ),
           Text(
             subtitle,
-            style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.4)),
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -982,26 +1579,114 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   Widget _buildCardContainer({required String title, required Widget child}) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF161226),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF2A2346)),
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: widget.isLightMode ? 0.02 : 0.15),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                color: _textPrimary,
               ),
             ),
           ),
-          const Divider(height: 1, color: Color(0xFF2A2346)),
+          const Divider(height: 1),
           child,
+        ],
+      ),
+    );
+  }
+
+  void _exportReportToClipboard() {
+    final activeNow = _kpis['activeNow'] ?? 0;
+    final totalOpens = _kpis['firstOpens'] ?? 0;
+    final totalInstalls = _kpis['totalInstalls'] ?? 0;
+    final avgDuration = _kpis['avgDurationMinutes'] ?? '0';
+    final streamHealth = _kpis['streamHealth'] ?? '100.0';
+    final totalPlays = _kpis['totalPlays'] ?? 0;
+    final totalSearches = _kpis['totalSearches'] ?? 0;
+
+    final nowStr = DateTime.now().toString().split('.')[0];
+
+    final report = '''
+📊 *تقرير منظومة تحليلات زقزوقة TV الرسمي*
+⏰ التاريخ: $nowStr
+🌐 السيرفر: سحابة Vercel + Firebase Firestore
+━━━━━━━━━━━━━━━━━━━━
+🟢 *المتصلون الآن بالتطبيق:* $activeNow مستخدم نشط
+📲 *إجمالي الفتح والزيارات:* $totalOpens زيارة
+📦 *التثبيتات المحتفظ بها:* $totalInstalls مستخدم
+⏱️ *متوسط مدة الجلسة:* $avgDuration دقيقة
+⚡ *صحة واستقرار البث:* $streamHealth% (بدون أعطال)
+▶️ *عمليات التشغيل المكتملة:* $totalPlays تشغيل
+🔍 *عمليات البحث المنجزة:* $totalSearches عملية بحث
+━━━━━━━━━━━━━━━━━━━━
+🚀 تم التوليد آلياً من تطبيق زقزوقة أدمن الرسمي
+''';
+
+    Clipboard.setData(ClipboardData(text: report));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('✅ تم نسخ التقرير التنفيذي الكامل إلى الحافظة!'),
+        backgroundColor: Color(0xFF10B981),
+      ),
+    );
+  }
+
+  void _showRawJsonDialog() {
+    final fullData = {
+      'kpis': _kpis,
+      'analytics': _analytics,
+      'sessions': _sessions,
+      'topContent': _topContent,
+      'searches': _searches,
+    };
+    final jsonStr = const JsonEncoder.withIndent('  ').convert(fullData);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg,
+        title: Text('بيانات السحابة الخام (JSON)', style: TextStyle(color: _textPrimary)),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              jsonStr,
+              style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: _textPrimary),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: jsonStr));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('تم نسخ الـ JSON')),
+              );
+            },
+            child: const Text('نسخ الـ JSON'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إغلاق'),
+          ),
         ],
       ),
     );
@@ -1015,25 +1700,25 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          backgroundColor: const Color(0xFF17122C),
-          title: const Text('إعدادات الاتصال بالسيرفر'),
+          backgroundColor: _cardBg,
+          title: Text('إعدادات الاتصال بالسحابة', style: TextStyle(color: _textPrimary)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: urlController,
+                style: TextStyle(color: _textPrimary),
                 decoration: const InputDecoration(
-                  labelText: 'رابط الـ API الأساسي',
-                  hintText: 'https://...',
+                  labelText: 'رابط السيرفر (API URL)',
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: secretController,
+                style: TextStyle(color: _textPrimary),
                 decoration: const InputDecoration(
-                  labelText: 'الرمز السري (Admin Secret)',
+                  labelText: 'مفتاح الأدمن السري (Admin Secret)',
                 ),
-                obscureText: true,
               ),
             ],
           ),
@@ -1043,9 +1728,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
               child: const Text('إلغاء'),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF8B5CF6),
-              ),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4F46E5)),
               onPressed: () {
                 setState(() {
                   _apiBaseUrl = urlController.text.trim();
@@ -1054,7 +1737,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 Navigator.pop(ctx);
                 _fetchStats();
               },
-              child: const Text('حفظ واتصال'),
+              child: const Text('حفظ واتصال', style: TextStyle(color: Colors.white)),
             ),
           ],
         );
@@ -1063,72 +1746,66 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 }
 
-// ─── Custom Hourly Chart Painter ─────────────────────────────────────────────
-class HourlyChartPainter extends CustomPainter {
+// ═════════════════════════════════════════════════════════════════════════════
+// MODERN HOURLY CHART PAINTER
+// ═════════════════════════════════════════════════════════════════════════════
+class ModernHourlyChartPainter extends CustomPainter {
   final List<int> hourlyTraffic;
-  HourlyChartPainter({required this.hourlyTraffic});
+  final Color barColor;
+  final Color peakColor;
+  final Color gridColor;
+
+  ModernHourlyChartPainter({
+    required this.hourlyTraffic,
+    required this.barColor,
+    required this.peakColor,
+    required this.gridColor,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     if (hourlyTraffic.isEmpty) return;
 
-    final paintLine = Paint()
-      ..color = const Color(0xFF00E5FF)
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
+    final maxVal = hourlyTraffic.reduce((a, b) => a > b ? a : b);
+    final effectiveMax = maxVal == 0 ? 1 : maxVal;
 
-    final paintFill = Paint()
-      ..shader = LinearGradient(
-        colors: [
-          const Color(0xFF00E5FF).withValues(alpha: 0.35),
-          const Color(0xFF00E5FF).withValues(alpha: 0.0),
-        ],
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..style = PaintingStyle.fill;
+    final barWidth = size.width / 24;
+    final barPaint = Paint()..style = PaintingStyle.fill;
 
-    final maxVal = (hourlyTraffic.reduce((a, b) => a > b ? a : b)).toDouble();
-    final effectiveMax = maxVal < 5 ? 5.0 : maxVal;
+    for (int i = 0; i < 24; i++) {
+      final val = i < hourlyTraffic.length ? hourlyTraffic[i] : 0;
+      final heightRatio = val / effectiveMax.toDouble();
+      final barHeight = heightRatio * (size.height - 24);
 
-    final path = Path();
-    final fillPath = Path();
+      final isPeak = val == maxVal && val > 0;
+      barPaint.color = isPeak ? peakColor : barColor.withValues(alpha: val > 0 ? 0.75 : 0.15);
 
-    final stepX = size.width / (hourlyTraffic.length - 1);
+      final left = i * barWidth + (barWidth * 0.15);
+      final right = (i + 1) * barWidth - (barWidth * 0.15);
+      final top = size.height - 20 - barHeight;
+      final bottom = size.height - 20;
 
-    for (int i = 0; i < hourlyTraffic.length; i++) {
-      final x = i * stepX;
-      final normalized = hourlyTraffic[i] / effectiveMax;
-      final y = size.height - (normalized * (size.height - 15)) - 8;
+      final rrect = RRect.fromRectAndRadius(
+        Rect.fromLTRB(left, top, right, bottom),
+        const Radius.circular(4),
+      );
+      canvas.drawRRect(rrect, barPaint);
 
-      if (i == 0) {
-        path.moveTo(x, y);
-        fillPath.moveTo(x, size.height);
-        fillPath.lineTo(x, y);
-      } else {
-        path.lineTo(x, y);
-        fillPath.lineTo(x, y);
-      }
-    }
-
-    fillPath.lineTo(size.width, size.height);
-    fillPath.close();
-
-    canvas.drawPath(fillPath, paintFill);
-    canvas.drawPath(path, paintLine);
-
-    // Draw points for non-zero hours
-    final dotPaint = Paint()..color = const Color(0xFF00E5FF);
-    for (int i = 0; i < hourlyTraffic.length; i++) {
-      if (hourlyTraffic[i] > 0) {
-        final x = i * stepX;
-        final normalized = hourlyTraffic[i] / effectiveMax;
-        final y = size.height - (normalized * (size.height - 15)) - 8;
-        canvas.drawCircle(Offset(x, y), 3.5, dotPaint);
+      // Label hours every 4 hours
+      if (i % 4 == 0) {
+        final textSpan = TextSpan(
+          text: '$i',
+          style: TextStyle(color: gridColor, fontSize: 10, fontWeight: FontWeight.bold),
+        );
+        final tp = TextPainter(
+          text: textSpan,
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, Offset(left, size.height - 16));
       }
     }
   }
 
   @override
-  bool shouldRepaint(covariant HourlyChartPainter oldDelegate) => true;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

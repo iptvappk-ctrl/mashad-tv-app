@@ -634,7 +634,9 @@ internal object SeriesCatalogParser {
     }
 
     fun cleanSeriesTitle(title: String): String {
-        val withoutSeriesSuffix = normalizeDigits(title)
+        val withoutPrefix = normalizeDigits(title)
+            .replace(Regex("""(?i)^\s*(?:مشاهدة|مشاهده|تحميل|سلسلة)?\s*(?:مسلسل|فيلم|انمي|أنمي|برنامج)?\s*"""), "")
+        val withoutSeriesSuffix = withoutPrefix
             .replace(
                 Regex("""(?i)\s+(?:الموسم|موسم|season|الجزء|جزء|part|الحلقة|حلقة|episode|ep)\s*.*$"""),
                 "",

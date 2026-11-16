@@ -1,26 +1,9 @@
 {
-    "packageName": "com.madar.madar_flutter",
-    "versionCode": 71,
-    "versionName": "1.0.66",
-    "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.66-71/zaqzouka-1.0.66-71.apk",
-    "sha256": "21f9fb9853d139ce8ee0ecf2ca307e176d0f89b86c25da079b15b42468fee0c0",
-    "telemetryUrl": "https://zaqzouka-dashboard-api.vercel.app",
-    "mandatory": false,
-    "releaseNotes": "تحديث زقزوقة 1.0.66: ربط سحابي عالمي لنظام التحليلات واستقبال بيانات المشاهدة الحية، مع مشغل زقزوقة 1.1.19 بالوضع الأفقي الإجباري التلقائي وحساب دقيق لمعدل استهلاك الجودة.",
-    "player": {
-        "packageName": "com.madar.player",
-        "versionCode": 19,
-        "versionName": "1.1.19",
-        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.66-71/zaqzouka-player-1.1.19.apk",
-        "sha256": "047c58a70b867192e678157ab20fd24fb1d5a7fcce42e390a850d767c935afc7",
-        "releaseNotes": "تحديث مشغل زقزوقة 1.1.19: تشغيل أفقي كامل تلقائي (Landscape) للأفلام والمسلسلات، حساب ديناميكي فوري للاستهلاك والتكلفة لكل جودة، وإلغاء الأزرار الرديئة (240p) مع توضيح جودة المصدر."
-    },
-    "admin": {
-        "packageName": "com.zaqzouka.admin",
-        "versionCode": 1,
-        "versionName": "1.0.0",
-        "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.66-71/zaqzouka-admin.apk",
-        "sha256": "c24be7728514fd840674453f610250224f3b1fd8f232ae96eca6fd258c18e0d6",
-        "description": "تطبيق فلاتر الرسمي لمنظومة تحليلات زقزوقة TV لمتابعة الجلسات الحية وساعات الذروة وإحصائيات المستخدمين مباشرة من هاتفك."
-    }
+    "packageName":  "com.madar.madar_flutter",
+    "versionCode":  72,
+    "versionName":  "1.0.67",
+    "apkUrl":  "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.67-72/zaqzouka-1.0.67-72.apk",
+    "sha256":  "212340e6517c889fa207e18966bcebca2e843521b8bf6e8cf8b7dcbc176a8109",
+    "mandatory":  false,
+    "releaseNotes":  "تحديث زقزوقة 1.0.67: حل نهائي شامل لتطابق أسماء الأفلام والمسلسلات في كافة التصنيفات (عربي، أجنبي، تركي، كوري، أنمي، قديم وجديد) مع منع الروابط الخاطئة، وتفعيل المشغل الأفقي Landscape التلقائي، وتطبيق لوحة تحليلات فلاتر للأدمن."
 }
