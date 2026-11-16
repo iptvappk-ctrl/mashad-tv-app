@@ -215,6 +215,10 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            @Suppress("DEPRECATION")
+            setTaskDescription(android.app.ActivityManager.TaskDescription("zag player"))
+        } catch (_: Throwable) {}
         overridePendingTransition(R.anim.player_enter, R.anim.player_exit)
 
         extractStreamFromIntent(intent)
@@ -289,6 +293,10 @@ class PlayerActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        try {
+            @Suppress("DEPRECATION")
+            setTaskDescription(android.app.ActivityManager.TaskDescription("zag player"))
+        } catch (_: Throwable) {}
         extractStreamFromIntent(intent)
         if (isSupportedStream(currentStreamUrl.value)) {
             launchedFromExternalIntent = true

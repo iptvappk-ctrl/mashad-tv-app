@@ -16,7 +16,11 @@
 
         <activity
             android:name=".PlayerActivity"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.madar.player"
+            android:label="zag player"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
             android:screenOrientation="unspecified"
             android:configChanges="orientation|screenSize|screenLayout"
             android:exported="true">

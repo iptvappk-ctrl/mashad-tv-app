@@ -289,7 +289,7 @@ class MainActivity : FlutterActivity() {
                 putExtra("com.madar.player.extra.STREAM_HEADERS", JSONObject(headers ?: emptyMap<String, String>()).toString())
                 putExtra("com.madar.player.extra.BACKUP_SOURCES", backupSourcesJson.orEmpty())
                 putExtra("com.madar.player.extra.IS_LIVE", isLive)
-                addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
             startActivity(intent)
             result.success(true)
