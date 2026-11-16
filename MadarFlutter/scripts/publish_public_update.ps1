@@ -83,6 +83,26 @@ if ($releaseExists) {
 }
 if ($LASTEXITCODE -ne 0) { throw "GitHub Release upload failed." }
 
+# Also upload the companion ZAG Player APK if available
+$playerApk = "C:\Users\hassa\Desktop\zag-player-latest.apk"
+$hasPlayer = Test-Path -LiteralPath $playerApk
+$playerObj = $null
+if ($hasPlayer) {
+    $playerSha = (Get-FileHash -LiteralPath $playerApk -Algorithm SHA256).Hash.ToLowerInvariant()
+    $playerAssetName = "zag-player-1.1.20.apk"
+    $playerTempPath = Join-Path ([IO.Path]::GetTempPath()) $playerAssetName
+    Copy-Item -LiteralPath $playerApk -Destination $playerTempPath -Force
+    gh release upload $tag $playerTempPath --repo $Repository --clobber
+    $playerObj = [ordered]@{
+        packageName = "com.madar.player"
+        versionCode = 20
+        versionName = "1.1.20"
+        apkUrl = "https://github.com/$Repository/releases/download/$tag/$playerAssetName"
+        sha256 = $playerSha
+        releaseNotes = "مشغل ZAG Player 1.1.20: هوية بصرية جديدة، ويف بار تفاعلي، دعم كامل ومستقل."
+    }
+}
+
 if (-not (Test-Path -LiteralPath $RepositoryPath)) {
     $parent = Split-Path -Parent $RepositoryPath
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -101,6 +121,7 @@ $manifest = [ordered]@{
     sha256 = $sha256
     releaseNotes = $ReleaseNotes
 }
+if ($playerObj) { $manifest["player"] = $playerObj }
 $manifestPath = Join-Path $RepositoryPath "latest.json"
 $manifestJson = $manifest | ConvertTo-Json -Depth 4
 [IO.File]::WriteAllText($manifestPath, $manifestJson, [Text.UTF8Encoding]::new($false))
@@ -131,6 +152,7 @@ $firebaseManifest = [ordered]@{
     mandatory = $false
     releaseNotes = $ReleaseNotes
 }
+if ($playerObj) { $firebaseManifest["player"] = $playerObj }
 $firebaseJson = $firebaseManifest | ConvertTo-Json -Depth 4
 [IO.File]::WriteAllText($hostingManifestPath, $firebaseJson, [Text.UTF8Encoding]::new($false))
 Push-Location $hostingDirectory
