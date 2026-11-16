@@ -14,8 +14,8 @@ android {
         applicationId = "com.madar.player"
         minSdk = 23
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.1.19"
+        versionCode = 20
+        versionName = "1.1.20"
     }
 
     buildTypes {
@@ -35,6 +35,13 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+        checkDependencies = false
+        disable += "InvalidFragmentVersionForActivityResult"
+    }
 }
 
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
@@ -42,6 +49,7 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.fragment)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)

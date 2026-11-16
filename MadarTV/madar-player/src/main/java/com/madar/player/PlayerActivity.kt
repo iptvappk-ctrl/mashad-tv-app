@@ -44,6 +44,13 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.foundation.text.BasicTextField
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.media3.datasource.DefaultDataSource
+import android.content.Context
+
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -125,7 +132,7 @@ private data class VideoQualityTrack(
 class PlayerActivity : ComponentActivity() {
 
     private val currentStreamUrl = mutableStateOf("")
-    private val currentTitle = mutableStateOf("زقزوقة بلاير")
+    private val currentTitle = mutableStateOf("مشغل الفيديو")
     private val currentUserAgent = mutableStateOf("")
     private val currentReferer = mutableStateOf("")
     private val currentStreamHeaders = mutableStateOf<Map<String, String>>(emptyMap())
@@ -133,13 +140,30 @@ class PlayerActivity : ComponentActivity() {
     private val currentFallbackReferer = mutableStateOf("")
     private val currentIsLive = mutableStateOf(false)
     private val currentBackupSources = androidx.compose.runtime.mutableStateListOf<PlaybackSource>()
+    private var launchedFromExternalIntent = false
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        overridePendingTransition(R.anim.player_enter, R.anim.player_exit)
+    private val openVideoLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val displayName = runCatching {
+                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex >= 0 && cursor.moveToFirst()) cursor.getString(nameIndex) else null
+                }
+            }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "فيديو محلي"
+
+            playStreamFromDashboard(
+                title = displayName,
+                url = uri.toString(),
+                userAgent = ""
+            )
+        }
+    }
+
+    private fun enterFullscreen() {
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-
-        // Immersive full-screen
+        @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_FULLSCREEN
                 or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
@@ -148,46 +172,115 @@ class PlayerActivity : ComponentActivity() {
                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         )
+    }
+
+    private fun exitFullscreen() {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+    }
+
+    private fun playStreamFromDashboard(
+        title: String,
+        url: String,
+        userAgent: String = "",
+        referer: String = ""
+    ) {
+        val cleanUrl = url.trim()
+        if (!isSupportedStream(cleanUrl)) {
+            Toast.makeText(this, "رابط الفيديو غير صالح", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val cleanTitle = title.trim().ifBlank { "مشغل الفيديو" }
+        PlayerStorage.addToHistory(
+            this,
+            SavedStreamItem(
+                title = cleanTitle,
+                url = cleanUrl,
+                userAgent = userAgent.trim(),
+                timestamp = System.currentTimeMillis()
+            )
+        )
+        currentStreamUrl.value = cleanUrl
+        currentTitle.value = cleanTitle
+        currentUserAgent.value = userAgent.trim()
+        currentReferer.value = referer.trim()
+        currentStreamHeaders.value = emptyMap()
+        currentFallbackUrl.value = ""
+        currentFallbackReferer.value = ""
+        currentIsLive.value = cleanUrl.contains(".m3u8") || cleanUrl.contains("/live/")
+        currentBackupSources.clear()
+        enterFullscreen()
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        overridePendingTransition(R.anim.player_enter, R.anim.player_exit)
 
         extractStreamFromIntent(intent)
 
+        if (isSupportedStream(currentStreamUrl.value)) {
+            launchedFromExternalIntent = true
+            enterFullscreen()
+        } else {
+            launchedFromExternalIntent = false
+            exitFullscreen()
+        }
+
         setContent {
             MaterialTheme {
-                BackHandler {
-                    finish()
-                }
-
                 val url = currentStreamUrl.value
-                val title = currentTitle.value
-                val userAgent = currentUserAgent.value
-                val referer = currentReferer.value
-                val streamHeaders = currentStreamHeaders.value
-                val fallbackUrl = currentFallbackUrl.value
-                val fallbackReferer = currentFallbackReferer.value
-                val isLive = currentIsLive.value
+                val isPlaying = isSupportedStream(url)
 
-                if (isSupportedStream(url)) {
+                if (isPlaying) {
+                    BackHandler {
+                        if (launchedFromExternalIntent) {
+                            finish()
+                        } else {
+                            currentStreamUrl.value = ""
+                            exitFullscreen()
+                        }
+                    }
+
                     PlayerScreen(
                         streamUrl = url,
-                        title = title,
-                        userAgent = userAgent,
-                        referer = referer,
-                        streamHeaders = streamHeaders,
-                        fallbackUrl = fallbackUrl,
-                        fallbackReferer = fallbackReferer,
-                        isLive = isLive,
+                        title = currentTitle.value,
+                        userAgent = currentUserAgent.value,
+                        referer = currentReferer.value,
+                        streamHeaders = currentStreamHeaders.value,
+                        fallbackUrl = currentFallbackUrl.value,
+                        fallbackReferer = currentFallbackReferer.value,
+                        isLive = currentIsLive.value,
                         backupSources = currentBackupSources,
                         onSwitchStream = { next, nextUa, nextRef, nextHeaders ->
                             Log.i("MadarPlayer", "switch host=${safeHost(currentStreamUrl.value)} -> ${safeHost(next)}")
                             currentStreamUrl.value = next
-                            currentUserAgent.value = nextUa.ifBlank { userAgent }
-                            currentReferer.value = nextRef.ifBlank { referer }
+                            currentUserAgent.value = nextUa.ifBlank { currentUserAgent.value }
+                            currentReferer.value = nextRef.ifBlank { currentReferer.value }
                             currentStreamHeaders.value = nextHeaders
                         },
-                        onClose = { finish() }
+                        onClose = {
+                            if (launchedFromExternalIntent) {
+                                finish()
+                            } else {
+                                currentStreamUrl.value = ""
+                                exitFullscreen()
+                            }
+                        }
                     )
                 } else {
-                    InvalidStreamScreen(onClose = { finish() })
+                    BackHandler {
+                        finish()
+                    }
+
+                    PlayerDashboardScreen(
+                        onPlay = { t, u, ua ->
+                            playStreamFromDashboard(title = t, url = u, userAgent = ua)
+                        },
+                        onPickLocalFile = {
+                            openVideoLauncher.launch("video/*")
+                        }
+                    )
                 }
             }
         }
@@ -197,6 +290,10 @@ class PlayerActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         extractStreamFromIntent(intent)
+        if (isSupportedStream(currentStreamUrl.value)) {
+            launchedFromExternalIntent = true
+            enterFullscreen()
+        }
     }
 
     private fun extractStreamFromIntent(intent: android.content.Intent?) {
@@ -292,7 +389,10 @@ class PlayerActivity : ComponentActivity() {
 }
 
 private fun isSupportedStream(url: String): Boolean =
-    url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true)
+    url.startsWith("http://", ignoreCase = true) ||
+    url.startsWith("https://", ignoreCase = true) ||
+    url.startsWith("content://", ignoreCase = true) ||
+    url.startsWith("file://", ignoreCase = true)
 
 private fun originForHeader(url: String): String = runCatching {
     val parsed = URI.create(url)
@@ -340,6 +440,9 @@ private fun toCleanEmbedUrl(url: String): String {
 }
 
 private fun isDirectStreamUrl(url: String): Boolean {
+    if (url.startsWith("content://", ignoreCase = true) || url.startsWith("file://", ignoreCase = true)) {
+        return true
+    }
     val clean = url.substringBefore('?')
     // Never hand a poster, thumbnail, or site icon to ExoPlayer as a video.
     if (clean.matches(Regex("(?i).*\\.(apng|avif|bmp|gif|jpe?g|png|svg|webp)$"))) return false
@@ -752,12 +855,13 @@ private fun PlayerScreen(
                     ?: originForHeader(cleanRef).takeIf(String::isNotBlank)
                 if (origin != null) put("Origin", origin)
             }
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(cleanUa)
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(20000)
             .setReadTimeoutMs(30000)
             .setDefaultRequestProperties(headers)
+        val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
 
         val isHls = isHlsStream(effectiveStreamUrl)
 
@@ -3306,21 +3410,810 @@ private fun applyQuality(
     trackSelector.setParameters(params)
 }
 
+data class SavedStreamItem(
+    val title: String,
+    val url: String,
+    val userAgent: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+private object PlayerStorage {
+    private const val PREFS_NAME = "madar_player_prefs"
+    private const val KEY_HISTORY = "playback_history"
+    private const val KEY_FAVORITES = "playback_favorites"
+
+    fun getHistory(context: Context): List<SavedStreamItem> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString(KEY_HISTORY, null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(jsonStr)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    add(SavedStreamItem(
+                        title = obj.optString("title"),
+                        url = obj.optString("url"),
+                        userAgent = obj.optString("userAgent"),
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                    ))
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun addToHistory(context: Context, item: SavedStreamItem) {
+        val current = getHistory(context).toMutableList()
+        current.removeAll { it.url == item.url }
+        current.add(0, item)
+        if (current.size > 50) current.removeAt(current.size - 1)
+        saveHistoryList(context, current)
+    }
+
+    fun deleteHistoryItem(context: Context, url: String) {
+        val current = getHistory(context).toMutableList()
+        current.removeAll { it.url == url }
+        saveHistoryList(context, current)
+    }
+
+    fun clearHistory(context: Context) {
+        saveHistoryList(context, emptyList())
+    }
+
+    private fun saveHistoryList(context: Context, list: List<SavedStreamItem>) {
+        val arr = JSONArray()
+        list.forEach { item ->
+            val obj = JSONObject()
+            obj.put("title", item.title)
+            obj.put("url", item.url)
+            obj.put("userAgent", item.userAgent)
+            obj.put("timestamp", item.timestamp)
+            arr.put(obj)
+        }
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_HISTORY, arr.toString())
+            .apply()
+    }
+
+    fun getFavorites(context: Context): List<SavedStreamItem> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString(KEY_FAVORITES, null) ?: return emptyList()
+        return runCatching {
+            val arr = JSONArray(jsonStr)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    add(SavedStreamItem(
+                        title = obj.optString("title"),
+                        url = obj.optString("url"),
+                        userAgent = obj.optString("userAgent"),
+                        timestamp = obj.optLong("timestamp", System.currentTimeMillis())
+                    ))
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    fun toggleFavorite(context: Context, item: SavedStreamItem): Boolean {
+        val current = getFavorites(context).toMutableList()
+        val exists = current.any { it.url == item.url }
+        if (exists) {
+            current.removeAll { it.url == item.url }
+        } else {
+            current.add(0, item)
+        }
+        saveFavoritesList(context, current)
+        return !exists
+    }
+
+    private fun saveFavoritesList(context: Context, list: List<SavedStreamItem>) {
+        val arr = JSONArray()
+        list.forEach { item ->
+            val obj = JSONObject()
+            obj.put("title", item.title)
+            obj.put("url", item.url)
+            obj.put("userAgent", item.userAgent)
+            obj.put("timestamp", item.timestamp)
+            arr.put(obj)
+        }
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_FAVORITES, arr.toString())
+            .apply()
+    }
+}
+
 @Composable
-private fun InvalidStreamScreen(onClose: () -> Unit) {
+private fun PlayerDashboardScreen(
+    onPlay: (title: String, url: String, userAgent: String) -> Unit,
+    onPickLocalFile: () -> Unit
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: المشغل, 1: السجل, 2: المفضلة
+
+    var titleInput by remember { mutableStateOf("") }
+    var urlInput by remember { mutableStateOf("") }
+    var uaInput by remember { mutableStateOf("") }
+
+    var showPrivacyDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    var historyList by remember { mutableStateOf(PlayerStorage.getHistory(context)) }
+    var favoritesList by remember { mutableStateOf(PlayerStorage.getFavorites(context)) }
+
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFB71C1C),
+                            Color(0xFFC62828),
+                            Color(0xFFD32F2F)
+                        )
+                    )
+                )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+            ) {
+                // Header Top Bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "مشغل الفيديو",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Text(
+                                text = "⋮",
+                                color = Color.White,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                            modifier = Modifier.background(Color.White)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("📁 فتح ملف من الهاتف", color = Color(0xFF212121), fontSize = 14.sp) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onPickLocalFile()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("⚡ تجربة بث مباشر (HLS)", color = Color(0xFF212121), fontSize = 14.sp) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onPlay("بث تجريبي HLS", "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", "")
+                                }
+                            )
+                            HorizontalDivider(color = Color(0xFFEEEEEE))
+                            DropdownMenuItem(
+                                text = { Text("🔒 سياسة الخصوصية", color = Color(0xFF212121), fontSize = 14.sp) },
+                                onClick = {
+                                    menuExpanded = false
+                                    showPrivacyDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("ℹ️ عن المشغل", color = Color(0xFF212121), fontSize = 14.sp) },
+                                onClick = {
+                                    menuExpanded = false
+                                    showAboutDialog = true
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Sub-bar pill: 🟢 جاهز للتشغيل | جودة عالية الوضوح
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .background(Color(0x33FFFFFF), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .background(Color(0xFF4CAF50), CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "جاهز للتشغيل",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Text(
+                            text = "جودة عالية الوضوح",
+                            color = Color(0xEEFFFFFF),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Normal
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Video Preview Container (Black Box)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(210.dp)
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF0A0A0A)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFF292929), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "أضف أو اختر فيديو للتشغيل",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Bottom White Card
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                    color = Color.White,
+                    shadowElevation = 8.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 18.dp, vertical = 16.dp)
+                    ) {
+                        // 3 Tabs: المشغل | السجل | المفضلة
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val isTab0 = selectedTab == 0
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isTab0) Color(0xFFFFEBEE) else Color.Transparent)
+                                    .then(
+                                        if (isTab0) Modifier.border(1.dp, Color(0xFFFFCDD2), RoundedCornerShape(12.dp))
+                                        else Modifier
+                                    )
+                                    .clickable { selectedTab = 0 }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "المشغل",
+                                    color = if (isTab0) Color(0xFFC62828) else Color(0xFF757575),
+                                    fontWeight = if (isTab0) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 15.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            val isTab1 = selectedTab == 1
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isTab1) Color(0xFFFFEBEE) else Color.Transparent)
+                                    .then(
+                                        if (isTab1) Modifier.border(1.dp, Color(0xFFFFCDD2), RoundedCornerShape(12.dp))
+                                        else Modifier
+                                    )
+                                    .clickable {
+                                        historyList = PlayerStorage.getHistory(context)
+                                        selectedTab = 1
+                                    }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "السجل",
+                                    color = if (isTab1) Color(0xFFC62828) else Color(0xFF757575),
+                                    fontWeight = if (isTab1) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 15.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            val isTab2 = selectedTab == 2
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isTab2) Color(0xFFFFEBEE) else Color.Transparent)
+                                    .then(
+                                        if (isTab2) Modifier.border(1.dp, Color(0xFFFFCDD2), RoundedCornerShape(12.dp))
+                                        else Modifier
+                                    )
+                                    .clickable {
+                                        favoritesList = PlayerStorage.getFavorites(context)
+                                        selectedTab = 2
+                                    }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "المفضلة",
+                                    color = if (isTab2) Color(0xFFC62828) else Color(0xFF757575),
+                                    fontWeight = if (isTab2) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 15.sp
+                                )
+                            }
+                        }
+
+                        // Tab Contents
+                        when (selectedTab) {
+                            0 -> {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    DashboardCustomInputField(
+                                        value = titleInput,
+                                        onValueChange = { titleInput = it },
+                                        placeholder = "عنوان الفيديو",
+                                        icon = {
+                                            Text(
+                                                text = "T",
+                                                color = Color(0xFFC62828),
+                                                fontSize = 24.sp,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                    )
+
+                                    DashboardCustomInputField(
+                                        value = urlInput,
+                                        onValueChange = { urlInput = it },
+                                        placeholder = "رابط الفيديو",
+                                        icon = {
+                                            Text(
+                                                text = "🔗",
+                                                color = Color(0xFFC62828),
+                                                fontSize = 18.sp
+                                            )
+                                        },
+                                        actionButton = {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFFFFEBEE))
+                                                    .clickable {
+                                                        val pasteText = clipboardManager.getText()?.text
+                                                        if (!pasteText.isNullOrBlank()) {
+                                                            urlInput = pasteText.trim()
+                                                            Toast.makeText(context, "تم لصق الرابط", Toast.LENGTH_SHORT).show()
+                                                        } else {
+                                                            Toast.makeText(context, "الحافظة فارغة", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(
+                                                    text = "لصق",
+                                                    color = Color(0xFFC62828),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    )
+
+                                    DashboardCustomInputField(
+                                        value = uaInput,
+                                        onValueChange = { uaInput = it },
+                                        placeholder = "وكيل المستخدم (اختياري)",
+                                        icon = {
+                                            Text(
+                                                text = "e",
+                                                color = Color(0xFFC62828),
+                                                fontSize = 26.sp,
+                                                fontWeight = FontWeight.Black,
+                                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                                            )
+                                        }
+                                    )
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    Button(
+                                        onClick = {
+                                            val cleanUrl = urlInput.trim()
+                                            if (cleanUrl.isBlank()) {
+                                                Toast.makeText(context, "يرجى إدخال رابط الفيديو أولاً", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                val validUrl = if (!cleanUrl.startsWith("http://", true) &&
+                                                    !cleanUrl.startsWith("https://", true) &&
+                                                    !cleanUrl.startsWith("content://", true) &&
+                                                    !cleanUrl.startsWith("file://", true)) {
+                                                    "https://$cleanUrl"
+                                                } else cleanUrl
+
+                                                onPlay(titleInput.trim(), validUrl, uaInput.trim())
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(54.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
+                                        ) {
+                                            Text(
+                                                text = "حفظ وتشغيل",
+                                                color = Color.White,
+                                                fontSize = 17.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "▶",
+                                                color = Color.White,
+                                                fontSize = 15.sp
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = onPickLocalFile,
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, Color(0xFFE0E0E0))
+                                        ) {
+                                            Text("📁 فتح ملف محلي", fontSize = 12.sp, color = Color(0xFF424242))
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                titleInput = "بث تجريبي HLS"
+                                                urlInput = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+                                                onPlay(titleInput, urlInput, "")
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, Color(0xFFE0E0E0))
+                                        ) {
+                                            Text("⚡ تجربة بث HLS", fontSize = 12.sp, color = Color(0xFF424242))
+                                        }
+                                    }
+
+                                    if (urlInput.isNotBlank()) {
+                                        TextButton(
+                                            onClick = {
+                                                PlayerStorage.toggleFavorite(
+                                                    context,
+                                                    SavedStreamItem(
+                                                        title = titleInput.ifBlank { "رابط مفضل" },
+                                                        url = urlInput.trim(),
+                                                        userAgent = uaInput.trim()
+                                                    )
+                                                )
+                                                Toast.makeText(context, "تمت الإضافة إلى المفضلة", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text("⭐ حفظ الرابط في المفضلة", color = Color(0xFFC62828), fontSize = 13.sp)
+                                        }
+                                    }
+                                }
+                            }
+
+                            1 -> {
+                                if (historyList.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("🕒", fontSize = 42.sp)
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text("لا يوجد سجل تشغيل حالياً", color = Color(0xFF757575), fontSize = 15.sp)
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text("أي فيديو تشغله سيظهر هنا للوصول السريع", color = Color(0xFF9E9E9E), fontSize = 12.sp)
+                                        }
+                                    }
+                                } else {
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("عدد العناصر: ${historyList.size}", color = Color(0xFF616161), fontSize = 13.sp)
+                                            TextButton(onClick = {
+                                                PlayerStorage.clearHistory(context)
+                                                historyList = emptyList()
+                                                Toast.makeText(context, "تم مسح السجل", Toast.LENGTH_SHORT).show()
+                                            }) {
+                                                Text("مسح الكل", color = Color(0xFFD32F2F), fontSize = 13.sp)
+                                            }
+                                        }
+                                        LazyColumn(
+                                            modifier = Modifier.fillMaxSize(),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            items(historyList, key = { it.url + it.timestamp }) { item ->
+                                                SavedStreamCard(
+                                                    item = item,
+                                                    onPlay = {
+                                                        onPlay(item.title, item.url, item.userAgent)
+                                                    },
+                                                    onDelete = {
+                                                        PlayerStorage.deleteHistoryItem(context, item.url)
+                                                        historyList = PlayerStorage.getHistory(context)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            2 -> {
+                                if (favoritesList.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text("⭐", fontSize = 42.sp)
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text("لا توجد روابط مفضلة بعد", color = Color(0xFF757575), fontSize = 15.sp)
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text("احفظ روابطك المفضلة للوصول إليها بنقرة واحدة", color = Color(0xFF9E9E9E), fontSize = 12.sp)
+                                        }
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        items(favoritesList, key = { it.url }) { item ->
+                                            SavedStreamCard(
+                                                item = item,
+                                                onPlay = {
+                                                    onPlay(item.title, item.url, item.userAgent)
+                                                },
+                                                onDelete = {
+                                                    PlayerStorage.toggleFavorite(context, item)
+                                                    favoritesList = PlayerStorage.getFavorites(context)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (showPrivacyDialog) {
+                AlertDialog(
+                    onDismissRequest = { showPrivacyDialog = false },
+                    title = { Text("🔒 سياسة الخصوصية", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                            Text(
+                                text = "مشغل الفيديو (Zaqzouka Player) يحترم خصوصية المستخدم بالكامل:\n\n" +
+                                    "1. عدم جمع البيانات: التطبيق لا يقوم بجمع أو إرسال أو بيع أي بيانات شخصية أو معلومات عن جهازك.\n\n" +
+                                    "2. التخزين المحلي: يتم تخزين سجل المشاهدة والمفضلة والروابط المدخلة محلياً فقط على هاتفك.\n\n" +
+                                    "3. أداة مشغل وسائط: هذا التطبيق هو أداة مشغل فيديو حيادية، ولا يحتوي على أي محتوى مدمج مسبقاً.\n\n" +
+                                    "4. حقوق الملكية: المستخدم مسؤول مسؤولية كاملة عن الروابط ومصادر البث التي يضيفها بما يتوافق مع القوانين وحقوق النشر.",
+                                fontSize = 13.sp,
+                                lineHeight = 20.sp,
+                                color = Color(0xFF333333)
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { showPrivacyDialog = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                        ) {
+                            Text("موافق", color = Color.White)
+                        }
+                    }
+                )
+            }
+
+            if (showAboutDialog) {
+                AlertDialog(
+                    onDismissRequest = { showAboutDialog = false },
+                    title = { Text("مشغل الفيديو v1.1.20", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column {
+                            Text(
+                                text = "مشغل وسائط متعدد الصيغ عالي الأداء يدعم بروتوكولات HLS و DASH وملفات الفيديو بجميع أنواعها.\n\n" +
+                                    "الإصدار: 1.1.20\n" +
+                                    "الحالة: جاهز للنشر على Google Play\n" +
+                                    "التوافق: Android 6.0 حتى Android 16 (API 36)",
+                                fontSize = 13.sp,
+                                color = Color(0xFF444444)
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { showAboutDialog = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                        ) {
+                            Text("إغلاق", color = Color.White)
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardCustomInputField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    icon: @Composable () -> Unit,
+    actionButton: @Composable (() -> Unit)? = null
+) {
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center
+            .fillMaxWidth()
+            .height(54.dp)
+            .background(Color.White, RoundedCornerShape(14.dp))
+            .border(1.dp, Color(0xFFD0D0D0), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.CenterStart
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("رابط البث غير صالح أو غير مدعوم", color = Color.White, fontSize = 16.sp)
-            Button(onClick = onClose) {
-                Text("إغلاق")
+            Box(
+                modifier = Modifier.size(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                icon()
+            }
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = placeholder,
+                        color = Color(0xFF9E9E9E),
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Start
+                    )
+                }
+                androidx.compose.foundation.text.BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        color = Color(0xFF212121),
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Start
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            if (actionButton != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                actionButton()
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedStreamCard(
+    item: SavedStreamItem,
+    onPlay: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onPlay),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFFEEEEEE)),
+        color = Color(0xFFFAFAFA)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.title.ifBlank { "فيديو بدون عنوان" },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = Color(0xFF212121),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = item.url,
+                    fontSize = 11.sp,
+                    color = Color(0xFF757575),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onPlay) {
+                    Text("▶", color = Color(0xFFC62828), fontSize = 16.sp)
+                }
+                IconButton(onClick = onDelete) {
+                    Text("🗑", fontSize = 14.sp)
+                }
             }
         }
     }
