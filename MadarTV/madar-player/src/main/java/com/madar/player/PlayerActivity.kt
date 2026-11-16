@@ -132,7 +132,7 @@ private data class VideoQualityTrack(
 class PlayerActivity : ComponentActivity() {
 
     private val currentStreamUrl = mutableStateOf("")
-    private val currentTitle = mutableStateOf("مشغل الفيديو")
+    private val currentTitle = mutableStateOf("ZAG Player")
     private val currentUserAgent = mutableStateOf("")
     private val currentReferer = mutableStateOf("")
     private val currentStreamHeaders = mutableStateOf<Map<String, String>>(emptyMap())
@@ -191,7 +191,7 @@ class PlayerActivity : ComponentActivity() {
             Toast.makeText(this, "رابط الفيديو غير صالح", Toast.LENGTH_SHORT).show()
             return
         }
-        val cleanTitle = title.trim().ifBlank { "مشغل الفيديو" }
+        val cleanTitle = title.trim().ifBlank { "ZAG Player" }
         PlayerStorage.addToHistory(
             this,
             SavedStreamItem(
@@ -3543,6 +3543,25 @@ private fun PlayerDashboardScreen(
     var historyList by remember { mutableStateOf(PlayerStorage.getHistory(context)) }
     var favoritesList by remember { mutableStateOf(PlayerStorage.getFavorites(context)) }
 
+    // Animations: Infinite pulse & shimmer transitions
+    val infiniteTransition = rememberInfiniteTransition(label = "zag_anim")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.025f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "btn_pulse"
+    )
+
+    // Animated visualizer wave bars
+    val wave1 by infiniteTransition.animateFloat(0.25f, 1f, infiniteRepeatable(tween(550, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "w1")
+    val wave2 by infiniteTransition.animateFloat(0.45f, 0.9f, infiniteRepeatable(tween(750, delayMillis = 100, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "w2")
+    val wave3 by infiniteTransition.animateFloat(0.2f, 1f, infiniteRepeatable(tween(480, delayMillis = 200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "w3")
+    val wave4 by infiniteTransition.animateFloat(0.4f, 0.85f, infiniteRepeatable(tween(680, delayMillis = 150, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "w4")
+    val wave5 by infiniteTransition.animateFloat(0.3f, 0.95f, infiniteRepeatable(tween(600, delayMillis = 250, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "w5")
+
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Box(
             modifier = Modifier
@@ -3550,9 +3569,9 @@ private fun PlayerDashboardScreen(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFFB71C1C),
-                            Color(0xFFC62828),
-                            Color(0xFFD32F2F)
+                            Color(0xFF090D16),
+                            Color(0xFF0F172A),
+                            Color(0xFF1E1B4B)
                         )
                     )
                 )
@@ -3562,59 +3581,98 @@ private fun PlayerDashboardScreen(
                     .fillMaxSize()
                     .statusBarsPadding()
             ) {
-                // Header Top Bar
+                // Top Header Bar
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = "مشغل الفيديو",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    // Right: App Brand Title & Badge
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(Color(0xFF4F46E5), Color(0xFF06B6D4))
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Z",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "ZAG PLAYER",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "مشغل الوسائط والبث المباشر",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
 
+                    // Left: 3-dots Menu
                     Box {
                         IconButton(onClick = { menuExpanded = true }) {
-                            Text(
-                                text = "⋮",
-                                color = Color.White,
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1E293B)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "⋮",
+                                    color = Color(0xFFE2E8F0),
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                         DropdownMenu(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
-                            modifier = Modifier.background(Color.White)
+                            modifier = Modifier.background(Color(0xFF0F172A))
                         ) {
                             DropdownMenuItem(
-                                text = { Text("📁 فتح ملف من الهاتف", color = Color(0xFF212121), fontSize = 14.sp) },
+                                text = { Text("📁 فتح ملف من الهاتف", color = Color(0xFFF1F5F9), fontSize = 14.sp) },
                                 onClick = {
                                     menuExpanded = false
                                     onPickLocalFile()
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("⚡ تجربة بث مباشر (HLS)", color = Color(0xFF212121), fontSize = 14.sp) },
+                                text = { Text("⚡ تجربة بث حي (HLS)", color = Color(0xFF38BDF8), fontSize = 14.sp) },
                                 onClick = {
                                     menuExpanded = false
                                     onPlay("بث تجريبي HLS", "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", "")
                                 }
                             )
-                            HorizontalDivider(color = Color(0xFFEEEEEE))
+                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFF1E293B)))
                             DropdownMenuItem(
-                                text = { Text("🔒 سياسة الخصوصية", color = Color(0xFF212121), fontSize = 14.sp) },
+                                text = { Text("🔒 سياسة الخصوصية", color = Color(0xFFCBD5E1), fontSize = 14.sp) },
                                 onClick = {
                                     menuExpanded = false
                                     showPrivacyDialog = true
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("ℹ️ عن المشغل", color = Color(0xFF212121), fontSize = 14.sp) },
+                                text = { Text("ℹ️ عن المشغل", color = Color(0xFFCBD5E1), fontSize = 14.sp) },
                                 onClick = {
                                     menuExpanded = false
                                     showAboutDialog = true
@@ -3624,12 +3682,14 @@ private fun PlayerDashboardScreen(
                     }
                 }
 
-                // Sub-bar pill: 🟢 جاهز للتشغيل | جودة عالية الوضوح
+                // Sub-bar Cyber Pill
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .background(Color(0x33FFFFFF), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 18.dp, vertical = 2.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0x331E293B))
+                        .border(1.dp, Color(0x4D6366F1), RoundedCornerShape(16.dp))
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     Row(
@@ -3640,74 +3700,131 @@ private fun PlayerDashboardScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size(9.dp)
-                                    .background(Color(0xFF4CAF50), CircleShape)
+                                    .size(8.dp)
+                                    .background(Color(0xFF10B981), CircleShape)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "جاهز للتشغيل",
-                                color = Color.White,
+                                text = "جاهز للتشغيل الفائق",
+                                color = Color(0xFFE2E8F0),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         }
 
                         Text(
-                            text = "جودة عالية الوضوح",
-                            color = Color(0xEEFFFFFF),
+                            text = "4K Ultra HD • HLS Engine",
+                            color = Color(0xFF38BDF8),
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Normal
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Video Preview Container (Black Box)
+                // Hero Visualizer Video Container (Cyber Glow Box)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(210.dp)
-                        .padding(horizontal = 16.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF0A0A0A)),
+                        .height(205.dp)
+                        .padding(horizontal = 18.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(Color(0xFF070B14), Color(0xFF0F172A))
+                            )
+                        )
+                        .border(
+                            1.5.dp,
+                            Brush.linearGradient(
+                                colors = listOf(Color(0xFF6366F1), Color(0xFF06B6D4), Color(0xFFA855F7))
+                            ),
+                            RoundedCornerShape(20.dp)
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .background(Color(0xFF292929), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Text(
-                            text = "أضف أو اختر فيديو للتشغيل",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        // Animated Wave Visualizer Bars + Play Center
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Left wave bars
+                            Box(modifier = Modifier.width(4.dp).height((32 * wave1).dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF06B6D4)))
+                            Box(modifier = Modifier.width(4.dp).height((42 * wave2).dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF6366F1)))
+
+                            // Center 3D Glowing Play Icon
+                            Box(
+                                modifier = Modifier
+                                    .size(62.dp)
+                                    .scale(pulseScale)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(
+                                            colors = listOf(Color(0xFF4F46E5), Color(0xFF06B6D4))
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "▶",
+                                    color = Color.White,
+                                    fontSize = 24.sp
+                                )
+                            }
+
+                            // Right wave bars
+                            Box(modifier = Modifier.width(4.dp).height((40 * wave3).dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF8B5CF6)))
+                            Box(modifier = Modifier.width(4.dp).height((30 * wave4).dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF06B6D4)))
+                            Box(modifier = Modifier.width(4.dp).height((22 * wave5).dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF38BDF8)))
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x801E293B))
+                                .border(1.dp, Color(0x66334155), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "أضف رابط فيديو أو اختر ملفاً للتشغيل الفوري",
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Bottom White Card
+                // Bottom Slate Surface
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                    color = Color.White,
-                    shadowElevation = 8.dp
+                    shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+                    color = Color(0xFF0B0F19),
+                    border = BorderStroke(1.dp, Color(0xFF1E293B))
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 18.dp, vertical = 16.dp)
+                            .padding(horizontal = 18.dp, vertical = 14.dp)
                     ) {
-                        // 3 Tabs: المشغل | السجل | المفضلة
+                        // 3 Modern Tabs with Glowing Indicator
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 16.dp),
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFF111827))
+                                .padding(4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -3715,11 +3832,11 @@ private fun PlayerDashboardScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isTab0) Color(0xFFFFEBEE) else Color.Transparent)
-                                    .then(
-                                        if (isTab0) Modifier.border(1.dp, Color(0xFFFFCDD2), RoundedCornerShape(12.dp))
-                                        else Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isTab0) Brush.horizontalGradient(
+                                            listOf(Color(0xFF4F46E5), Color(0xFF7C3AED))
+                                        ) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
                                     )
                                     .clickable { selectedTab = 0 }
                                     .padding(vertical = 10.dp),
@@ -3727,23 +3844,21 @@ private fun PlayerDashboardScreen(
                             ) {
                                 Text(
                                     text = "المشغل",
-                                    color = if (isTab0) Color(0xFFC62828) else Color(0xFF757575),
+                                    color = if (isTab0) Color.White else Color(0xFF94A3B8),
                                     fontWeight = if (isTab0) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 15.sp
+                                    fontSize = 14.sp
                                 )
                             }
-
-                            Spacer(modifier = Modifier.width(8.dp))
 
                             val isTab1 = selectedTab == 1
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isTab1) Color(0xFFFFEBEE) else Color.Transparent)
-                                    .then(
-                                        if (isTab1) Modifier.border(1.dp, Color(0xFFFFCDD2), RoundedCornerShape(12.dp))
-                                        else Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isTab1) Brush.horizontalGradient(
+                                            listOf(Color(0xFF4F46E5), Color(0xFF7C3AED))
+                                        ) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
                                     )
                                     .clickable {
                                         historyList = PlayerStorage.getHistory(context)
@@ -3754,23 +3869,21 @@ private fun PlayerDashboardScreen(
                             ) {
                                 Text(
                                     text = "السجل",
-                                    color = if (isTab1) Color(0xFFC62828) else Color(0xFF757575),
+                                    color = if (isTab1) Color.White else Color(0xFF94A3B8),
                                     fontWeight = if (isTab1) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 15.sp
+                                    fontSize = 14.sp
                                 )
                             }
-
-                            Spacer(modifier = Modifier.width(8.dp))
 
                             val isTab2 = selectedTab == 2
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isTab2) Color(0xFFFFEBEE) else Color.Transparent)
-                                    .then(
-                                        if (isTab2) Modifier.border(1.dp, Color(0xFFFFCDD2), RoundedCornerShape(12.dp))
-                                        else Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isTab2) Brush.horizontalGradient(
+                                            listOf(Color(0xFF4F46E5), Color(0xFF7C3AED))
+                                        ) else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
                                     )
                                     .clickable {
                                         favoritesList = PlayerStorage.getFavorites(context)
@@ -3781,52 +3894,71 @@ private fun PlayerDashboardScreen(
                             ) {
                                 Text(
                                     text = "المفضلة",
-                                    color = if (isTab2) Color(0xFFC62828) else Color(0xFF757575),
+                                    color = if (isTab2) Color.White else Color(0xFF94A3B8),
                                     fontWeight = if (isTab2) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 15.sp
+                                    fontSize = 14.sp
                                 )
                             }
                         }
 
-                        // Tab Contents
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Tab Contents with Animated Transitions
                         when (selectedTab) {
                             0 -> {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .verticalScroll(rememberScrollState()),
-                                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
+                                    // Field 1: Title
                                     DashboardCustomInputField(
                                         value = titleInput,
                                         onValueChange = { titleInput = it },
-                                        placeholder = "عنوان الفيديو",
+                                        placeholder = "عنوان الفيديو (اختياري)",
                                         icon = {
-                                            Text(
-                                                text = "T",
-                                                color = Color(0xFFC62828),
-                                                fontSize = 24.sp,
-                                                fontWeight = FontWeight.Black
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0x336366F1)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "T",
+                                                    color = Color(0xFF818CF8),
+                                                    fontSize = 18.sp,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
                                         }
                                     )
 
+                                    // Field 2: URL with Paste
                                     DashboardCustomInputField(
                                         value = urlInput,
                                         onValueChange = { urlInput = it },
-                                        placeholder = "رابط الفيديو",
+                                        placeholder = "رابط الفيديو (HLS, MP4, MKV...)",
                                         icon = {
-                                            Text(
-                                                text = "🔗",
-                                                color = Color(0xFFC62828),
-                                                fontSize = 18.sp
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0x3306B6D4)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "🔗",
+                                                    fontSize = 16.sp
+                                                )
+                                            }
                                         },
                                         actionButton = {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color(0xFFFFEBEE))
+                                                    .background(Color(0xFF312E81))
                                                     .clickable {
                                                         val pasteText = clipboardManager.getText()?.text
                                                         if (!pasteText.isNullOrBlank()) {
@@ -3836,11 +3968,11 @@ private fun PlayerDashboardScreen(
                                                             Toast.makeText(context, "الحافظة فارغة", Toast.LENGTH_SHORT).show()
                                                         }
                                                     }
-                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                    .padding(horizontal = 12.dp, vertical = 6.dp)
                                             ) {
                                                 Text(
                                                     text = "لصق",
-                                                    color = Color(0xFFC62828),
+                                                    color = Color(0xFFA5B4FC),
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -3848,23 +3980,30 @@ private fun PlayerDashboardScreen(
                                         }
                                     )
 
+                                    // Field 3: User-Agent
                                     DashboardCustomInputField(
                                         value = uaInput,
                                         onValueChange = { uaInput = it },
-                                        placeholder = "وكيل المستخدم (اختياري)",
+                                        placeholder = "وكيل المستخدم User-Agent (اختياري)",
                                         icon = {
-                                            Text(
-                                                text = "e",
-                                                color = Color(0xFFC62828),
-                                                fontSize = 26.sp,
-                                                fontWeight = FontWeight.Black,
-                                                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0x338B5CF6)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "🌐",
+                                                    fontSize = 16.sp
+                                                )
+                                            }
                                         }
                                     )
 
                                     Spacer(modifier = Modifier.height(4.dp))
 
+                                    // Pulsing Animated Action Button: ▶ حفظ وتشغيل
                                     Button(
                                         onClick = {
                                             val cleanUrl = urlInput.trim()
@@ -3878,34 +4017,49 @@ private fun PlayerDashboardScreen(
                                                     "https://$cleanUrl"
                                                 } else cleanUrl
 
-                                                onPlay(titleInput.trim(), validUrl, uaInput.trim())
+                                                onPlay(titleInput.trim().ifBlank { "ZAG Player" }, validUrl, uaInput.trim())
                                             }
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(54.dp),
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                                            .height(54.dp)
+                                            .scale(pulseScale),
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                        contentPadding = PaddingValues(0.dp)
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Center
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    Brush.horizontalGradient(
+                                                        listOf(Color(0xFF4F46E5), Color(0xFF7C3AED), Color(0xFF06B6D4))
+                                                    ),
+                                                    RoundedCornerShape(14.dp)
+                                                ),
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = "حفظ وتشغيل",
-                                                color = Color.White,
-                                                fontSize = 17.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = "▶",
-                                                color = Color.White,
-                                                fontSize = 15.sp
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Text(
+                                                    text = "تشغيل الفيديو الآن",
+                                                    color = Color.White,
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = "▶",
+                                                    color = Color.White,
+                                                    fontSize = 16.sp
+                                                )
+                                            }
                                         }
                                     }
 
+                                    // Fast Utilities Row
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -3914,22 +4068,22 @@ private fun PlayerDashboardScreen(
                                             onClick = onPickLocalFile,
                                             modifier = Modifier.weight(1f),
                                             shape = RoundedCornerShape(10.dp),
-                                            border = BorderStroke(1.dp, Color(0xFFE0E0E0))
+                                            border = BorderStroke(1.dp, Color(0xFF334155))
                                         ) {
-                                            Text("📁 فتح ملف محلي", fontSize = 12.sp, color = Color(0xFF424242))
+                                            Text("📁 فتح ملف من الهاتف", fontSize = 12.sp, color = Color(0xFF94A3B8))
                                         }
 
                                         OutlinedButton(
                                             onClick = {
-                                                titleInput = "بث تجريبي HLS"
+                                                titleInput = "ZAG Demo Stream"
                                                 urlInput = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
-                                                onPlay(titleInput, urlInput, "")
+                                                onPlay("ZAG Demo Stream", urlInput, "")
                                             },
                                             modifier = Modifier.weight(1f),
                                             shape = RoundedCornerShape(10.dp),
-                                            border = BorderStroke(1.dp, Color(0xFFE0E0E0))
+                                            border = BorderStroke(1.dp, Color(0xFF4F46E5))
                                         ) {
-                                            Text("⚡ تجربة بث HLS", fontSize = 12.sp, color = Color(0xFF424242))
+                                            Text("⚡ تجربة بث HLS", fontSize = 12.sp, color = Color(0xFF818CF8))
                                         }
                                     }
 
@@ -3939,7 +4093,7 @@ private fun PlayerDashboardScreen(
                                                 PlayerStorage.toggleFavorite(
                                                     context,
                                                     SavedStreamItem(
-                                                        title = titleInput.ifBlank { "رابط مفضل" },
+                                                        title = titleInput.ifBlank { "ZAG Bookmark" },
                                                         url = urlInput.trim(),
                                                         userAgent = uaInput.trim()
                                                     )
@@ -3948,7 +4102,7 @@ private fun PlayerDashboardScreen(
                                             },
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            Text("⭐ حفظ الرابط في المفضلة", color = Color(0xFFC62828), fontSize = 13.sp)
+                                            Text("⭐ حفظ الرابط في المفضلة", color = Color(0xFF38BDF8), fontSize = 13.sp)
                                         }
                                     }
                                 }
@@ -3963,9 +4117,9 @@ private fun PlayerDashboardScreen(
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text("🕒", fontSize = 42.sp)
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            Text("لا يوجد سجل تشغيل حالياً", color = Color(0xFF757575), fontSize = 15.sp)
+                                            Text("لا يوجد سجل تشغيل حالياً", color = Color(0xFF94A3B8), fontSize = 15.sp)
                                             Spacer(modifier = Modifier.height(4.dp))
-                                            Text("أي فيديو تشغله سيظهر هنا للوصول السريع", color = Color(0xFF9E9E9E), fontSize = 12.sp)
+                                            Text("أي فيديو تشغله سيظهر هنا للوصول السريع", color = Color(0xFF64748B), fontSize = 12.sp)
                                         }
                                     }
                                 } else {
@@ -3975,13 +4129,13 @@ private fun PlayerDashboardScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("عدد العناصر: ${historyList.size}", color = Color(0xFF616161), fontSize = 13.sp)
+                                            Text("عدد العناصر المحفوظة: ${historyList.size}", color = Color(0xFF94A3B8), fontSize = 13.sp)
                                             TextButton(onClick = {
                                                 PlayerStorage.clearHistory(context)
                                                 historyList = emptyList()
                                                 Toast.makeText(context, "تم مسح السجل", Toast.LENGTH_SHORT).show()
                                             }) {
-                                                Text("مسح الكل", color = Color(0xFFD32F2F), fontSize = 13.sp)
+                                                Text("مسح الكل", color = Color(0xFFF43F5E), fontSize = 13.sp)
                                             }
                                         }
                                         LazyColumn(
@@ -4014,9 +4168,9 @@ private fun PlayerDashboardScreen(
                                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text("⭐", fontSize = 42.sp)
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            Text("لا توجد روابط مفضلة بعد", color = Color(0xFF757575), fontSize = 15.sp)
+                                            Text("لا توجد روابط مفضلة بعد", color = Color(0xFF94A3B8), fontSize = 15.sp)
                                             Spacer(modifier = Modifier.height(4.dp))
-                                            Text("احفظ روابطك المفضلة للوصول إليها بنقرة واحدة", color = Color(0xFF9E9E9E), fontSize = 12.sp)
+                                            Text("احفظ روابطك المفضلة للوصول إليها بنقرة واحدة", color = Color(0xFF64748B), fontSize = 12.sp)
                                         }
                                     }
                                 } else {
@@ -4047,25 +4201,26 @@ private fun PlayerDashboardScreen(
             if (showPrivacyDialog) {
                 AlertDialog(
                     onDismissRequest = { showPrivacyDialog = false },
-                    title = { Text("🔒 سياسة الخصوصية", fontWeight = FontWeight.Bold) },
+                    title = { Text("🔒 سياسة الخصوصية - ZAG Player", fontWeight = FontWeight.Bold, color = Color.White) },
+                    containerColor = Color(0xFF0F172A),
                     text = {
                         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                             Text(
-                                text = "مشغل الفيديو (Zaqzouka Player) يحترم خصوصية المستخدم بالكامل:\n\n" +
+                                text = "تطبيق ZAG Player يحترم خصوصية المستخدم بالكامل:\n\n" +
                                     "1. عدم جمع البيانات: التطبيق لا يقوم بجمع أو إرسال أو بيع أي بيانات شخصية أو معلومات عن جهازك.\n\n" +
-                                    "2. التخزين المحلي: يتم تخزين سجل المشاهدة والمفضلة والروابط المدخلة محلياً فقط على هاتفك.\n\n" +
-                                    "3. أداة مشغل وسائط: هذا التطبيق هو أداة مشغل فيديو حيادية، ولا يحتوي على أي محتوى مدمج مسبقاً.\n\n" +
-                                    "4. حقوق الملكية: المستخدم مسؤول مسؤولية كاملة عن الروابط ومصادر البث التي يضيفها بما يتوافق مع القوانين وحقوق النشر.",
+                                    "2. التخزين المحلي: يتم تخزين سجل المشاهدة والمفضلة محلياً فقط على هاتفك.\n\n" +
+                                    "3. أداة مشغل وسائط: هذا التطبيق أداة مشغل فيديو نظيفة وحيادية تماماً، ولا يحتوي على أي محتوى مدمج مسبقاً.\n\n" +
+                                    "4. حقوق الملكية: المستخدم مسؤول مسؤولية كاملة عن الروابط ومصادر البث التي يضيفها بما يتوافق مع القوانين الدولية وحقوق النشر.",
                                 fontSize = 13.sp,
                                 lineHeight = 20.sp,
-                                color = Color(0xFF333333)
+                                color = Color(0xFFCBD5E1)
                             )
                         }
                     },
                     confirmButton = {
                         Button(
                             onClick = { showPrivacyDialog = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
                         ) {
                             Text("موافق", color = Color.White)
                         }
@@ -4076,23 +4231,25 @@ private fun PlayerDashboardScreen(
             if (showAboutDialog) {
                 AlertDialog(
                     onDismissRequest = { showAboutDialog = false },
-                    title = { Text("مشغل الفيديو v1.1.20", fontWeight = FontWeight.Bold) },
+                    title = { Text("ZAG Player v1.1.20", fontWeight = FontWeight.Bold, color = Color.White) },
+                    containerColor = Color(0xFF0F172A),
                     text = {
                         Column {
                             Text(
-                                text = "مشغل وسائط متعدد الصيغ عالي الأداء يدعم بروتوكولات HLS و DASH وملفات الفيديو بجميع أنواعها.\n\n" +
+                                text = "مشغل وسائط متعدد الصيغ عالي الأداء يدعم بروتوكولات HLS و DASH وملفات الفيديو المحلية.\n\n" +
                                     "الإصدار: 1.1.20\n" +
+                                    "الاسم التجاري: ZAG Player (zag player)\n" +
                                     "الحالة: جاهز للنشر على Google Play\n" +
                                     "التوافق: Android 6.0 حتى Android 16 (API 36)",
                                 fontSize = 13.sp,
-                                color = Color(0xFF444444)
+                                color = Color(0xFF94A3B8)
                             )
                         }
                     },
                     confirmButton = {
                         Button(
                             onClick = { showAboutDialog = false },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
                         ) {
                             Text("إغلاق", color = Color.White)
                         }
@@ -4115,8 +4272,9 @@ private fun DashboardCustomInputField(
         modifier = Modifier
             .fillMaxWidth()
             .height(54.dp)
-            .background(Color.White, RoundedCornerShape(14.dp))
-            .border(1.dp, Color(0xFFD0D0D0), RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF1E293B))
+            .border(1.dp, Color(0xFF334155), RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.CenterStart
     ) {
@@ -4140,8 +4298,8 @@ private fun DashboardCustomInputField(
                 if (value.isEmpty()) {
                     Text(
                         text = placeholder,
-                        color = Color(0xFF9E9E9E),
-                        fontSize = 15.sp,
+                        color = Color(0xFF64748B),
+                        fontSize = 14.sp,
                         textAlign = TextAlign.Start
                     )
                 }
@@ -4150,8 +4308,8 @@ private fun DashboardCustomInputField(
                     onValueChange = onValueChange,
                     singleLine = true,
                     textStyle = androidx.compose.ui.text.TextStyle(
-                        color = Color(0xFF212121),
-                        fontSize = 15.sp,
+                        color = Color(0xFFF8FAFC),
+                        fontSize = 14.sp,
                         textAlign = TextAlign.Start
                     ),
                     modifier = Modifier.fillMaxWidth()
@@ -4178,8 +4336,8 @@ private fun SavedStreamCard(
             .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onPlay),
         shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, Color(0xFFEEEEEE)),
-        color = Color(0xFFFAFAFA)
+        border = BorderStroke(1.dp, Color(0xFF1E293B)),
+        color = Color(0xFF111827)
     ) {
         Row(
             modifier = Modifier
@@ -4193,7 +4351,7 @@ private fun SavedStreamCard(
                     text = item.title.ifBlank { "فيديو بدون عنوان" },
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
-                    color = Color(0xFF212121),
+                    color = Color(0xFFF1F5F9),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -4201,7 +4359,7 @@ private fun SavedStreamCard(
                 Text(
                     text = item.url,
                     fontSize = 11.sp,
-                    color = Color(0xFF757575),
+                    color = Color(0xFF64748B),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -4209,7 +4367,7 @@ private fun SavedStreamCard(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onPlay) {
-                    Text("▶", color = Color(0xFFC62828), fontSize = 16.sp)
+                    Text("▶", color = Color(0xFF38BDF8), fontSize = 16.sp)
                 }
                 IconButton(onClick = onDelete) {
                     Text("🗑", fontSize = 14.sp)
