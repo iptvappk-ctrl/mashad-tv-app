@@ -114,11 +114,13 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   String _sessionSearchQuery = '';
   String _sessionFilterStatus = 'all'; // 'all', 'active', 'closed'
   String _logFilterType = 'all'; // 'all', 'play', 'search', 'install'
+  bool _groupByDevice = true; // عرض بطاقة واحدة فقط لكل جهاز حقيقي لمنع التكرار
 
   Map<String, dynamic> _kpis = {};
   Map<String, dynamic> _analytics = {};
   Map<String, dynamic> _monetization = {};
   List<dynamic> _sessions = [];
+  List<dynamic> _devices = [];
   List<dynamic> _topContent = [];
   List<dynamic> _searches = [];
   List<dynamic> _activityLog = [];
@@ -177,6 +179,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             _analytics = data['analytics'] ?? {};
             _monetization = data['monetization'] ?? {};
             _sessions = data['sessions'] ?? [];
+            _devices = data['devices'] ?? [];
             _topContent = data['topContent'] ?? [];
             _searches = data['searches'] ?? [];
             _activityLog = data['activityLog'] ?? [];
@@ -692,13 +695,53 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     );
   }
 
+  List<Map<String, dynamic>> _getGroupedDevices() {
+    if (_devices.isNotEmpty) {
+      return _devices.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    }
+    final map = <String, Map<String, dynamic>>{};
+    for (final item in _sessions) {
+      final s = Map<String, dynamic>.from(item as Map);
+      final did = (s['deviceId'] ?? s['device'] ?? s['id'] ?? '').toString();
+      if (!map.containsKey(did)) {
+        map[did] = {
+          ...s,
+          'id': did,
+          'deviceId': did,
+          'sessionCount': 1,
+          'totalDurationMinutes': s['durationMinutes'] ?? 1,
+          'sessionsHistory': [s],
+        };
+      } else {
+        final d = map[did]!;
+        d['sessionCount'] = (d['sessionCount'] as int) + 1;
+        d['totalDurationMinutes'] = (d['totalDurationMinutes'] as num) + (s['durationMinutes'] ?? 1);
+        (d['sessionsHistory'] as List).add(s);
+        if (s['status'] == 'active') {
+          d['status'] = 'active';
+          d['lastSeen'] = s['lastSeen'] ?? d['lastSeen'];
+          d['lastContent'] = s['lastContent'] ?? d['lastContent'];
+          d['lastSection'] = s['lastSection'] ?? d['lastSection'];
+        }
+      }
+    }
+    return map.values.toList();
+  }
+
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 2: LIVE SESSIONS & DEVICE INSPECTOR
+  // TAB 2: LIVE SESSIONS & DEVICE INSPECTOR (DEDUPLICATED UNIQUE DEVICES)
   // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildSessionsTab() {
+    final baseList = _groupByDevice
+        ? _getGroupedDevices()
+        : _sessions.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+    final totalCount = baseList.length;
+    final activeCount = baseList.where((s) => s['status'] == 'active').length;
+    final closedCount = baseList.where((s) => s['status'] != 'active').length;
+
     // Filter sessions based on search query and status filter
-    final filtered = _sessions.where((item) {
-      final s = item as Map<String, dynamic>;
+    final filtered = baseList.where((s) {
       final device = (s['device'] ?? '').toString().toLowerCase();
       final country = (s['country'] ?? '').toString().toLowerCase();
       final content = (s['lastContent'] ?? '').toString().toLowerCase();
@@ -728,7 +771,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 TextField(
                   style: TextStyle(color: _textPrimary, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: 'ابحث عن جهاز أو دولة أو اسم فيلم...',
+                    hintText: _groupByDevice ? 'ابحث عن اسم جهاز أو نظام...' : 'ابحث عن جهاز أو دولة أو اسم فيلم...',
                     hintStyle: TextStyle(color: _textMuted, fontSize: 13),
                     prefixIcon: Icon(Icons.search, size: 20, color: _textMuted),
                     filled: true,
@@ -748,11 +791,48 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    _buildFilterChip('الكل (${_sessions.length})', 'all'),
+                    _buildFilterChip('الكل ($totalCount)', 'all'),
                     const SizedBox(width: 6),
-                    _buildFilterChip('🟢 نشط الآن', 'active'),
+                    _buildFilterChip('🟢 نشط ($activeCount)', 'active'),
                     const SizedBox(width: 6),
-                    _buildFilterChip('⚪ منتهية', 'closed'),
+                    _buildFilterChip('⚪ منتهية ($closedCount)', 'closed'),
+                    const Spacer(),
+                    // Toggle: Unique Devices vs Raw Sessions
+                    InkWell(
+                      onTap: () => setState(() => _groupByDevice = !_groupByDevice),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _groupByDevice
+                              ? const Color(0xFF4F46E5).withValues(alpha: 0.15)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _groupByDevice ? const Color(0xFF4F46E5) : _border,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _groupByDevice ? Icons.devices_rounded : Icons.history_rounded,
+                              size: 14,
+                              color: _groupByDevice ? const Color(0xFF4F46E5) : _textMuted,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _groupByDevice ? 'أجهزة فريدة' : 'كل الجلسات',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: _groupByDevice ? const Color(0xFF4F46E5) : _textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -777,7 +857,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     itemCount: filtered.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
-                      final s = filtered[index] as Map<String, dynamic>;
+                      final s = filtered[index];
                       final isActive = s['status'] == 'active';
                       final device = s['device'] ?? 'Android Device';
                       final openTime = s['openTime'] ?? '';
@@ -919,6 +999,19 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                                     child: Text(
                                       audienceSegment,
                                       style: const TextStyle(color: Color(0xFF8B5CF6), fontSize: 11, fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                if ((s['sessionCount'] ?? 1) > 1)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: const Color(0xFF4F46E5).withValues(alpha: 0.3)),
+                                    ),
+                                    child: Text(
+                                      '📱 ${s['sessionCount']} جلسات',
+                                      style: const TextStyle(color: Color(0xFF4F46E5), fontSize: 11, fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                 Container(

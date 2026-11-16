@@ -28,42 +28,42 @@ async function sessionStart(req, res) {
   const lastContent = body.currentContent || '';
   const audience = resolveAudienceSegment(lastContent, lastSection);
 
-  // ── Deduplication: reuse existing active session for same device (last 10 min) ──
-  if (!isWeb && deviceId && !deviceId.startsWith('anon_')) {
-    try {
-      const existingSnap = await db.ref('sessions')
-        .orderByChild('deviceId')
-        .equalTo(deviceId)
-        .limitToLast(1)
-        .once('value');
-      if (existingSnap.exists()) {
-        let found = null;
-        existingSnap.forEach((child) => { found = child.val(); });
-        if (found && found.status === 'active') {
-          const lastSeenMs = new Date(found.lastSeen).getTime();
-          const ageMs = Date.now() - lastSeenMs;
-          if (ageMs < 10 * 60 * 1000) { // less than 10 minutes old → reuse
-            // Update lastSeen and return existing sessionId
-            await db.ref(`sessions/${found.id}`).update({
-              lastSeen: now.toISOString(),
-              lastSection,
-              lastContent,
-            });
-            return sendJson(res, 200, { ok: true, sessionId: found.id, location: geo.location, reused: true });
-          } else {
-            // Old session: mark it closed before creating new one
-            await db.ref(`sessions/${found.id}`).update({
-              status: 'closed',
-              closeTime: formatClockTime(now),
-              durationText: 'انتهت تلقائياً',
-            });
-          }
-        }
-      }
-    } catch (_) { /* fail-open: continue creating new session */ }
-  }
+  // ── 1 Entry per Physical Device (Strict Zero-Duplicate Guarantee) ──────────
+  const sessionId = isWeb
+    ? ('sess_web_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7))
+    : ('dev_' + (deviceId || 'anon').replace(/[^a-zA-Z0-9_-]/g, '_'));
 
-  const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+  if (!isWeb) {
+    try {
+      const snap = await db.ref(`sessions/${sessionId}`).once('value');
+      if (snap.exists()) {
+        const existing = snap.val() || {};
+        const prevSessionCount = existing.sessionCount || 1;
+        const prevActions = existing.actionsCount || 0;
+        await db.ref(`sessions/${sessionId}`).update({
+          device,
+          osVersion: body.osVersion || existing.osVersion || 'Android',
+          country: geo.country || existing.country,
+          city: geo.city || existing.city,
+          region: geo.region || existing.region,
+          location: geo.location || existing.location,
+          isp: geo.isp || existing.isp,
+          audienceSegmentName: audience.name,
+          openTime: formatClockTime(now),
+          closeTime: 'نشط الآن...',
+          durationText: 'مستمر (1 د)',
+          durationMinutes: 1,
+          lastSection,
+          lastContent,
+          status: 'active',
+          lastSeen: now.toISOString(),
+          sessionCount: prevSessionCount + 1,
+          actionsCount: prevActions + 1,
+        });
+        return sendJson(res, 200, { ok: true, sessionId, location: geo.location, updated: true });
+      }
+    } catch (_) { /* continue to set */ }
+  }
 
   const newSession = {
     id: sessionId,
@@ -94,6 +94,7 @@ async function sessionStart(req, res) {
     status: 'active',
     openedAt: now.toISOString(),
     lastSeen: now.toISOString(),
+    sessionCount: 1,
     actionsCount: 0,
   };
 

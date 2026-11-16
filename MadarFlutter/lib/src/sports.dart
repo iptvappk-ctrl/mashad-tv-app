@@ -1298,26 +1298,120 @@ Widget _highlightsPromoCard() {
       event: 'start',
     );
 
-    final opened = await NativeBridge.openPlayer(
-      url: item.embedUrl,
-      title: item.title,
-      referer: 'https://www.youtube.com/',
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      backupSources: [
-        {'name': 'YouTube Official', 'url': item.videoUrl},
-      ],
-      isLive: false,
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: CachedNetworkImage(
+                    imageUrl: item.thumbnail,
+                    width: 76,
+                    height: 46,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => const Icon(Icons.sports_soccer_rounded, size: 36),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, height: 1.3),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'beIN SPORTS · ${item.duration} · ${item.views}',
+                        style: const TextStyle(color: _muted, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                NativeBridge.openYouTube(
+                  videoId: item.id,
+                  watchUrl: item.videoUrl,
+                );
+              },
+              icon: const Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 22),
+              label: const Text(
+                'مشاهدة فائقة الدقة 1080p (YouTube الرسمي)',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFCC0000),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final opened = await NativeBridge.openPlayer(
+                  url: item.embedUrl,
+                  title: item.title,
+                  referer: 'https://www.youtube.com/',
+                  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                  backupSources: [
+                    {'name': 'YouTube Official', 'url': item.videoUrl},
+                  ],
+                  isLive: false,
+                );
+                if (!opened) {
+                  NativeBridge.openYouTube(
+                    videoId: item.id,
+                    watchUrl: item.videoUrl,
+                  );
+                }
+              },
+              icon: const Icon(Icons.smart_display_rounded, size: 20),
+              label: const Text(
+                'تشغيل في مشغل زقزوقة المدمج',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                side: BorderSide(color: Colors.grey.shade400),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
-
-    if (!opened) {
-      final ytOpened = await NativeBridge.openYouTube(
-        videoId: item.id,
-        watchUrl: item.videoUrl,
-      );
-      if (!ytOpened && context.mounted) {
-        _message(context, 'تعذر تشغيل الملخص، تحقق من اتصالك بالإنترنت.');
-      }
-    }
   }
 
   Widget _tournamentChip(String name) {
@@ -2008,28 +2102,36 @@ class MatchHighlightsService {
   MatchHighlightsService._();
 
   static Future<List<MatchHighlight>> fetchHighlights({String query = ''}) async {
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
     try {
-      final term = query.trim().isNotEmpty
-          ? 'ملخص ${query.trim()} beIN SPORTS'
-          : 'ملخصات مباريات beIN SPORTS';
-      final uri = Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent(term)}');
-      final req = await client.getUrl(uri);
-      req.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-      req.headers.set('Accept-Language', 'ar,en;q=0.9');
-      final res = await req.close().timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) {
-        final html = await res.transform(utf8.decoder).join();
-        final match = RegExp(r'var ytInitialData = ({.*?});<\/script>').firstMatch(html);
-        if (match != null) {
-          final jsonStr = match.group(1);
-          if (jsonStr != null) {
-            final data = jsonDecode(jsonStr);
-            final List<MatchHighlight> results = [];
-            _extractFromYt(data, results);
-            if (results.isNotEmpty) return results;
+      final List<Uri> endpoints = [];
+      if (query.trim().isEmpty) {
+        endpoints.add(Uri.parse('https://www.youtube.com/@beINSPORTS/videos'));
+        endpoints.add(Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent("ملخص مباراة beIN SPORTS")}'));
+      } else {
+        endpoints.add(Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent("ملخص ${query.trim()} beIN SPORTS")}'));
+      }
+
+      for (final uri in endpoints) {
+        try {
+          final req = await client.getUrl(uri);
+          req.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+          req.headers.set('Accept-Language', 'ar,en;q=0.9');
+          final res = await req.close().timeout(const Duration(seconds: 8));
+          if (res.statusCode == 200) {
+            final html = await res.transform(utf8.decoder).join();
+            final match = RegExp(r'var ytInitialData = ({.*?});<\/script>').firstMatch(html);
+            if (match != null) {
+              final jsonStr = match.group(1);
+              if (jsonStr != null) {
+                final data = jsonDecode(jsonStr);
+                final List<MatchHighlight> results = [];
+                _extractFromYt(data, results);
+                if (results.isNotEmpty) return results;
+              }
+            }
           }
-        }
+        } catch (_) {}
       }
     } catch (_) {
     } finally {
@@ -2040,6 +2142,60 @@ class MatchHighlightsService {
 
   static void _extractFromYt(dynamic obj, List<MatchHighlight> out) {
     if (obj is Map) {
+      // 1. New YouTube lockupViewModel parser (channel pages and new search)
+      if (obj.containsKey('lockupViewModel')) {
+        final lm = obj['lockupViewModel'] as Map<String, dynamic>;
+        final vid = lm['contentId']?.toString() ?? '';
+        final meta = lm['metadata']?['lockupMetadataViewModel'];
+        final title = meta?['title']?['content']?.toString() ?? '';
+
+        String duration = '';
+        final img = lm['contentImage']?['thumbnailViewModel'];
+        final overlays = img?['overlays'];
+        if (overlays is List) {
+          for (final ov in overlays) {
+            final badge = ov?['thumbnailBottomOverlayViewModel']?['badges'];
+            if (badge is List && badge.isNotEmpty) {
+              duration = badge[0]?['thumbnailBadgeViewModel']?['text']?.toString() ?? '';
+              if (duration.isNotEmpty) break;
+            }
+          }
+        }
+
+        String views = '';
+        String timeAgo = '';
+        final rows = meta?['metadata']?['contentMetadataViewModel']?['metadataRows'];
+        if (rows is List && rows.isNotEmpty) {
+          final parts = rows[0]?['metadataParts'];
+          if (parts is List) {
+            if (parts.isNotEmpty) {
+              views = parts[0]?['text']?['content']?.toString() ?? '';
+              if (views.isNotEmpty && !views.contains('مشاهدة')) views = '$views مشاهدة';
+            }
+            if (parts.length > 1) {
+              timeAgo = parts[1]?['text']?['content']?.toString() ?? '';
+            }
+          }
+        }
+
+        if (vid.isNotEmpty && title.isNotEmpty && (title.contains('ملخص') || title.contains('مباراة') || title.contains('أهداف') || title.contains('كأس') || title.contains('دوري'))) {
+          String tour = _detectTournament(title);
+          out.add(MatchHighlight(
+            id: vid,
+            title: title,
+            channel: 'beIN SPORTS',
+            duration: duration,
+            timeAgo: timeAgo,
+            views: views,
+            thumbnail: 'https://i.ytimg.com/vi/$vid/hqdefault.jpg',
+            videoUrl: 'https://www.youtube.com/watch?v=$vid',
+            embedUrl: 'https://www.youtube.com/embed/$vid?autoplay=1&controls=1&playsinline=1',
+            tournament: tour,
+          ));
+        }
+      }
+
+      // 2. Standard videoRenderer parser
       if (obj.containsKey('videoRenderer')) {
         final vr = obj['videoRenderer'] as Map<String, dynamic>;
         final vid = vr['videoId']?.toString() ?? '';
@@ -2065,21 +2221,7 @@ class MatchHighlightsService {
         }
 
         if (vid.isNotEmpty && title.isNotEmpty && (title.contains('ملخص') || title.contains('مباراة') || title.contains('أهداف'))) {
-          String tour = 'بطولات كبرى';
-          if (title.contains('الأمم الأوروبية') || title.contains('Nations League')) {
-            tour = 'دوري الأمم الأوروبية';
-          } else if (title.contains('أبطال أوروبا') || title.contains('Champions League')) {
-            tour = 'دوري أبطال أوروبا';
-          } else if (title.contains('الإنجليزي') || title.contains('Premier')) {
-            tour = 'الدوري الإنجليزي';
-          } else if (title.contains('الإسباني') || title.contains('LaLiga') || title.contains('كلاسيكو')) {
-            tour = 'الدوري الإسباني';
-          } else if (title.contains('إفريقيا') || title.contains('أمم إفريقيا')) {
-            tour = 'كأس أمم إفريقيا';
-          } else if (title.contains('العالم') || title.contains('World Cup')) {
-            tour = 'كأس العالم';
-          }
-
+          String tour = _detectTournament(title);
           out.add(MatchHighlight(
             id: vid,
             title: title,
@@ -2094,6 +2236,7 @@ class MatchHighlightsService {
           ));
         }
       }
+
       for (final val in obj.values) {
         _extractFromYt(val, out);
       }
@@ -2102,6 +2245,23 @@ class MatchHighlightsService {
         _extractFromYt(item, out);
       }
     }
+  }
+
+  static String _detectTournament(String title) {
+    if (title.contains('الأمم الأوروبية') || title.contains('Nations League')) {
+      return 'دوري الأمم الأوروبية';
+    } else if (title.contains('أبطال أوروبا') || title.contains('Champions League')) {
+      return 'دوري أبطال أوروبا';
+    } else if (title.contains('الإنجليزي') || title.contains('Premier')) {
+      return 'الدوري الإنجليزي';
+    } else if (title.contains('الإسباني') || title.contains('LaLiga') || title.contains('كلاسيكو')) {
+      return 'الدوري الإسباني';
+    } else if (title.contains('إفريقيا') || title.contains('أمم إفريقيا')) {
+      return 'كأس أمم إفريقيا';
+    } else if (title.contains('العالم') || title.contains('World Cup')) {
+      return 'كأس العالم';
+    }
+    return 'بطولات كبرى';
   }
 }
 

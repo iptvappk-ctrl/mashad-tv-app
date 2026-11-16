@@ -367,18 +367,36 @@ private val AD_HOST_MARKERS = listOf(
     "ad-maven", "adcash", "exoclick", "juicyads", "bet365", "1xbet", "melbet",
     "facebook.com", "twitter.com", "instagram.com", "llvpn.com", "syndication",
     "vidoomy", "adservice", "adsystem", "coinhive", "adtrue", "revenuehits",
-    "adcolony", "inmobi", "taboola", "outbrain", "adnxs", "criteo"
+    "adcolony", "inmobi", "taboola", "outbrain", "adnxs", "criteo",
+    "google.com", "googleleadservices", "google-analytics", "bonus", "casino",
+    "777", "jackpot", "winner", "reward", "lottery", "survey", "yango", "yandex",
+    "redirect", "affiliate", "landing", "mostbet", "linebet", "winline", "bet"
 )
 
 private fun isBlockedAd(url: String): Boolean {
     val parsed = runCatching { URI.create(url) }.getOrNull() ?: return false
     val host = parsed.host.orEmpty().lowercase(Locale.ROOT)
     val path = parsed.path.orEmpty()
+    // Do not block legitimate YouTube requests
+    if (host.contains("youtube.com") || host.contains("googlevideo.com") || host.contains("ytimg.com")) {
+        return false
+    }
     if (AD_HOST_MARKERS.any(host::contains)) return true
     // Match whole path segments only. A substring check on the entire URL blocked valid
     // media paths such as /download/video.mp4 and URLs with unrelated query values.
-    return Regex("(?i)(^|/)(ads?|advert|banner|popunder|onclick|tracking|analytics)(/|$)")
+    return Regex("(?i)(^|/)(ads?|advert|banner|popunder|onclick|tracking|analytics|bonus|casino)(/|$)")
         .containsMatchIn(path)
+}
+
+private fun isKnownVideoHost(host: String): Boolean {
+    val h = host.lowercase(Locale.ROOT)
+    val videoHosts = listOf(
+        "vidmoly", "vidplay", "vidsrc", "vidhide", "vidguard", "vido", "vidcdn",
+        "streamtape", "dood", "voe", "mixdrop", "filemoon", "upstream", "upvid",
+        "streamwish", "mega4up", "govid", "player2", "akwam", "arabseed", "fasel",
+        "youtube", "googlevideo", "fastly", "cloudflare", "bunny"
+    )
+    return videoHosts.any { h.contains(it) }
 }
 
 private fun safeHost(url: String): String =
@@ -391,59 +409,32 @@ private fun isMediaRequest(url: String): Boolean {
     val query = parsed.query.orEmpty().lowercase(Locale.ROOT)
     val full = url.lowercase(Locale.ROOT)
 
-    // امتدادات الـ video المعروفة
-    val videoExts = listOf(".m3u8", ".mpd", ".mp4", ".mkv", ".webm", ".m4v", ".mov", ".ts", ".avi")
+    // Ignore non-media web documents, scripts, and styling immediately
+    val ignoredExts = listOf(".html", ".htm", ".php", ".js", ".css", ".json", ".xml", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".gif", ".ico", ".woff", ".woff2", ".ttf")
+    if (ignoredExts.any { path.endsWith(it) || query.endsWith(it) }) return false
+
+    // امتدادات الـ video الحقيقية المؤكدة
+    val videoExts = listOf(".m3u8", ".mpd", ".mp4", ".mkv", ".webm", ".m4v", ".mov", ".ts")
     if (videoExts.any { path.substringBefore('?').endsWith(it) }) return true
     if (videoExts.any { query.contains(it) }) return true
 
-    // مسارات بث HLS/DASH شائعة
+    // مسارات بث HLS/DASH شائعة فقط لو مش صفحة ويب
     if (path.contains("/hls/") || path.contains("/dash/") || path.contains("/stream/") ||
         path.contains("/video/") || path.contains("/videos/") || path.contains("/media/") ||
         path.contains("index.m3u8") || path.contains("master.m3u8") || path.contains("playlist.m3u8") ||
-        path.contains("video.mp4") || path.contains("manifest.mpd")) return true
-
-    // Doodstream — pass_md5 و /d/ وكل subdomains
-    if (host.contains("dood") || host.contains("ds2play") || host.contains("d0000d") ||
-        host.contains("dooood") || host.contains("doods")) return true
-    if (path.contains("/pass_md5/") || path.contains("/cdn/") || path.contains("/v/")) {
-        if (host.contains("dood") || host.contains("ds2play")) return true
+        path.contains("video.mp4") || path.contains("manifest.mpd")) {
+        return true
     }
 
-    // Streamtape
-    if (host.contains("streamtape") || host.contains("tapecontent") || host.contains("strtape")) return true
-    if (path.contains("/get_video") || path.contains("/getvideo")) return true
-
-    // Voe.sx
-    if (host.contains("voe.sx") || host.contains("voe-network") || host.contains("voe.cx")) return true
-
-    // Mixdrop
-    if (host.contains("mixdrop") || host.contains("mixdrp")) return true
-
-    // Filemoon / Moon
-    if (host.contains("filemoon") || host.contains("moonembed") || host.contains("moviesm4u") ||
-        host.contains("filelions") || host.contains("fmoonembed")) return true
-
-    // Vidplay / Vidsrc hosts
-    if (host.contains("vidplay") || host.contains("vidsrc") || host.contains("vidsrc") ||
-        host.contains("vidmoly") || host.contains("vidhide") || host.contains("vidguard") ||
-        host.contains("vido") || host.contains("vidcdn") || host.contains("vidhd")) return true
-
-    // Upstream / Upvid
-    if (host.contains("upstream") || host.contains("upvid") || host.contains("uqload") ||
-        host.contains("uqlinks")) return true
-
-    // Streamwish / Swish
-    if (host.contains("streamwish") || host.contains("awish") || host.contains("swdyu") ||
-        host.contains("sfastwish") || host.contains("strmwsh")) return true
-
-    // إمبيد روابط Arabic streaming
-    if (host.contains("mega4up") || host.contains("govid") || host.contains("player2.site") ||
-        host.contains("akwam") || host.contains("4kseries") || host.contains("movizland")) return true
-
-    // Generic patterns
-    if (path.contains("/e/") && (host.contains("embed") || host.contains("player"))) return true
-    if (query.contains("token=") && (path.contains(".m3u8") || path.contains("/hls"))) return true
-    if (path.contains("/download/") && videoExts.any { path.contains(it) }) return true
+    // Direct video endpoints for specific video hosts (with actual video tokens/endpoints)
+    if ((host.contains("dood") || host.contains("ds2play")) && (path.contains("/pass_md5/") || path.contains("/cdn/"))) return true
+    if ((host.contains("streamtape") || host.contains("tapecontent")) && (path.contains("/get_video") || path.contains("/getvideo"))) return true
+    if ((host.contains("voe.sx") || host.contains("voe-network")) && path.contains(".m3u8")) return true
+    if (host.contains("mixdrop") && (path.contains("/stream/") || path.contains("/delivery/"))) return true
+    if ((host.contains("filemoon") || host.contains("moonembed")) && path.contains(".m3u8")) return true
+    if ((host.contains("vidmoly") || host.contains("vidhide") || host.contains("vidguard")) && (path.contains(".m3u8") || path.contains(".mp4"))) return true
+    if ((host.contains("upstream") || host.contains("upvid") || host.contains("uqload")) && (path.contains(".mp4") || path.contains(".m3u8"))) return true
+    if (host.contains("streamwish") && (path.contains(".m3u8") || path.contains(".mp4"))) return true
 
     return false
 }
@@ -618,6 +609,7 @@ private fun PlayerScreen(
     var ytSliderValue by remember(effectiveStreamUrl) { mutableStateOf<Float?>(null) }
     var ytIsPlaying by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var ytIsBuffering by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var showYouTubeFallbackPrompt by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var ytSpeed by remember(effectiveStreamUrl) { mutableFloatStateOf(1.0f) }
     var ytDoubleTapSide by remember { mutableStateOf<String?>(null) }
     var ytDoubleTapKey by remember { mutableIntStateOf(0) }
@@ -628,6 +620,14 @@ private fun PlayerScreen(
             showDoubleTapIndicator = true
             kotlinx.coroutines.delay(650)
             showDoubleTapIndicator = false
+        }
+    }
+
+    LaunchedEffect(isYouTube, effectiveStreamUrl, ytIsPlaying) {
+        if (!isYouTube) return@LaunchedEffect
+        kotlinx.coroutines.delay(3500)
+        if (!ytIsPlaying) {
+            showYouTubeFallbackPrompt = true
         }
     }
 
@@ -714,12 +714,15 @@ private fun PlayerScreen(
     var downloadedBytes by remember(streamUrl) { mutableLongStateOf(0L) }
     var bufferingSinceMs by remember(effectiveStreamUrl) { mutableLongStateOf(0L) }
     var bufferingFallbackUsed by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var hasRenderedFirstFrame by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    val streamStartedMs = remember(effectiveStreamUrl) { System.currentTimeMillis() }
 
     var showControls by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    LaunchedEffect(showControls, lastInteractionTime, showBandwidthSheet, showTvConnectDialog) {
-        if (showControls && !showBandwidthSheet && !showTvConnectDialog) {
+    LaunchedEffect(showControls, lastInteractionTime, showBandwidthSheet, showTvConnectDialog, hasRenderedFirstFrame, ytIsPlaying) {
+        val isPlayingVideo = hasRenderedFirstFrame || ytIsPlaying
+        if (showControls && isPlayingVideo && !showBandwidthSheet && !showTvConnectDialog) {
             kotlinx.coroutines.delay(5000)
             showControls = false
         }
@@ -791,6 +794,12 @@ private fun PlayerScreen(
             .build()
             .apply {
                 addListener(object : Player.Listener {
+                    override fun onRenderedFirstFrame() {
+                        hasRenderedFirstFrame = true
+                        isBuffering = false
+                        playbackError = null
+                    }
+
                     override fun onPlaybackStateChanged(state: Int) {
                         isBuffering = (state == Player.STATE_BUFFERING)
                         if (state == Player.STATE_BUFFERING) {
@@ -799,6 +808,9 @@ private fun PlayerScreen(
                             bufferingSinceMs = 0L
                         }
                         if (state == Player.STATE_READY) {
+                            if (currentPosition > 0L) {
+                                hasRenderedFirstFrame = true
+                            }
                             playbackError = null
                         }
                     }
@@ -852,19 +864,25 @@ private fun PlayerScreen(
     LaunchedEffect(player) {
         val p = player ?: return@LaunchedEffect
         while (true) {
-            kotlinx.coroutines.delay(2000)
+            kotlinx.coroutines.delay(1000)
             val format = p.videoFormat
             val br = if (format != null && format.bitrate > 0) format.bitrate else if (format != null && format.averageBitrate > 0) format.averageBitrate else null
             if (br != null) currentBitrateKbps = br / 1000
 
+            val elapsedMs = System.currentTimeMillis() - streamStartedMs
             val bufferingForMs = bufferingSinceMs.takeIf { it > 0L }
                 ?.let { System.currentTimeMillis() - it } ?: 0L
-            if (!bufferingFallbackUsed && p.playWhenReady &&
-                p.playbackState == Player.STATE_BUFFERING && bufferingForMs >= 20_000L
-            ) {
+
+            // ── Auto Black Screen Detection (no frame rendered after 7s or stuck buffering) ──
+            val isBlackScreen = !hasRenderedFirstFrame && elapsedMs >= 7_000L && p.currentPosition == 0L
+            val isEndlessBuffering = p.playWhenReady && p.playbackState == Player.STATE_BUFFERING && bufferingForMs >= 7_000L
+
+            if (!bufferingFallbackUsed && (isBlackScreen || isEndlessBuffering)) {
                 bufferingFallbackUsed = true
+                Log.w("MadarPlayer", "Auto Black Screen / Buffer Recovery triggered (elapsed=${elapsedMs}ms, buffering=${bufferingForMs}ms). Backups left: ${backupSources.size}")
                 if (backupSources.isNotEmpty()) {
                     val next = backupSources.removeAt(0)
+                    Log.i("MadarPlayer", "Switching to next backup: ${safeHost(next.url)}")
                     onSwitchStream(
                         next.url,
                         next.userAgent.ifBlank { cleanUa },
@@ -872,7 +890,7 @@ private fun PlayerScreen(
                         next.headers,
                     )
                 } else {
-                    playbackError = "لم يبدأ الفيديو بعد 20 ثانية. جرّب سيرفر مشاهدة آخر."
+                    playbackError = "تعذر تشغيل هذا السيرفر (شاشة سوداء). اضغط لإعادة المحاولة أو اختر سيرفرًا آخر."
                     isBuffering = false
                 }
             }
@@ -1067,6 +1085,9 @@ private fun PlayerScreen(
                                 if (backupSources.isNotEmpty()) {
                                     val next = backupSources.removeAt(0)
                                     Log.i("MadarPlayer", "trying backup host=${safeHost(next.url)}")
+                                    pageFailureScheduled.set(false)
+                                    mediaHandoffScheduled.set(false)
+                                    pagePlayableObserved.set(false)
                                     onSwitchStream(
                                         next.url,
                                         next.userAgent.ifBlank { cleanUa },
@@ -1130,18 +1151,36 @@ private fun PlayerScreen(
                             }
 
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                val reqUrl = request?.url?.toString() ?: return false
+                                val reqUrl = request?.url?.toString() ?: return true
+                                val uri = request.url ?: return true
+                                val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
+
                                 if (isYouTube) {
                                     // Block navigation away from embed, keep playback strictly inside native player
                                     return true
                                 }
+                                if (reqUrl.startsWith("intent:", true) || reqUrl.startsWith("market:", true) ||
+                                    reqUrl.startsWith("whatsapp:", true) || reqUrl.startsWith("tg:", true)
+                                ) return true
+
                                 if (isBlockedAd(reqUrl)) {
                                     if (request.isForMainFrame) {
                                         handleMainFrameFailure("تم إيقاف صفحة إعلانية، جارٍ تجربة سيرفر آخر.")
                                     }
                                     return true
                                 }
-                                if (reqUrl.startsWith("intent:") || reqUrl.startsWith("market:") || reqUrl.startsWith("whatsapp:")) return true
+
+                                // Prevent ad redirects from hijacking the main player frame to Google or external sites
+                                if (request.isForMainFrame) {
+                                    val originalHost = safeHost(effectiveStreamUrl)
+                                    if (originalHost.isNotBlank() && host.isNotBlank()) {
+                                        val isSameHost = host.endsWith(originalHost) || originalHost.endsWith(host)
+                                        if (!isSameHost && !isMediaRequest(reqUrl) && !isKnownVideoHost(host)) {
+                                            Log.w("MadarPlayer", "Blocked main frame navigation to foreign host: $host")
+                                            return true
+                                        }
+                                    }
+                                }
                                 return false
                             }
 
@@ -1164,17 +1203,34 @@ private fun PlayerScreen(
                                 pagePlayableObserved.set(false)
                                 pageFailureScheduled.set(false)
                                 if (!url.isNullOrBlank()) activePageUrl.set(url)
-                                if (isYouTube) {
-                                    pagePlayableObserved.set(true)
-                                } else {
+                                if (!isYouTube) {
+                                    view?.evaluateJavascript(
+                                        "(function(){ try { window.open=function(){return null;}; window.alert=function(){}; window.confirm=function(){return false;}; } catch(e){} })();",
+                                        null
+                                    )
+                                    // ── Black Screen Watchdog 1: 8 seconds (if no video playing) ──
                                     pageProbeHandler.postDelayed({
                                         if (pageStartedAt.get() != startedAt || pageFailureScheduled.get() ||
                                             pagePlayableObserved.get() || !webViewActive.get()
                                         ) return@postDelayed
+                                        Log.w("MadarPlayer", "WebView black screen watchdog 8s. Backups left: ${backupSources.size}")
                                         handleMainFrameFailure(
-                                            "السيرفر لم يبدأ فيديو قابلًا للتشغيل خلال المهلة. جرّب سيرفرًا آخر."
+                                            "شاشة سوداء: السيرفر لم يبث فيديو خلال 8 ثوانٍ. جارٍ التبديل لسيرفر آخر تلقائياً..."
                                         )
-                                    }, 18_000L)
+                                    }, 8_000L)
+
+                                    // ── Black Screen Watchdog 2: 14 seconds (maximum fallback threshold) ──
+                                    pageProbeHandler.postDelayed({
+                                        if (pageStartedAt.get() != startedAt || pageFailureScheduled.get() ||
+                                            !webViewActive.get()
+                                        ) return@postDelayed
+                                        if (!pagePlayableObserved.get()) {
+                                            Log.w("MadarPlayer", "WebView black screen watchdog 14s. Backups left: ${backupSources.size}")
+                                            handleMainFrameFailure(
+                                                "السيرفر لم يبدأ فيديو قابلًا للتشغيل خلال المهلة. جارٍ الانتقال لمصدر آخر..."
+                                            )
+                                        }
+                                    }, 14_000L)
                                 }
                             }
 
@@ -1367,7 +1423,8 @@ private fun PlayerScreen(
                                        var hasJsPlayer=!!(window.jwplayer||window.videojs||window.Plyr||document.querySelector('.jw-video,.video-js,.plyr,.vjs-tech,div[id*=player],div[class*=player]'));
                                        if(!hasJsPlayer){try{Array.prototype.forEach.call(document.querySelectorAll('iframe'),function(fr){try{var fw=fr.contentWindow;if(fw&&(fw.jwplayer||fw.videojs||fw.Plyr))hasJsPlayer=true;}catch(e){}});}catch(e){}}
                                        try{var ads=document.querySelectorAll('.div-over, .overlay, #modal, .modalDialog, #status, [id^="ad-"], [class^="ad-"], [id*="-ad-"], [class*="-ad-"], [id*="banner"], [class*="banner"], iframe[src*="ads"]');ads.forEach(function(el){try{el.remove();}catch(e){}});}catch(e){}
-                                       videos.forEach(function(vid){if(vid){vid.muted=false;if(vid.paused){try{vid.play();}catch(e){}}}});
+                                       try{var playBtns=document.querySelectorAll('.play-btn, .jw-display-icon-container, .vjs-big-play-button, button[aria-label="Play"], #play, .play-button, .playbutton, .play_btn, .video-click, #overlay-play, .jw-preview, .jw-controls');playBtns.forEach(function(btn){try{btn.click();}catch(e){}});}catch(e){}
+                                       videos.forEach(function(vid){if(vid){if(vid.paused){try{vid.play();}catch(e){try{vid.muted=true;vid.play();}catch(e2){}}}}});
                                        var jwUrl='';
                                        try{var jw=window.jwplayer&&window.jwplayer();if(jw&&jw.getPlaylistItem){var pi=jw.getPlaylistItem();jwUrl=pi&&(pi.file||pi.sources&&pi.sources[0]&&pi.sources[0].file)||'';}}catch(e){}
                                        if(!jwUrl){try{Array.prototype.forEach.call(document.querySelectorAll('iframe'),function(fr){try{var fw=fr.contentWindow;if(fw&&fw.jwplayer){var jw2=fw.jwplayer();if(jw2&&jw2.getPlaylistItem){var pi2=jw2.getPlaylistItem();var f2=pi2&&(pi2.file||pi2.sources&&pi2.sources[0]&&pi2.sources[0].file)||'';if(f2)jwUrl=f2;}}}catch(e){}});}catch(e){}}
@@ -1405,11 +1462,10 @@ private fun PlayerScreen(
                                             handleMainFrameFailure(
                                                 "صفحة المصدر لا تحتوي مشغل فيديو. جارٍ تجربة سيرفر آخر."
                                             )
-                                        } else if (payload.optBoolean("playing", false) && payload.optInt("ready", 0) >= 3) {
+                                        } else if (payload.optBoolean("playing", false) && payload.optInt("ready", 0) >= 2) {
                                             pagePlayableObserved.set(true)
                                             isBuffering = false
-                                        } else if (!pagePlayableObserved.get() && (hasJsPlayer || payload.optInt("frameCount", 0) > 0)) {
-                                            pagePlayableObserved.set(true) // iframe or JS player found — keep waiting
+                                            playbackError = null
                                         }
                                         if (!pageFailureScheduled.get() &&
                                             (mediaUrl.startsWith("https://", true) || mediaUrl.startsWith("http://", true))
@@ -1574,37 +1630,124 @@ private fun PlayerScreen(
             }
         }
 
-        playbackError?.let { errorCode ->
+        // ── YouTube Copyright / Embed Restriction Banner ───────────────────
+        if (isYouTube && showYouTubeFallbackPrompt && !ytIsPlaying) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 24.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xF0181A20))
+                    .border(1.dp, Color(0xFF580F8B), RoundedCornerShape(20.dp))
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 Column(
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("⚠️ حقوق البث الرسمية لـ beIN SPORTS", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("بعض الملخصات تمنع تشغيلها كفيديو مدمج داخل التطبيقات وتتطلب المشاهدة الرسمية", color = Color(0xFFB0B3C1), fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Button(
+                        onClick = {
+                            val ytId = extractYouTubeId(effectiveStreamUrl)
+                            val watchUrl = "https://www.youtube.com/watch?v=$ytId"
+                            try {
+                                val ytIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$ytId")).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(ytIntent)
+                            } catch (_: Exception) {
+                                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(watchUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(browserIntent)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFCC0000)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("▶ فتح فوراً في YouTube بجودة فائقة (1080p)", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // ── Black Screen Recovery Dialog ────────────────────────────────────
+        playbackError?.let { errorCode ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xF0181A20))
+                    .border(1.dp, Color(0xFFC0392B), RoundedCornerShape(20.dp))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text("تعذر تشغيل هذا المصدر", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("رمز الخطأ: $errorCode", color = Color.LightGray, fontSize = 13.sp)
+                    Text("⚠️ تعذر تشغيل هذا المصدر (شاشة سوداء)", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text(errorCode, color = Color(0xFFB0B3C1), fontSize = 13.sp, textAlign = TextAlign.Center)
                     sourceDiagnostic?.let { diagnostic ->
-                        Text(diagnostic, color = Color.LightGray, fontSize = 12.sp)
+                        Text(diagnostic, color = Color.LightGray, fontSize = 11.sp)
                     }
-                    Button(onClick = {
-                        playbackError = null
-                        sourceDiagnostic = null
-                        isBuffering = true
-                        if (backupSources.isNotEmpty()) {
-                            val next = backupSources.removeAt(0)
-                            onSwitchStream(
-                                next.url,
-                                next.userAgent.ifBlank { cleanUa },
-                                next.referer.ifBlank { cleanRef },
-                                next.headers,
-                            )
-                        } else {
-                            exoRetryKey++
-                            webViewRef?.reload()
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                playbackError = null
+                                sourceDiagnostic = null
+                                isBuffering = true
+                                if (backupSources.isNotEmpty()) {
+                                    val next = backupSources.removeAt(0)
+                                    onSwitchStream(
+                                        next.url,
+                                        next.userAgent.ifBlank { cleanUa },
+                                        next.referer.ifBlank { cleanRef },
+                                        next.headers,
+                                    )
+                                } else {
+                                    exoRetryKey++
+                                    webViewRef?.reload()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27AE60)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(if (backupSources.isNotEmpty()) "⚡ سيرفر بديل (${backupSources.size})" else "🔄 إعادة المحاولة", color = Color.White)
                         }
-                    }) {
-                        Text("إعادة المحاولة")
+
+                        Button(
+                            onClick = {
+                                try {
+                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(effectiveStreamUrl)).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(browserIntent)
+                                } catch (_: Exception) {}
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2980B9)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("🌐 بالمتصفح", color = Color.White)
+                        }
+
+                        Button(
+                            onClick = { onClose() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34495E)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("◀ عودة", color = Color.White)
+                        }
                     }
                 }
+            }
         }
 
         // Keep custom controls in the same tap-to-show/hide cycle as the
@@ -1675,6 +1818,38 @@ private fun PlayerScreen(
                                 "· $bwText",
                                 color = Color(0xFFD4AF37),
                                 fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                // ── Quick Switch to Next Backup Server button ─────────────────
+                if (backupSources.isNotEmpty()) {
+                    Surface(
+                        onClick = {
+                            val next = backupSources.removeAt(0)
+                            onSwitchStream(
+                                next.url,
+                                next.userAgent.ifBlank { cleanUa },
+                                next.referer.ifBlank { cleanRef },
+                                next.headers,
+                            )
+                            lastInteractionTime = System.currentTimeMillis()
+                        },
+                        color = Color(0xD9C0392B),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Text("⚡", fontSize = 13.sp)
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                "تبديل السيرفر (${backupSources.size})",
+                                color = Color.White,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }

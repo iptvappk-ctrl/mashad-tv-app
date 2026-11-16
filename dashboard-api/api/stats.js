@@ -85,7 +85,43 @@ module.exports = async (req, res) => {
         ? ((totalPlays / (totalPlays + errors)) * 100).toFixed(1)
         : '100';
 
-    // 5. Device brands
+    // 5. Unique Devices Aggregation (1 card per physical device)
+    const deviceMap = new Map();
+    for (const s of sessions) {
+      const dId = s.deviceId || s.device || s.id;
+      if (!deviceMap.has(dId)) {
+        deviceMap.set(dId, {
+          ...s,
+          id: dId,
+          deviceId: dId,
+          sessionCount: 1,
+          totalDurationMinutes: s.durationMinutes || 1,
+          sessionsHistory: [s],
+          isActiveDevice: s.status === 'active',
+        });
+      } else {
+        const d = deviceMap.get(dId);
+        d.sessionCount += 1;
+        d.totalDurationMinutes += (s.durationMinutes || 1);
+        d.sessionsHistory.push(s);
+        if (s.status === 'active') {
+          d.isActiveDevice = true;
+          d.status = 'active';
+          d.lastSeen = s.lastSeen || d.lastSeen;
+          d.lastContent = s.lastContent || d.lastContent;
+          d.lastSection = s.lastSection || d.lastSection;
+          d.openTime = s.openTime || d.openTime;
+          d.durationText = s.durationText || d.durationText;
+        }
+      }
+    }
+    const devices = Array.from(deviceMap.values()).map(d => ({
+      ...d,
+      status: d.isActiveDevice ? 'active' : 'closed',
+      actionsCount: d.sessionsHistory.reduce((acc, x) => acc + (x.actionsCount || 0), 0),
+    }));
+
+    // 6. Device brands
     const brandMap = {};
     for (const s of sessions) {
       const dev = (s.device || '').toLowerCase();
@@ -265,6 +301,7 @@ module.exports = async (req, res) => {
         ],
       },
       monetization,
+      devices,
       sessions,
       topContent,
       searches: searchesList,
