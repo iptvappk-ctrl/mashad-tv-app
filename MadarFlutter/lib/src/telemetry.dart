@@ -151,6 +151,31 @@ class AppTelemetry {
 
   static Future<void> _startSession() async {
     try {
+      // ── Deduplication: check if we have a recent session saved locally ──
+      // The server also deduplicates by deviceId, but we avoid unnecessary calls.
+      Map? prefs;
+      Map? savedId;
+      try {
+        prefs = await _native.invokeMethod<Map>('cache.get', {'key': '_zq_session_ts'});
+      } catch (_) {}
+      try {
+        savedId = await _native.invokeMethod<Map>('cache.get', {'key': '_zq_session_id'});
+      } catch (_) {}
+      final savedTs = prefs?.values.firstOrNull?.toString();
+      final savedSessionId = savedId?.values.firstOrNull?.toString();
+
+      if (savedTs != null && savedSessionId != null) {
+        final savedTime = DateTime.tryParse(savedTs);
+        if (savedTime != null) {
+          final age = DateTime.now().difference(savedTime);
+          if (age.inMinutes < 8) {
+            // Reuse existing session — server already has it
+            _sessionId = savedSessionId;
+            return; // skip creating a new session
+          }
+        }
+      }
+
       final payload = {
         'deviceId': _deviceId,
         'device': _deviceModel,
@@ -170,6 +195,10 @@ class AppTelemetry {
       final res = await _postJson('$_resolvedBaseUrl/api/telemetry/session/start', payload);
       if (res != null && res['sessionId'] != null) {
         _sessionId = res['sessionId'].toString();
+        // Save session ID and timestamp to avoid duplicates on quick restarts
+        final nowIso = DateTime.now().toIso8601String();
+        await _native.invokeMethod('cache.set', {'key': '_zq_session_ts', 'value': nowIso}).catchError((_) => null);
+        await _native.invokeMethod('cache.set', {'key': '_zq_session_id', 'value': _sessionId}).catchError((_) => null);
       }
     } catch (_) {}
   }

@@ -18,9 +18,9 @@ function formatClockTime(d) {
 async function sessionStart(req, res) {
   const body = req.body || {};
   const now = new Date();
-  const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
   const rawDevice = (body.device || body.deviceModel || '').trim();
   const device = rawDevice.length > 0 ? rawDevice : 'Android Device';
+  const deviceId = body.deviceId || ('anon_' + Date.now());
 
   const geo = resolveDetailedLocation(body, req);
   const isWeb = body.platform === 'web' || body.deviceType === 'web';
@@ -28,9 +28,46 @@ async function sessionStart(req, res) {
   const lastContent = body.currentContent || '';
   const audience = resolveAudienceSegment(lastContent, lastSection);
 
+  // ── Deduplication: reuse existing active session for same device (last 10 min) ──
+  if (!isWeb && deviceId && !deviceId.startsWith('anon_')) {
+    try {
+      const existingSnap = await db.ref('sessions')
+        .orderByChild('deviceId')
+        .equalTo(deviceId)
+        .limitToLast(1)
+        .once('value');
+      if (existingSnap.exists()) {
+        let found = null;
+        existingSnap.forEach((child) => { found = child.val(); });
+        if (found && found.status === 'active') {
+          const lastSeenMs = new Date(found.lastSeen).getTime();
+          const ageMs = Date.now() - lastSeenMs;
+          if (ageMs < 10 * 60 * 1000) { // less than 10 minutes old → reuse
+            // Update lastSeen and return existing sessionId
+            await db.ref(`sessions/${found.id}`).update({
+              lastSeen: now.toISOString(),
+              lastSection,
+              lastContent,
+            });
+            return sendJson(res, 200, { ok: true, sessionId: found.id, location: geo.location, reused: true });
+          } else {
+            // Old session: mark it closed before creating new one
+            await db.ref(`sessions/${found.id}`).update({
+              status: 'closed',
+              closeTime: formatClockTime(now),
+              durationText: 'انتهت تلقائياً',
+            });
+          }
+        }
+      }
+    } catch (_) { /* fail-open: continue creating new session */ }
+  }
+
+  const sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+
   const newSession = {
     id: sessionId,
-    deviceId: body.deviceId || sessionId,
+    deviceId,
     device,
     deviceType: body.deviceType || (isWeb ? 'web' : 'phone'),
     platform: isWeb ? 'web' : 'app',

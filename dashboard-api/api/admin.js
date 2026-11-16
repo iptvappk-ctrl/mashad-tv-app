@@ -150,6 +150,78 @@ async function handleReset(req, res) {
   }
 }
 
+// ─── route: cleanup-sessions (remove duplicate/stale sessions per device) ─────
+async function handleCleanupSessions(req, res) {
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST required' });
+  const secret = req.headers['x-master-secret'] || req.query.secret;
+  if (!MASTER_SECRET || secret !== MASTER_SECRET) {
+    return sendJson(res, 403, { error: 'Unauthorized' });
+  }
+
+  try {
+    const snap = await db.ref('sessions').once('value');
+    if (!snap.exists()) return sendJson(res, 200, { ok: true, removed: 0 });
+
+    const all = snap.val();
+    const now = Date.now();
+    const TEN_MIN = 10 * 60 * 1000;
+
+    // Group sessions by deviceId
+    const byDevice = {};
+    for (const [sid, session] of Object.entries(all)) {
+      const did = session.deviceId || sid;
+      if (!byDevice[did]) byDevice[did] = [];
+      byDevice[did].push({ sid, session });
+    }
+
+    const updates = {};
+    let removed = 0;
+
+    for (const [did, sessions] of Object.entries(byDevice)) {
+      if (sessions.length <= 1) continue; // no duplicates
+
+      // Sort: active sessions last, then by lastSeen descending
+      sessions.sort((a, b) => {
+        if (a.session.status === 'active' && b.session.status !== 'active') return 1;
+        if (b.session.status === 'active' && a.session.status !== 'active') return -1;
+        return new Date(b.session.lastSeen) - new Date(a.session.lastSeen);
+      });
+
+      // Keep the most recent active session, close all others
+      const keepIdx = sessions.findIndex(s => s.session.status === 'active');
+      sessions.forEach((item, i) => {
+        if (i === keepIdx) return; // keep this one
+        if (item.session.status === 'active') {
+          // Mark old active sessions as closed
+          updates[`sessions/${item.sid}/status`] = 'closed';
+          updates[`sessions/${item.sid}/durationText`] = 'مكرر - أُغلق تلقائياً';
+          removed++;
+        }
+      });
+
+      // Also close stale active sessions (last seen > 30 min ago)
+      sessions.forEach((item) => {
+        if (item.session.status === 'active') {
+          const age = now - new Date(item.session.lastSeen).getTime();
+          if (age > 30 * 60 * 1000) {
+            updates[`sessions/${item.sid}/status`] = 'closed';
+            updates[`sessions/${item.sid}/durationText`] = 'انتهت تلقائياً (30 د)';
+            removed++;
+          }
+        }
+      });
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await db.ref('/').update(updates);
+    }
+
+    return sendJson(res, 200, { ok: true, removed, deviceGroups: Object.keys(byDevice).length });
+  } catch (err) {
+    return sendJson(res, 500, { error: err.message });
+  }
+}
+
 // ─── Main Router ─────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   handleCors(res);
@@ -165,7 +237,8 @@ module.exports = async (req, res) => {
     if (route === 'kill-switch') return await handleKillSwitch(req, res);
     if (route === 'license-check') return await handleLicenseCheck(req, res);
     if (route === 'reset') return await handleReset(req, res);
-    return sendJson(res, 404, { error: 'Unknown admin route. Use ?route=kill-switch|license-check|reset' });
+    if (route === 'cleanup-sessions') return await handleCleanupSessions(req, res);
+    return sendJson(res, 404, { error: 'Unknown admin route. Use ?route=kill-switch|license-check|reset|cleanup-sessions' });
   } catch (err) {
     console.error('admin router error:', err);
     return sendJson(res, 500, { ok: false, error: err.message });
