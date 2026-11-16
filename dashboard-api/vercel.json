@@ -1,7 +1,10 @@
 {
   "version": 2,
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" }
+    { "source": "/api/telemetry/(.*)", "destination": "/api/telemetry?route=$1" },
+    { "source": "/api/export/(.*)",    "destination": "/api/export?route=$1" },
+    { "source": "/api/admin/(.*)",     "destination": "/api/admin?route=$1" },
+    { "source": "/api/(.*)",           "destination": "/api/$1" }
   ],
   "headers": [
     {
@@ -9,7 +12,7 @@
       "headers": [
         { "key": "Access-Control-Allow-Origin",  "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS, DELETE" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Admin-Secret" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Admin-Secret, x-master-secret, x-zaqzouka-key" },
         { "key": "Cache-Control",                "value": "no-store" }
       ]
     }

@@ -18,6 +18,7 @@
 | **03. محركات الفيديو والتبديل** | توثيق مشغل الفيديو الأصلي (ExoPlayer + HLS.js)، فك تشفير سيرفرات Voe و Vidmoly، والتبديل التلقائي عند التعطل، وإعلانات VAST. | [03_ZAQZOUKA_VIDEO_PLAYER_ENGINE.md](file:///c:/Users/hassa/Desktop/all%20project/iptv%20app/documents%20for/03_ZAQZOUKA_VIDEO_PLAYER_ENGINE.md) |
 | **04. لوحة الأدمن وسوق الداتا** | توثيق لوحة تحليلات زقزوقة (8 تبويبات)، التحديد الجغرافي الدقيق للمدن، محرك تسييل البيانات، وسماسرة الـ DMP. | [04_ZAQZOUKA_ADMIN_AND_TELEMETRY_BACKEND.md](file:///c:/Users/hassa/Desktop/all%20project/iptv%20app/documents%20for/04_ZAQZOUKA_ADMIN_AND_TELEMETRY_BACKEND.md) |
 | **05. المخطط الشامل التكاملي** | المخطط الهندسي التكاملي (End-to-End Blueprint)، مخططات Mermaid، فهرس كافة ملفات المشروع، وأدلة البناء والنشر. | [05_FULL_SYSTEM_END_TO_END_BLUEPRINT.md](file:///c:/Users/hassa/Desktop/all%20project/iptv%20app/documents%20for/05_FULL_SYSTEM_END_TO_END_BLUEPRINT.md) |
+| **06. دليل الأمان وقفل الطوارئ للمالك** | دليل الحماية وقفل الطوارئ السحابي (Remote Kill Switch)، التحكم بمصير التطبيق والموقع، وإجراءات تأمين المالك ضد أي شريك. | [06_OWNER_SECURITY_AND_KILL_SWITCH_GUIDE.md](file:///c:/Users/hassa/Desktop/all%20project/iptv%20app/documents%20for/06_OWNER_SECURITY_AND_KILL_SWITCH_GUIDE.md) |
 
 ---
 
