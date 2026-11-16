@@ -16,10 +16,26 @@ class _SportsPageState extends State<SportsPage> {
   bool _scoreRefreshing = false;
   bool _todayOnly = true;
 
+  // ─── beIN SPORTS Match Highlights State ─────────────────────────────────────
+  List<MatchHighlight> _highlights = [];
+  List<MatchHighlight> _allHighlights = [];
+  bool _loadingHighlights = false;
+  String _highlightTournamentFilter = 'الكل';
+  final TextEditingController _highlightSearchCtrl = TextEditingController();
+  Timer? _highlightSearchDebounce;
+
   @override
   void initState() {
     super.initState();
     unawaited(_loadInitial());
+    unawaited(_initHighlights());
+  }
+
+  @override
+  void dispose() {
+    _highlightSearchCtrl.dispose();
+    _highlightSearchDebounce?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadInitial() async {
@@ -137,14 +153,16 @@ class _SportsPageState extends State<SportsPage> {
         ),
       ),
       SizedBox(
-        height: 45,
+        height: 48,
         child: ListView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
           children: [
-            _sectionChip('matches', 'مباريات'),
+            _sectionChip('matches', 'مباريات مباشرة ⚽'),
             const SizedBox(width: 8),
-            _sectionChip('channels', 'قنوات'),
+            _sectionChip('highlights', 'ملخصات beIN 🎬'),
+            const SizedBox(width: 8),
+            _sectionChip('channels', 'قنوات بي إن 📺'),
           ],
         ),
       ),
@@ -177,8 +195,18 @@ class _SportsPageState extends State<SportsPage> {
       Expanded(
         child: RefreshIndicator(
           color: _brick,
-          onRefresh: () => _refresh(),
-          child: _section == 'matches' ? _eventsList() : _channelsList(),
+          onRefresh: () async {
+            if (_section == 'highlights') {
+              await _fetchBeInHighlights(query: _highlightSearchCtrl.text);
+            } else {
+              await _refresh();
+            }
+          },
+          child: _section == 'matches'
+              ? _eventsList()
+              : _section == 'highlights'
+                  ? _highlightsList()
+                  : _channelsList(),
         ),
       ),
     ],
@@ -381,8 +409,11 @@ class _SportsPageState extends State<SportsPage> {
       return ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(14),
-        itemCount: _events.length,
-        itemBuilder: (_, index) => _eventCard(_events[index]),
+        itemCount: _events.length + 1,
+        itemBuilder: (_, index) {
+          if (index == 0) return _highlightsPromoCard();
+          return _eventCard(_events[index - 1]);
+        },
       );
     }
 
@@ -392,6 +423,8 @@ class _SportsPageState extends State<SportsPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 18),
         children: [
+          _highlightsPromoCard(),
+          const SizedBox(height: 8),
           Row(
             children: [
               ChoiceChip(
@@ -1060,6 +1093,636 @@ class _SportsPageState extends State<SportsPage> {
       if (mounted) setState(() => _loadingId = null);
     }
   }
+
+  // ─── ⚽ beIN SPORTS MATCH HIGHLIGHTS METHODS ─────────────────────────────
+Widget _highlightsPromoCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF580F8B), Color(0xFF38085C)],
+          begin: Alignment.topRight,
+          end: Alignment.bottomLeft,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF580F8B).withValues(alpha: 0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => setState(() => _section = 'highlights'),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 26),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'ملخصات مباريات beIN SPORTS',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          SizedBox(width: 5),
+                          Icon(Icons.verified_rounded, size: 14, color: Color(0xFFFFD700)),
+                        ],
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'ملخص إسبانيا وإنجلترا، دوري الأمم، وأبطال أوروبا HD',
+                        style: TextStyle(color: Colors.white70, fontSize: 11.5),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFD700),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    'مشاهدة 🎬',
+                    style: TextStyle(
+                      color: Color(0xFF38085C),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _initHighlights() async {
+    _allHighlights = List.from(_kStarterHighlights);
+    _highlights = List.from(_allHighlights);
+    if (mounted) setState(() {});
+
+    try {
+      final cachedJson = await NativeBridge.readCache('bein:highlights:v1');
+      if (cachedJson != null && cachedJson.isNotEmpty) {
+        final decoded = jsonDecode(cachedJson) as List<dynamic>;
+        final cachedItems = decoded
+            .map((e) => MatchHighlight.fromMap(e as Map<String, dynamic>))
+            .where((e) => e.id.isNotEmpty && e.title.isNotEmpty)
+            .toList();
+        if (cachedItems.isNotEmpty) {
+          _allHighlights = cachedItems;
+          _highlights = _filterHighlights();
+          if (mounted) setState(() {});
+        }
+      }
+    } catch (_) {}
+
+    await _fetchBeInHighlights();
+  }
+
+  Future<void> _fetchBeInHighlights({String query = ''}) async {
+    if (_loadingHighlights) return;
+    if (mounted) setState(() => _loadingHighlights = true);
+    try {
+      final fresh = await MatchHighlightsService.fetchHighlights(query: query);
+      if (fresh.isNotEmpty) {
+        if (query.trim().isEmpty) {
+          final Map<String, MatchHighlight> unique = {};
+          for (final h in _kStarterHighlights) {
+            unique[h.id] = h;
+          }
+          for (final h in fresh) {
+            unique[h.id] = h;
+          }
+          _allHighlights = unique.values.toList();
+          _highlights = _filterHighlights();
+          unawaited(NativeBridge.writeCache(
+            'bein:highlights:v1',
+            jsonEncode(_allHighlights.map((e) => e.toMap()).toList()),
+          ));
+        } else {
+          _highlights = fresh;
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _loadingHighlights = false);
+    }
+  }
+
+  void _onHighlightSearchChanged(String text) {
+    _highlightSearchDebounce?.cancel();
+    _highlightSearchDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      final q = text.trim();
+      if (q.isEmpty) {
+        setState(() {
+          _highlights = _filterHighlights();
+        });
+      } else {
+        final localFiltered = _allHighlights.where((h) {
+          return h.title.contains(q) || h.tournament.contains(q);
+        }).toList();
+
+        setState(() {
+          if (localFiltered.isNotEmpty) {
+            _highlights = localFiltered;
+          }
+        });
+
+        unawaited(_fetchBeInHighlights(query: q));
+      }
+    });
+  }
+
+  void _performBeInSearch(String q) {
+    _highlightSearchDebounce?.cancel();
+    if (q.trim().isEmpty) {
+      setState(() => _highlights = _filterHighlights());
+    } else {
+      unawaited(_fetchBeInHighlights(query: q.trim()));
+    }
+  }
+
+  List<MatchHighlight> _filterHighlights() {
+    final query = _highlightSearchCtrl.text.trim();
+    return _allHighlights.where((h) {
+      final matchesTournament = _highlightTournamentFilter == 'الكل' ||
+          h.tournament.contains(_highlightTournamentFilter) ||
+          h.title.contains(_highlightTournamentFilter);
+      final matchesQuery = query.isEmpty ||
+          h.title.contains(query) ||
+          h.tournament.contains(query);
+      return matchesTournament && matchesQuery;
+    }).toList();
+  }
+
+  Future<void> _launchHighlightPlayer(
+    BuildContext context,
+    MatchHighlight item,
+  ) async {
+    AppTelemetry.trackPlayback(
+      title: item.title,
+      category: 'ملخصات beIN SPORTS ⚽',
+      event: 'start',
+    );
+
+    final opened = await NativeBridge.openPlayer(
+      url: item.embedUrl,
+      title: item.title,
+      referer: 'https://www.youtube.com/',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      backupSources: [
+        {'name': 'YouTube Official', 'url': item.videoUrl},
+      ],
+      isLive: false,
+    );
+
+    if (!opened) {
+      final ytOpened = await NativeBridge.openYouTube(
+        videoId: item.id,
+        watchUrl: item.videoUrl,
+      );
+      if (!ytOpened && context.mounted) {
+        _message(context, 'تعذر تشغيل الملخص، تحقق من اتصالك بالإنترنت.');
+      }
+    }
+  }
+
+  Widget _tournamentChip(String name) {
+    final selected = _highlightTournamentFilter == name;
+    return ChoiceChip(
+      label: Text(name),
+      selected: selected,
+      showCheckmark: false,
+      labelStyle: TextStyle(
+        color: selected ? Colors.white : _ink,
+        fontSize: 11.5,
+        fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+      ),
+      side: BorderSide(color: selected ? const Color(0xFF580F8B) : _line),
+      selectedColor: const Color(0xFF580F8B),
+      backgroundColor: Colors.white,
+      onSelected: (_) {
+        setState(() {
+          _highlightTournamentFilter = name;
+          _highlights = _filterHighlights();
+        });
+      },
+    );
+  }
+
+  Widget _highlightsList() {
+    final filtered = _filterHighlights();
+    return Column(
+      children: [
+        // Search bar
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+          child: TextField(
+            controller: _highlightSearchCtrl,
+            textDirection: TextDirection.rtl,
+            decoration: InputDecoration(
+              hintText: 'ابحث عن ملخص مباراة (إسبانيا، إنجلترا، السيتي)...',
+              hintStyle: const TextStyle(color: _muted, fontSize: 13),
+              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF580F8B)),
+              suffixIcon: _highlightSearchCtrl.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      onPressed: () {
+                        _highlightSearchCtrl.clear();
+                        _onHighlightSearchChanged('');
+                      },
+                    )
+                  : null,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: _line),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: _line),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: Color(0xFF580F8B), width: 1.5),
+              ),
+            ),
+            onChanged: _onHighlightSearchChanged,
+            onSubmitted: _performBeInSearch,
+          ),
+        ),
+        // Tournament Chips
+        SizedBox(
+          height: 44,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            children: [
+              _tournamentChip('الكل'),
+              const SizedBox(width: 6),
+              _tournamentChip('دوري الأمم الأوروبية'),
+              const SizedBox(width: 6),
+              _tournamentChip('دوري أبطال أوروبا'),
+              const SizedBox(width: 6),
+              _tournamentChip('الدوري الإنجليزي'),
+              const SizedBox(width: 6),
+              _tournamentChip('الدوري الإسباني'),
+              const SizedBox(width: 6),
+              _tournamentChip('كأس أمم إفريقيا'),
+            ],
+          ),
+        ),
+        if (_loadingHighlights)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: LinearProgressIndicator(
+              color: Color(0xFF580F8B),
+              backgroundColor: Color(0xFFF3E8FF),
+              minHeight: 2.5,
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: Row(
+            children: [
+              const Icon(Icons.video_library_rounded, size: 14, color: Color(0xFF580F8B)),
+              const SizedBox(width: 6),
+              Text(
+                'ملخصات beIN SPORTS المتاحة (${filtered.length})',
+                style: const TextStyle(
+                  color: Color(0xFF580F8B),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const Spacer(),
+              if (_highlightSearchCtrl.text.isNotEmpty)
+                GestureDetector(
+                  onTap: () {
+                    _highlightSearchCtrl.clear();
+                    _onHighlightSearchChanged('');
+                  },
+                  child: const Text(
+                    'مسح البحث ✕',
+                    style: TextStyle(color: _brick, fontSize: 11, fontWeight: FontWeight.w700),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: filtered.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.sports_soccer_rounded, size: 48, color: _muted),
+                        const SizedBox(height: 12),
+                        Text(
+                          _highlightSearchCtrl.text.isNotEmpty
+                              ? 'لا توجد نتائج لـ "${_highlightSearchCtrl.text}" في beIN SPORTS'
+                              : 'لا توجد ملخصات متاحة حالياً',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: _muted, fontSize: 14),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            _highlightSearchCtrl.clear();
+                            _highlightTournamentFilter = 'الكل';
+                            _onHighlightSearchChanged('');
+                          },
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('عرض جميع الملخصات'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(14, 4, 14, 24),
+                  itemCount: filtered.length,
+                  itemBuilder: (_, index) => _highlightCard(filtered[index]),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _highlightCard(MatchHighlight item) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _line.withValues(alpha: 0.8)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _launchHighlightPlayer(context, item),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  CachedNetworkImage(
+                    imageUrl: item.thumbnail,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => Container(
+                      color: const Color(0xFF1E1E2C),
+                      child: const Center(
+                        child: CircularProgressIndicator(color: Color(0xFF580F8B), strokeWidth: 2),
+                      ),
+                    ),
+                    errorWidget: (_, __, ___) => Container(
+                      color: const Color(0xFF1E1E2C),
+                      child: const Center(
+                        child: Icon(Icons.sports_soccer_rounded, color: Colors.white54, size: 40),
+                      ),
+                    ),
+                  ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black38,
+                          Colors.transparent,
+                          Colors.black87,
+                        ],
+                        stops: [0.0, 0.5, 1.0],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF580F8B),
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black38, blurRadius: 4),
+                        ],
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.verified_rounded, size: 13, color: Color(0xFFFFD700)),
+                          SizedBox(width: 4),
+                          Text(
+                            'beIN SPORTS',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Center(
+                    child: Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF580F8B).withValues(alpha: 0.9),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black45, blurRadius: 10),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 34,
+                      ),
+                    ),
+                  ),
+                  if (item.duration.isNotEmpty)
+                    Positioned(
+                      bottom: 10,
+                      left: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black87,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.timer_outlined, size: 11, color: Colors.white70),
+                            const SizedBox(width: 3),
+                            Text(
+                              item.duration,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (item.tournament.isNotEmpty)
+                    Positioned(
+                      bottom: 10,
+                      right: 10,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF16856D),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          item.tournament,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    style: const TextStyle(
+                      color: _ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      height: 1.35,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      if (item.timeAgo.isNotEmpty) ...[
+                        const Icon(Icons.schedule_rounded, size: 13, color: _muted),
+                        const SizedBox(width: 4),
+                        Text(item.timeAgo, style: const TextStyle(color: _muted, fontSize: 11.5)),
+                        const SizedBox(width: 12),
+                      ],
+                      if (item.views.isNotEmpty) ...[
+                        const Icon(Icons.visibility_outlined, size: 13, color: _muted),
+                        const SizedBox(width: 4),
+                        Text(item.views, style: const TextStyle(color: _muted, fontSize: 11.5)),
+                      ],
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF3E8FF),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.hd_rounded, size: 14, color: Color(0xFF580F8B)),
+                            SizedBox(width: 3),
+                            Text(
+                              'Full HD',
+                              style: TextStyle(
+                                color: Color(0xFF580F8B),
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF580F8B),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                      ),
+                      onPressed: () => _launchHighlightPlayer(context, item),
+                      icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
+                      label: const Text(
+                        'مشاهدة الملخص الآن',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _LiveBadge extends StatelessWidget {
@@ -1187,3 +1850,258 @@ void _message(BuildContext context, String message) =>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
+
+// ─── ⚽ MODEL & HIGHLIGHTS SERVICE ──────────────────────────────────────────
+
+class MatchHighlight {
+  const MatchHighlight({
+    required this.id,
+    required this.title,
+    required this.channel,
+    required this.duration,
+    required this.timeAgo,
+    required this.views,
+    required this.thumbnail,
+    required this.videoUrl,
+    required this.embedUrl,
+    this.tournament = '',
+  });
+
+  final String id;
+  final String title;
+  final String channel;
+  final String duration;
+  final String timeAgo;
+  final String views;
+  final String thumbnail;
+  final String videoUrl;
+  final String embedUrl;
+  final String tournament;
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'title': title,
+    'channel': channel,
+    'duration': duration,
+    'timeAgo': timeAgo,
+    'views': views,
+    'thumbnail': thumbnail,
+    'videoUrl': videoUrl,
+    'embedUrl': embedUrl,
+    'tournament': tournament,
+  };
+
+  factory MatchHighlight.fromMap(Map<String, dynamic> map) => MatchHighlight(
+    id: map['id']?.toString() ?? '',
+    title: map['title']?.toString() ?? '',
+    channel: map['channel']?.toString() ?? 'beIN SPORTS',
+    duration: map['duration']?.toString() ?? '',
+    timeAgo: map['timeAgo']?.toString() ?? '',
+    views: map['views']?.toString() ?? '',
+    thumbnail: map['thumbnail']?.toString() ?? '',
+    videoUrl: map['videoUrl']?.toString() ?? '',
+    embedUrl: map['embedUrl']?.toString() ?? '',
+    tournament: map['tournament']?.toString() ?? '',
+  );
+}
+
+const List<MatchHighlight> _kStarterHighlights = [
+  MatchHighlight(
+    id: 'd5B3UyUeOGM',
+    title: 'ملخص مباراة إسبانيا وإنجلترا | دوري الأمم الأوروبية - الجولة السادسة',
+    channel: 'beIN SPORTS',
+    duration: '11:57',
+    timeAgo: 'قبل 4 ساعات',
+    views: '821 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/d5B3UyUeOGM/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=d5B3UyUeOGM',
+    embedUrl: 'https://www.youtube.com/embed/d5B3UyUeOGM?autoplay=1&controls=1&playsinline=1',
+    tournament: 'دوري الأمم الأوروبية',
+  ),
+  MatchHighlight(
+    id: 'h5eCgxrtmUk',
+    title: 'ملخص مباراة فرنسا وتركيا | دوري الأمم الأوروبية - الجولة السادسة',
+    channel: 'beIN SPORTS',
+    duration: '8:44',
+    timeAgo: 'قبل 4 ساعات',
+    views: '540 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/h5eCgxrtmUk/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=h5eCgxrtmUk',
+    embedUrl: 'https://www.youtube.com/embed/h5eCgxrtmUk?autoplay=1&controls=1&playsinline=1',
+    tournament: 'دوري الأمم الأوروبية',
+  ),
+  MatchHighlight(
+    id: 'Q1dhBbciRpQ',
+    title: 'ملخص مباراة جمهورية التشيك وإسبانيا | دوري الأمم الأوروبية - الجولة الخامسة',
+    channel: 'beIN SPORTS',
+    duration: '11:54',
+    timeAgo: 'قبل يومين',
+    views: '690 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/Q1dhBbciRpQ/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=Q1dhBbciRpQ',
+    embedUrl: 'https://www.youtube.com/embed/Q1dhBbciRpQ?autoplay=1&controls=1&playsinline=1',
+    tournament: 'دوري الأمم الأوروبية',
+  ),
+  MatchHighlight(
+    id: 'k8F2o_L9wQs',
+    title: 'ملخص مباراة إيطاليا وفرنسا | دوري الأمم الأوروبية - الجولة الخامسة',
+    channel: 'beIN SPORTS',
+    duration: '9:54',
+    timeAgo: 'قبل 3 أيام',
+    views: '1.2 مليون مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/k8F2o_L9wQs/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=k8F2o_L9wQs',
+    embedUrl: 'https://www.youtube.com/embed/k8F2o_L9wQs?autoplay=1&controls=1&playsinline=1',
+    tournament: 'دوري الأمم الأوروبية',
+  ),
+  MatchHighlight(
+    id: '9vYgRkF-qXw',
+    title: 'ملخص مباراة ريال مدريد وبرشلونة | كلاسيكو الدوري الإسباني',
+    channel: 'beIN SPORTS',
+    duration: '14:20',
+    timeAgo: 'قبل أسبوع',
+    views: '3.4 مليون مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/9vYgRkF-qXw/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=9vYgRkF-qXw',
+    embedUrl: 'https://www.youtube.com/embed/9vYgRkF-qXw?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الإسباني',
+  ),
+  MatchHighlight(
+    id: 'mQe2nZ8yW0g',
+    title: 'ملخص مباراة ليفربول ومانشستر سيتي | قمة الدوري الإنجليزي الممتاز',
+    channel: 'beIN SPORTS',
+    duration: '13:15',
+    timeAgo: 'قبل أسبوع',
+    views: '2.8 مليون مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/mQe2nZ8yW0g/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=mQe2nZ8yW0g',
+    embedUrl: 'https://www.youtube.com/embed/mQe2nZ8yW0g?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الإنجليزي',
+  ),
+  MatchHighlight(
+    id: 'b8L2w_P0qZs',
+    title: 'ملخص مباراة بايرن ميونخ وباريس سان جيرمان | دوري أبطال أوروبا',
+    channel: 'beIN SPORTS',
+    duration: '12:30',
+    timeAgo: 'قبل أسبوعين',
+    views: '1.9 مليون مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/b8L2w_P0qZs/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=b8L2w_P0qZs',
+    embedUrl: 'https://www.youtube.com/embed/b8L2w_P0qZs?autoplay=1&controls=1&playsinline=1',
+    tournament: 'دوري أبطال أوروبا',
+  ),
+  MatchHighlight(
+    id: 'x7N3q_K1vYs',
+    title: 'ملخص مباراة مصر ومالاوي | تصفيات كأس أمم إفريقيا 2027',
+    channel: 'beIN SPORTS',
+    duration: '10:53',
+    timeAgo: 'قبل يومين',
+    views: '950 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/x7N3q_K1vYs/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=x7N3q_K1vYs',
+    embedUrl: 'https://www.youtube.com/embed/x7N3q_K1vYs?autoplay=1&controls=1&playsinline=1',
+    tournament: 'كأس أمم إفريقيا',
+  ),
+];
+
+class MatchHighlightsService {
+  MatchHighlightsService._();
+
+  static Future<List<MatchHighlight>> fetchHighlights({String query = ''}) async {
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final term = query.trim().isNotEmpty
+          ? 'ملخص ${query.trim()} beIN SPORTS'
+          : 'ملخصات مباريات beIN SPORTS';
+      final uri = Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent(term)}');
+      final req = await client.getUrl(uri);
+      req.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+      req.headers.set('Accept-Language', 'ar,en;q=0.9');
+      final res = await req.close().timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final html = await res.transform(utf8.decoder).join();
+        final match = RegExp(r'var ytInitialData = ({.*?});<\/script>').firstMatch(html);
+        if (match != null) {
+          final jsonStr = match.group(1);
+          if (jsonStr != null) {
+            final data = jsonDecode(jsonStr);
+            final List<MatchHighlight> results = [];
+            _extractFromYt(data, results);
+            if (results.isNotEmpty) return results;
+          }
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+    return [];
+  }
+
+  static void _extractFromYt(dynamic obj, List<MatchHighlight> out) {
+    if (obj is Map) {
+      if (obj.containsKey('videoRenderer')) {
+        final vr = obj['videoRenderer'] as Map<String, dynamic>;
+        final vid = vr['videoId']?.toString() ?? '';
+        String title = '';
+        final titleObj = vr['title'];
+        if (titleObj is Map) {
+          final runs = titleObj['runs'];
+          if (runs is List && runs.isNotEmpty) {
+            title = runs[0]['text']?.toString() ?? '';
+          } else if (titleObj['simpleText'] != null) {
+            title = titleObj['simpleText'].toString();
+          }
+        }
+
+        final duration = vr['lengthText']?['simpleText']?.toString() ?? '';
+        final timeAgo = vr['publishedTimeText']?['simpleText']?.toString() ?? '';
+        final views = vr['viewCountText']?['simpleText']?.toString() ?? '';
+
+        String channel = 'beIN SPORTS';
+        final ownerText = vr['ownerText'];
+        if (ownerText is Map && ownerText['runs'] is List && ownerText['runs'].isNotEmpty) {
+          channel = ownerText['runs'][0]['text']?.toString() ?? 'beIN SPORTS';
+        }
+
+        if (vid.isNotEmpty && title.isNotEmpty && (title.contains('ملخص') || title.contains('مباراة') || title.contains('أهداف'))) {
+          String tour = 'بطولات كبرى';
+          if (title.contains('الأمم الأوروبية') || title.contains('Nations League')) {
+            tour = 'دوري الأمم الأوروبية';
+          } else if (title.contains('أبطال أوروبا') || title.contains('Champions League')) {
+            tour = 'دوري أبطال أوروبا';
+          } else if (title.contains('الإنجليزي') || title.contains('Premier')) {
+            tour = 'الدوري الإنجليزي';
+          } else if (title.contains('الإسباني') || title.contains('LaLiga') || title.contains('كلاسيكو')) {
+            tour = 'الدوري الإسباني';
+          } else if (title.contains('إفريقيا') || title.contains('أمم إفريقيا')) {
+            tour = 'كأس أمم إفريقيا';
+          } else if (title.contains('العالم') || title.contains('World Cup')) {
+            tour = 'كأس العالم';
+          }
+
+          out.add(MatchHighlight(
+            id: vid,
+            title: title,
+            channel: channel,
+            duration: duration,
+            timeAgo: timeAgo,
+            views: views,
+            thumbnail: 'https://i.ytimg.com/vi/$vid/hqdefault.jpg',
+            videoUrl: 'https://www.youtube.com/watch?v=$vid',
+            embedUrl: 'https://www.youtube.com/embed/$vid?autoplay=1&controls=1&playsinline=1',
+            tournament: tour,
+          ));
+        }
+      }
+      for (final val in obj.values) {
+        _extractFromYt(val, out);
+      }
+    } else if (obj is List) {
+      for (final item in obj) {
+        _extractFromYt(item, out);
+      }
+    }
+  }
+}
+

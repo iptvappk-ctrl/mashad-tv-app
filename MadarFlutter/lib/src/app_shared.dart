@@ -179,6 +179,18 @@ class NativeBridge {
     }
   }
 
+  static Future<bool> openYouTube({String? videoId, String? watchUrl}) async {
+    try {
+      return await _native.invokeMethod<bool>('youtube.open', {
+            'videoId': videoId,
+            'watchUrl': watchUrl,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<void> openPlayerStore() async {
     try {
       await _native.invokeMethod<void>('player.store');
