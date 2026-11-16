@@ -15,11 +15,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { checkRateLimit } from "@/lib/security";
 import { superAggregator } from "@/lib/providers/super-aggregator";
 import { extractStreamFromEmbed, extractStreamWithFallback, toProxiedUrl } from "@/lib/providers/stream-extractor";
+import { isServiceAllowed } from "@/lib/server-license";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
+  if (!await isServiceAllowed()) {
+    return NextResponse.json({ success: false, error: "Service temporarily suspended." }, { status: 403 });
+  }
+
   const ip = req.headers.get("x-forwarded-for") || "127.0.0.1";
   if (!checkRateLimit(ip, 300, 60000)) {
     return NextResponse.json({ success: false, error: "Too Many Requests" }, { status: 429 });

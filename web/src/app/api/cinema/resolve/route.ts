@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aggregator } from "@/lib/providers/aggregator";
+import { isServiceAllowed } from "@/lib/server-license";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  if (!await isServiceAllowed()) {
+    return NextResponse.json({ success: false, error: "Service temporarily suspended." }, { status: 403 });
+  }
+
   const { searchParams } = new URL(req.url);
   const serverUrl = searchParams.get("serverUrl");
 

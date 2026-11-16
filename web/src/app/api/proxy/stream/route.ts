@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAllowedProxyUrl, checkRateLimit } from "@/lib/security";
+import { isServiceAllowed } from "@/lib/server-license";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  if (!await isServiceAllowed()) {
+    return new NextResponse("Service temporarily suspended.", { status: 403 });
+  }
+
   const ip = req.headers.get("x-forwarded-for") || "127.0.0.1";
   if (!checkRateLimit(ip, 1200, 60000)) {
     return new NextResponse("Too Many Requests", { status: 429 });
