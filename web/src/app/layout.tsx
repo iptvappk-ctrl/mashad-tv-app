@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import KillSwitchProvider from "@/components/KillSwitchProvider";
 
 export const metadata: Metadata = {
   title: "زقزوقة | أفلام ومسلسلات ومباريات",
@@ -23,7 +24,9 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl">
       <body className="min-h-screen bg-[#F2E6D7] text-[#342633] antialiased">
-        {children}
+        <KillSwitchProvider>
+          {children}
+        </KillSwitchProvider>
       </body>
     </html>
   );

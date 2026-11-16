@@ -108,7 +108,7 @@ class ZakzoukaFlutterApp extends StatelessWidget {
       textDirection: TextDirection.rtl,
       child: child ?? const SizedBox.shrink(),
     ),
-    home: const _UpdatePromptGate(child: _StartupIntro(child: RootTabs())),
+    home: const _KillSwitchGate(child: _UpdatePromptGate(child: _StartupIntro(child: RootTabs()))),
   );
 }
 
@@ -344,6 +344,130 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
   @override
   Widget build(BuildContext context) => widget.child;
 }
+
+// ─── 🔐 KILL SWITCH GATE ─────────────────────────────────────────────────────
+// Checks the owner's kill switch on every app startup.
+// If kill switch is active on the cloud → shows shutdown screen (cannot be bypassed).
+// If server is unreachable (no internet) → allows the app to run normally (fail-open).
+// OWNER only can deactivate via: POST /api/admin/kill-switch with MASTER_SECRET header.
+class _KillSwitchGate extends StatefulWidget {
+  const _KillSwitchGate({required this.child});
+  final Widget child;
+  @override
+  State<_KillSwitchGate> createState() => _KillSwitchGateState();
+}
+
+class _KillSwitchGateState extends State<_KillSwitchGate> {
+  static const String _apiBase = 'https://zaqzouka-dashboard-api.vercel.app';
+  // 🔑 Replace this with YOUR secret API key (set it in Vercel env as ZAQZOUKA_API_KEY)
+  // Keep this key private — do NOT share with anyone.
+  static const String _apiKey = 'ZQ-OWNER-2026-SECRET-14MOON';
+
+  bool _checking = true;
+  bool _killed = false;
+  String _killMessage = 'التطبيق متوقف مؤقتاً.\nجاري الصيانة، سنعود قريباً.';
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_checkKillSwitch());
+  }
+
+  Future<void> _checkKillSwitch() async {
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client
+          .postUrl(Uri.parse('$_apiBase/api/admin/license-check'))
+          .timeout(const Duration(seconds: 5));
+      req.headers.set('Content-Type', 'application/json');
+      req.headers.set('x-zaqzouka-key', _apiKey);
+      req.write(jsonEncode({'platform': 'app', 'buildId': 'zq-14moon'}));
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      final body = await res.transform(utf8.decoder).join();
+      client.close();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (data['allowed'] == false) {
+        if (mounted) {
+          setState(() {
+            _killed = true;
+            _checking = false;
+            _killMessage = data['message']?.toString() ??
+                'التطبيق متوقف مؤقتاً.\nجاري الصيانة، سنعود قريباً.';
+          });
+        }
+        return;
+      }
+    } catch (_) {
+      // No internet or server error → fail open (let the app run normally)
+    }
+    if (mounted) setState(() => _checking = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_checking) {
+      return const Scaffold(
+        backgroundColor: _paper,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 36, height: 36,
+                child: CircularProgressIndicator(color: _brick, strokeWidth: 2.5),
+              ),
+              SizedBox(height: 18),
+              Text('جاري التحقق...', style: TextStyle(color: _muted, fontSize: 14)),
+            ],
+          ),
+        ),
+      );
+    }
+    if (_killed) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF1A0E0E),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline_rounded, color: Color(0xFFB94E3C), size: 64),
+                const SizedBox(height: 24),
+                const Text(
+                  'زقزوقة TV',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  _killMessage,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Color(0xFFCCB0A0), fontSize: 16, height: 1.6),
+                ),
+                const SizedBox(height: 32),
+                TextButton(
+                  onPressed: () {
+                    setState(() { _checking = true; _killed = false; });
+                    unawaited(_checkKillSwitch());
+                  },
+                  child: const Text('إعادة المحاولة', style: TextStyle(color: Color(0xFFB94E3C))),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return widget.child;
+  }
+}
+
+// ─── END KILL SWITCH GATE ────────────────────────────────────────────────────
 
 class _StartupIntro extends StatefulWidget {
   const _StartupIntro({required this.child});

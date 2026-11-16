@@ -3,6 +3,31 @@
 import type { Analytics } from "firebase/analytics";
 
 const CLOUD_TELEMETRY_API = "https://zaqzouka-dashboard-api.vercel.app";
+// 🔑 Owner API Key — same key set in Vercel env ZAQZOUKA_API_KEY
+// Keep this private — do NOT share with anyone.
+const OWNER_API_KEY = "ZQ-OWNER-2026-SECRET-14MOON";
+
+// ─── 🔐 Kill Switch Checker (called from layout/page on mount) ───────────────
+// Returns { allowed: true } if service is live, { allowed: false, message } if killed.
+// If the check fails (no internet) → returns { allowed: true } to avoid false blocking.
+export async function checkKillSwitch(): Promise<{ allowed: boolean; message?: string }> {
+  try {
+    const res = await fetch(`${CLOUD_TELEMETRY_API}/api/admin/license-check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-zaqzouka-key": OWNER_API_KEY },
+      body: JSON.stringify({ platform: "web", buildId: "zq-web-14moon" }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return { allowed: true }; // Server error → fail open
+    const data = await res.json();
+    if (data?.allowed === false) {
+      return { allowed: false, message: data.message || "الموقع متوقف مؤقتاً." };
+    }
+    return { allowed: true };
+  } catch {
+    return { allowed: true }; // No internet → fail open
+  }
+}
 
 let analyticsPromise: Promise<Analytics | null> | null = null;
 let currentSessionId: string | null = null;
