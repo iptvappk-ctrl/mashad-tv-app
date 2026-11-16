@@ -9,7 +9,7 @@ import RecapsView from "@/components/RecapsView";
 import PlayerModal, { StreamSource } from "@/components/PlayerModal";
 import { ArabseedDetail, ArabseedEpisode, ArabseedItem, ArabseedSeason } from "@/lib/arabseed";
 import { Bookmark, Star, Trash2 } from "lucide-react";
-import { trackCompletedSearch, trackContentOpen } from "@/lib/analytics";
+import { initWebTelemetry, trackCompletedSearch, trackContentOpen } from "@/lib/analytics";
 
 type Tab = "home" | "movies" | "series" | "anime" | "recaps" | "matches" | "favorites";
 interface DetailSnapshot {
@@ -50,6 +50,7 @@ export default function HomePage() {
   }, [searchQuery]);
 
   useEffect(() => {
+    initWebTelemetry();
     try {
       const saved = localStorage.getItem("zakzouka_favorites");
       if (saved) setFavorites(JSON.parse(saved));

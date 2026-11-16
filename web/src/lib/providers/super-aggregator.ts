@@ -4,6 +4,7 @@
  */
 
 import { aggregator, normalizeTitle } from "./aggregator";
+import { titlesStrictlyMatch } from "../title-matcher";
 import { BaseProvider, UnifiedMediaDetail, UnifiedMediaItem, UnifiedServer } from "./types";
 import { extractStreamFromEmbed, extractStreamWithFallback } from "./stream-extractor";
 import { cima4uProvider } from "./cima4u";
@@ -120,7 +121,7 @@ export class SuperAggregator {
       }
     }
 
-    const merged = Array.from(seen.values());
+    const merged = Array.from(seen.values()).filter((it) => titlesStrictlyMatch(q, it.title));
     if (merged.length > 0) superSearchCache.set(cacheKey, { items: merged, time: Date.now() });
     return merged;
   }

@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { titlesStrictlyMatch } from "./title-matcher";
 
 export interface ArabseedItem {
   id: string;
@@ -220,10 +221,25 @@ export async function getArabseedSeries(page = 1, force = false): Promise<Arabse
 
 export async function searchArabseed(query: string): Promise<ArabseedItem[]> {
   try {
-    const encoded = encodeURIComponent(query.trim());
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+    const encoded = encodeURIComponent(trimmed);
     const url = `${BASE_URL}/?s=${encoded}`;
     const html = await fetchHtml(url);
-    return parseListing(html);
+
+    // Soft-404 / 0 search results check: prevent WordPress fallback to recent/featured posts
+    if (
+      html.includes("لم يتم العثور على أي نتائج") ||
+      html.includes("لا توجد نتائج") ||
+      html.includes("no-results") ||
+      html.includes("not-found")
+    ) {
+      return [];
+    }
+
+    const items = parseListing(html);
+    // Strict title matching: discard any unrelated media (e.g. BBC shows returned when searching Arabic series)
+    return items.filter((it) => titlesStrictlyMatch(trimmed, it.title));
   } catch (err) {
     console.error("Arabseed search error:", err);
     return [];

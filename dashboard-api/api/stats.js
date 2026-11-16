@@ -44,6 +44,26 @@ module.exports = async (req, res) => {
     const activeNow = sessions.filter((s) => s.status === 'active').length;
     const totalSessions = sessions.length;
 
+    // Platform separation (App vs Web)
+    const webSessions = sessions.filter((s) => s.platform === 'web' || s.deviceType === 'web');
+    const appSessions = sessions.filter((s) => s.platform !== 'web' && s.deviceType !== 'web');
+    const webActiveNow = webSessions.filter((s) => s.status === 'active').length;
+    const appActiveNow = appSessions.filter((s) => s.status === 'active').length;
+
+    // Web browsers breakdown
+    const browserMap = {};
+    for (const s of webSessions) {
+      const b = (s.browser || s.device || 'Chrome').split('(')[0].trim();
+      browserMap[b] = (browserMap[b] || 0) + 1;
+    }
+    const webBrowsers = Object.entries(browserMap)
+      .map(([browser, count]) => ({
+        browser,
+        count,
+        percent: webSessions.length > 0 ? Math.round((count / webSessions.length) * 100) : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
     // 1. Avg session duration
     const totalMinutes = sessions.reduce((acc, s) => acc + (s.durationMinutes || 1), 0);
     const avgDuration = totalSessions > 0 ? (totalMinutes / totalSessions).toFixed(1) : '0';
@@ -157,8 +177,11 @@ module.exports = async (req, res) => {
       updatedAt: new Date().toISOString(),
       kpis: {
         activeNow,
+        appActiveNow,
+        webActiveNow,
         firstOpens,
         totalInstalls: stats.totalInstalls || 0,
+        webVisits: stats.webVisits || 0,
         bouncedUsers: bounced,
         bounceRate,
         totalSearches: stats.totalSearches || 0,
@@ -168,8 +191,22 @@ module.exports = async (req, res) => {
         avgDurationMinutes: avgDuration,
         tvRatio,
         phoneRatio: 100 - tvRatio,
+        appSessionsCount: appSessions.length,
+        webSessionsCount: webSessions.length,
+        appRatio: totalSessions > 0 ? Math.round((appSessions.length / totalSessions) * 100) : 0,
+        webRatio: totalSessions > 0 ? Math.round((webSessions.length / totalSessions) * 100) : 0,
       },
-      analytics: { deviceBrands, topCountries, hourlyTraffic, osList },
+      analytics: {
+        deviceBrands,
+        topCountries,
+        hourlyTraffic,
+        osList,
+        webBrowsers,
+        platforms: [
+          { name: 'تطبيق الهاتف والشاشات 📱', count: appSessions.length, active: appActiveNow },
+          { name: 'الموقع الإلكتروني (Web Portal) 🌐', count: webSessions.length, active: webActiveNow },
+        ],
+      },
       sessions,
       topContent,
       searches: searchesList,

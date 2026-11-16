@@ -1,4 +1,5 @@
 import { BaseProvider, UnifiedMediaDetail, UnifiedMediaItem } from "./types";
+import { titlesStrictlyMatch } from "../title-matcher";
 import { arabseedProvider } from "./arabseed";
 import { akwamProvider } from "./akwam";
 import { wecimaProvider } from "./wecima";
@@ -162,7 +163,7 @@ export class MultiProviderAggregator {
       }
     }
 
-    const merged = Array.from(seen.values());
+    const merged = Array.from(seen.values()).filter((it) => titlesStrictlyMatch(q, it.title));
     const cachedAt = Date.now();
     if (merged.length > 0) searchCache.set(cacheKey, { items: merged, time: cachedAt });
     // Poster repair is opportunistic; never hold search results while opening

@@ -19,20 +19,23 @@ module.exports = async (req, res) => {
     const remoteIp = (req.headers && req.headers['x-forwarded-for']) || '';
     const { code: countryCode, name: country } = resolveCountry(body.countryCode, body.timezone);
 
+    const isWeb = body.platform === 'web' || body.deviceType === 'web';
     const newSession = {
       id: sessionId,
       deviceId: body.deviceId || sessionId,
       device,
-      deviceType: body.deviceType || 'phone',
-      osVersion: body.osVersion || 'Android',
-      appVersion: body.appVersion || '',
+      deviceType: body.deviceType || (isWeb ? 'web' : 'phone'),
+      platform: isWeb ? 'web' : 'app',
+      browser: body.browser || '',
+      osVersion: body.osVersion || (isWeb ? 'Web Browser' : 'Android'),
+      appVersion: body.appVersion || (isWeb ? 'Web Portal v1.0' : ''),
       country,
       countryCode,
       openTime: formatClockTime(now),
       closeTime: 'نشط الآن...',
       durationText: 'مستمر (1 د)',
       durationMinutes: 1,
-      lastSection: (body.currentSection || 'الرئيسية 🏠').trim(),
+      lastSection: (body.currentSection || (isWeb ? 'الموقع 🌐' : 'الرئيسية 🏠')).trim(),
       lastContent: body.currentContent || '',
       status: 'active',
       openedAt: now.toISOString(),
@@ -45,16 +48,20 @@ module.exports = async (req, res) => {
     await db.ref('stats').transaction((current) => {
       const s = current || {};
       s.firstOpens = (s.firstOpens || 0) + 1;
-      if (body.isNewInstall === true) {
+      if (isWeb) {
+        s.webVisits = (s.webVisits || 0) + 1;
+      } else if (body.isNewInstall === true) {
         s.totalInstalls = (s.totalInstalls || 0) + 1;
       }
       return s;
     });
 
+    const actIcon = isWeb ? '🌐' : '📱';
+    const actLabel = isWeb ? 'زيارة للموقع الإلكتروني' : 'فتح تطبيق زقزوقة';
     await db.ref('activityLog').push({
       type: 'open',
-      text: `فتح التطبيق من جهاز ${device} (${country})`,
-      icon: '📱',
+      text: `${actLabel} من ${device} (${country})`,
+      icon: actIcon,
       time: formatClockTime(now),
       timestamp: now.toISOString(),
     });
