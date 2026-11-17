@@ -59,7 +59,7 @@ class _FeaturedCarouselState extends State<_FeaturedCarousel> {
   Widget build(BuildContext context) => Column(
     children: [
       SizedBox(
-        height: 204,
+        height: 208,
         child: PageView.builder(
           controller: _controller,
           itemCount: widget.items.length,
@@ -100,89 +100,100 @@ class _FeaturedCard extends StatelessWidget {
   const _FeaturedCard({required this.item, required this.onTap});
   final MediaItem item;
   final VoidCallback onTap;
+
   @override
-  Widget build(BuildContext context) => Material(
-    color: const Color(0xFF3C2D3A),
-    borderRadius: BorderRadius.circular(24),
-    clipBehavior: Clip.antiAlias,
-    child: InkWell(
-      onTap: onTap,
-      child: Container(
-        height: 194,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerRight,
-            end: Alignment.centerLeft,
-            colors: [Color(0xFF30232E), Color(0xFF594653), Color(0xFF8A777A)],
+  Widget build(BuildContext context) {
+    final title = item.title.trim();
+    // Dynamic adaptive font size: ensures complete title fits without awkward cuts
+    final double titleFontSize = title.length > 38
+        ? 14.5
+        : (title.length > 24 ? 16.5 : 19.0);
+
+    return Material(
+      color: const Color(0xFF3C2D3A),
+      borderRadius: BorderRadius.circular(24),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 198,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.centerRight,
+              end: Alignment.centerLeft,
+              colors: [Color(0xFF30232E), Color(0xFF594653), Color(0xFF8A777A)],
+            ),
+          ),
+          child: Stack(
+            children: [
+              Positioned(
+                left: 8,
+                top: 9,
+                bottom: 9,
+                width: 118,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: _NetworkImage(url: item.poster, fit: BoxFit.contain),
+                ),
+              ),
+              Positioned(
+                left: 132,
+                right: 14,
+                top: 10,
+                bottom: 10,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'اختيار اليوم',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      title,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      textDirection: TextDirection.rtl,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: titleFontSize,
+                        fontWeight: FontWeight.w900,
+                        height: 1.24,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.play_circle_fill,
+                          size: 30,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 8),
+                        _SmallBadge(label: item.isSeries ? 'مسلسل' : 'فيلم'),
+                        if (item.year.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          _SmallBadge(label: item.year),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        child: Stack(
-          children: [
-            Positioned(
-              left: 8,
-              top: 9,
-              bottom: 9,
-              width: 118,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: _NetworkImage(url: item.poster, fit: BoxFit.contain),
-              ),
-            ),
-            Positioned(
-              left: 137,
-              right: 17,
-              top: 16,
-              bottom: 16,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  const Text(
-                    'اختيار اليوم',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 9),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    children: [
-                      const Icon(
-                        Icons.play_circle_fill,
-                        size: 31,
-                        color: Colors.white,
-                      ),
-                      const SizedBox(width: 8),
-                      _SmallBadge(label: item.isSeries ? 'مسلسل' : 'فيلم'),
-                      if (item.year.isNotEmpty) ...[
-                        const SizedBox(width: 6),
-                        _SmallBadge(label: item.year),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _SmallBadge extends StatelessWidget {
