@@ -12,7 +12,7 @@ class RecapChannel {
   final String emoji;
 }
 
-/// The 25 dedicated movie recap channels requested by the user
+/// The 27 dedicated movie recap channels requested by the user
 const List<RecapChannel> _kRecapChannels = [
   RecapChannel(
     name: 'كوكلي Cokley',
@@ -138,6 +138,16 @@ const List<RecapChannel> _kRecapChannels = [
     name: 'فيلم في الخلاصة',
     channelId: 'UChO6HRowsTQHmELCeGy4G_Q',
     emoji: '💡',
+  ),
+  RecapChannel(
+    name: 'فيلم في الخمسينة',
+    channelId: 'UCqQkYvn14_QAjheEhCD5cnA',
+    emoji: '⏱️',
+  ),
+  RecapChannel(
+    name: 'فيلمتشو',
+    channelId: 'UC26gMQ-F5XJ0COgPnQfL1uQ',
+    emoji: '🍿',
   ),
 ];
 

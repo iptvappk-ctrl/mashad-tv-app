@@ -1298,120 +1298,22 @@ Widget _highlightsPromoCard() {
       event: 'start',
     );
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: CachedNetworkImage(
-                    imageUrl: item.thumbnail,
-                    width: 76,
-                    height: 46,
-                    fit: BoxFit.cover,
-                    errorWidget: (_, __, ___) => const Icon(Icons.sports_soccer_rounded, size: 36),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, height: 1.3),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        'beIN SPORTS · ${item.duration} · ${item.views}',
-                        style: const TextStyle(color: _muted, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: () {
-                Navigator.pop(ctx);
-                NativeBridge.openYouTube(
-                  videoId: item.id,
-                  watchUrl: item.videoUrl,
-                );
-              },
-              icon: const Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 22),
-              label: const Text(
-                'مشاهدة فائقة الدقة 1080p (YouTube الرسمي)',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFCC0000),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: () async {
-                Navigator.pop(ctx);
-                final opened = await NativeBridge.openPlayer(
-                  url: item.embedUrl,
-                  title: item.title,
-                  referer: 'https://www.youtube.com/',
-                  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                  backupSources: [
-                    {'name': 'YouTube Official', 'url': item.videoUrl},
-                  ],
-                  isLive: false,
-                );
-                if (!opened) {
-                  NativeBridge.openYouTube(
-                    videoId: item.id,
-                    watchUrl: item.videoUrl,
-                  );
-                }
-              },
-              icon: const Icon(Icons.smart_display_rounded, size: 20),
-              label: const Text(
-                'تشغيل في مشغل زقزوقة المدمج',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-              ),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 13),
-                side: BorderSide(color: Colors.grey.shade400),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-            ),
-          ],
-        ),
-      ),
+    final opened = await NativeBridge.openPlayer(
+      url: item.videoUrl,
+      title: item.title,
+      referer: 'https://www.youtube.com/',
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      backupSources: [
+        {'name': 'YouTube Embed', 'url': item.embedUrl},
+      ],
+      isLive: false,
     );
+    if (!opened) {
+      NativeBridge.openYouTube(
+        videoId: item.id,
+        watchUrl: item.videoUrl,
+      );
+    }
   }
 
   Widget _tournamentChip(String name) {

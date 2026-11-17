@@ -412,9 +412,9 @@ private fun isYouTubeStream(url: String): Boolean {
     return lower.contains("youtube.com") || lower.contains("youtu.be") || lower.contains("youtube-nocookie.com")
 }
 
-// YouTube requires a stable app identity as the WebView document origin so its
-// embedded player can identify the client (otherwise it returns Error 153).
-private const val YOUTUBE_EMBED_ORIGIN = "https://com.madar.player"
+// YouTube IFrame API: use https://www.youtube.com as the base URL so YouTube
+// treats the embed as first-party (avoids Error 153 / origin restriction).
+private const val YOUTUBE_EMBED_ORIGIN = "https://www.youtube.com"
 
 private fun extractYouTubeId(url: String): String {
     return when {
@@ -440,11 +440,8 @@ private fun formatTime(seconds: Long): String {
 }
 
 private fun toCleanEmbedUrl(url: String): String {
-    if (!isYouTubeStream(url)) return url
-    val id = extractYouTubeId(url)
-    return if (id.isNotBlank()) {
-        "https://www.youtube.com/embed/$id?autoplay=1&controls=0&rel=0&playsinline=1&enablejsapi=1&modestbranding=1&iv_load_policy=3&fs=0&cc_load_policy=0&origin=https%3A%2F%2Fcom.madar.player"
-    } else url
+    // Preserve URL intact so watch and embed types are handled appropriately
+    return url
 }
 
 private fun isDirectStreamUrl(url: String): Boolean {
@@ -720,11 +717,66 @@ private fun PlayerScreen(
     var ytSliderValue by remember(effectiveStreamUrl) { mutableStateOf<Float?>(null) }
     var ytIsPlaying by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var ytIsBuffering by remember(effectiveStreamUrl) { mutableStateOf(false) }
-    var showYouTubeFallbackPrompt by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var useWatchPage by remember(effectiveStreamUrl) {
+        mutableStateOf(
+            !effectiveStreamUrl.contains("/embed/") ||
+            title.contains("beIN", ignoreCase = true) ||
+            title.contains("ملخص", ignoreCase = true) ||
+            title.contains("الدوري", ignoreCase = true) ||
+            title.contains("مباراة", ignoreCase = true)
+        )
+    }
     var ytSpeed by remember(effectiveStreamUrl) { mutableFloatStateOf(1.0f) }
     var ytDoubleTapSide by remember { mutableStateOf<String?>(null) }
     var ytDoubleTapKey by remember { mutableIntStateOf(0) }
     var showDoubleTapIndicator by remember { mutableStateOf(false) }
+
+    val cleanCinemaJs = remember {
+        """
+            (function() {
+                var css = 'html, body { overflow: hidden !important; background: #000 !important; margin: 0 !important; padding: 0 !important; width: 100vw !important; height: 100vh !important; } ytm-mobile-topbar-renderer, ytm-pivot-bar-renderer, ytm-item-section-renderer, ytm-comment-section-renderer, .watch-below-the-player, ytm-reel-shelf-renderer, #related, #comments, .ytm-cinema, ytm-engagement-panel-section-list-renderer, ytm-single-column-watch-next-results-renderer, .fullscreen-icon, .player-controls-bottom { display: none !important; } .player-container, #player-container-id, .html5-video-player, #player { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 999999 !important; background: #000 !important; } video { width: 100vw !important; height: 100vh !important; object-fit: contain !important; }';
+                var style = document.getElementById('zag-yt-cinema-css');
+                if (!style) {
+                    style = document.createElement('style');
+                    style.id = 'zag-yt-cinema-css';
+                    style.textContent = css;
+                    (document.head || document.documentElement).appendChild(style);
+                }
+                var v = document.querySelector('video');
+                if (v) {
+                    if (v.paused) {
+                        try {
+                            var p = v.play();
+                            if (p !== undefined) {
+                                p.catch(function() {
+                                    v.muted = true;
+                                    v.play();
+                                });
+                            }
+                        } catch(e) {}
+                    }
+                    if (!v.__madar_hooked) {
+                        v.__madar_hooked = true;
+                        v.addEventListener('playing', function() {
+                            if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
+                        });
+                        v.addEventListener('pause', function() {
+                            if (window.MadarBridge) window.MadarBridge.onStateChange('paused');
+                        });
+                        v.addEventListener('waiting', function() {
+                            if (window.MadarBridge) window.MadarBridge.onStateChange('buffering');
+                        });
+                        v.addEventListener('timeupdate', function() {
+                            if (window.MadarBridge) window.MadarBridge.onTimeUpdate(v.currentTime || 0, v.duration || 0);
+                        });
+                        v.addEventListener('ended', function() {
+                            if (window.MadarBridge) window.MadarBridge.onStateChange('ended');
+                        });
+                    }
+                }
+            })();
+        """.trimIndent()
+    }
 
     LaunchedEffect(ytDoubleTapKey) {
         if (ytDoubleTapKey > 0) {
@@ -734,22 +786,23 @@ private fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(isYouTube, effectiveStreamUrl, ytIsPlaying) {
+    LaunchedEffect(isYouTube, effectiveStreamUrl, ytIsPlaying, useWatchPage) {
         if (!isYouTube) return@LaunchedEffect
-        kotlinx.coroutines.delay(3500)
-        if (!ytIsPlaying) {
-            showYouTubeFallbackPrompt = true
+        kotlinx.coroutines.delay(4000)
+        if (!ytIsPlaying && !useWatchPage) {
+            useWatchPage = true
+            val ytId = extractYouTubeId(effectiveStreamUrl)
+            if (ytId.isNotBlank()) {
+                webViewRef?.loadUrl("https://m.youtube.com/watch?v=$ytId")
+            }
         }
     }
 
-    LaunchedEffect(isYouTube, effectiveStreamUrl, webViewRef) {
-        if (!isYouTube) return@LaunchedEffect
-        while (true) {
-            kotlinx.coroutines.delay(400)
-            webViewRef?.evaluateJavascript(
-                "(function(){ try { if (window.__madar_clean) window.__madar_clean(); } catch(e){} })();",
-                null
-            )
+    LaunchedEffect(isYouTube, effectiveStreamUrl, webViewRef, useWatchPage) {
+        if (!isYouTube || !useWatchPage) return@LaunchedEffect
+        for (i in 1..12) {
+            kotlinx.coroutines.delay(350)
+            webViewRef?.evaluateJavascript(cleanCinemaJs, null)
         }
     }
 
@@ -757,10 +810,17 @@ private fun PlayerScreen(
         { deltaSeconds ->
             val js = """
                 (function() {
-                    var v = document.querySelector('video');
-                    if (v) {
-                        var target = Math.max(0, Math.min((v.currentTime || 0) + ($deltaSeconds), v.duration || 999999));
-                        v.currentTime = target;
+                    if (typeof player !== 'undefined' && player.seekTo && player.getCurrentTime) {
+                        var cur = player.getCurrentTime() || 0;
+                        var dur = player.getDuration() || 999999;
+                        var target = Math.max(0, Math.min(cur + ($deltaSeconds), dur));
+                        player.seekTo(target, true);
+                    } else {
+                        var v = document.querySelector('video');
+                        if (v) {
+                            var target = Math.max(0, Math.min((v.currentTime || 0) + ($deltaSeconds), v.duration || 999999));
+                            v.currentTime = target;
+                        }
                     }
                 })();
             """.trimIndent()
@@ -804,7 +864,7 @@ private fun PlayerScreen(
     }
     val preferences = remember(context) { context.getSharedPreferences("madar_player", 0) }
     var selectedQuality by remember {
-        mutableStateOf(preferences.getString("quality", "ضغط ذكي (HD موفّر)") ?: "ضغط ذكي (HD موفّر)")
+        mutableStateOf(preferences.getString("quality", "أعلى جودة") ?: "أعلى جودة")
     }
     var showBandwidthSheet by remember { mutableStateOf(false) }
     var showTvConnectDialog by remember { mutableStateOf(false) }
@@ -892,10 +952,10 @@ private fun PlayerScreen(
 
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 8_000,
-                /* maxBufferMs = */ 20_000,
-                /* bufferForPlaybackMs = */ 1_500,
-                /* bufferForPlaybackAfterRebufferMs = */ 2_500
+                /* minBufferMs = */ 3_000,
+                /* maxBufferMs = */ 30_000,
+                /* bufferForPlaybackMs = */ 1_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_500
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
@@ -985,14 +1045,15 @@ private fun PlayerScreen(
             val bufferingForMs = bufferingSinceMs.takeIf { it > 0L }
                 ?.let { System.currentTimeMillis() - it } ?: 0L
 
-            // ── Auto Black Screen Detection (no frame rendered after 7s or stuck buffering) ──
-            val isBlackScreen = !hasRenderedFirstFrame && elapsedMs >= 7_000L && p.currentPosition == 0L
-            val isEndlessBuffering = p.playWhenReady && p.playbackState == Player.STATE_BUFFERING && bufferingForMs >= 7_000L
+            // ── Auto Black Screen Detection (initial stall: 15s; stuck buffering during playback: 30s) ──
+            val isBlackScreen = !hasRenderedFirstFrame && elapsedMs >= 15_000L && p.currentPosition == 0L
+            val isEndlessBuffering = p.playWhenReady && p.playbackState == Player.STATE_BUFFERING && bufferingForMs >= 30_000L
 
             if (!bufferingFallbackUsed && (isBlackScreen || isEndlessBuffering)) {
                 bufferingFallbackUsed = true
                 Log.w("MadarPlayer", "Auto Black Screen / Buffer Recovery triggered (elapsed=${elapsedMs}ms, buffering=${bufferingForMs}ms). Backups left: ${backupSources.size}")
-                if (backupSources.isNotEmpty()) {
+                val canSwitch = backupSources.isNotEmpty() && (!hasRenderedFirstFrame || isDirectStreamUrl(backupSources.first().url))
+                if (canSwitch) {
                     val next = backupSources.removeAt(0)
                     Log.i("MadarPlayer", "Switching to next backup: ${safeHost(next.url)}")
                     onSwitchStream(
@@ -1001,7 +1062,7 @@ private fun PlayerScreen(
                         next.referer.ifBlank { cleanRef },
                         next.headers,
                     )
-                } else {
+                } else if (!hasRenderedFirstFrame) {
                     playbackError = "تعذر تشغيل هذا السيرفر (شاشة سوداء). اضغط لإعادة المحاولة أو اختر سيرفرًا آخر."
                     isBuffering = false
                 }
@@ -1122,6 +1183,21 @@ private fun PlayerScreen(
                                             }
                                         }
                                     }
+
+                                    @JavascriptInterface
+                                    fun onPlayerError(errorCode: Int) {
+                                        pageProbeHandler.post {
+                                            Log.w("MadarPlayer", "YouTube IFrame Error: $errorCode -> Auto-switching to cinema mobile watch stream")
+                                            ytIsBuffering = true
+                                            if (!useWatchPage) {
+                                                useWatchPage = true
+                                                val ytId = extractYouTubeId(effectiveStreamUrl)
+                                                if (ytId.isNotBlank()) {
+                                                    webViewRef?.loadUrl("https://m.youtube.com/watch?v=$ytId")
+                                                }
+                                            }
+                                        }
+                                    }
                                 },
                                 "MadarBridge"
                             )
@@ -1145,7 +1221,11 @@ private fun PlayerScreen(
                             javaScriptCanOpenWindowsAutomatically = false
                             setSupportMultipleWindows(false)
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            if (!isYouTube) userAgentString = cleanUa
+                            userAgentString = if (isYouTube) {
+                                "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.107 Mobile Safari/537.36"
+                            } else {
+                                cleanUa
+                            }
                         }
                         webChromeClient = object : WebChromeClient() {
                             override fun onCreateWindow(
@@ -1268,8 +1348,23 @@ private fun PlayerScreen(
                                 val host = uri.host?.lowercase(Locale.ROOT).orEmpty()
 
                                 if (isYouTube) {
-                                    // Block navigation away from embed, keep playback strictly inside native player
-                                    return true
+                                    // Allow YouTube iframe sub-resources (api, scripts, media) to load normally.
+                                    // Only block external navigation that leaves the embed page.
+                                    val ytHost = host
+                                    val isYtSubdomain = ytHost.endsWith("youtube.com") ||
+                                        ytHost.endsWith("youtu.be") ||
+                                        ytHost.endsWith("ytimg.com") ||
+                                        ytHost.endsWith("ggpht.com") ||
+                                        ytHost.endsWith("googlevideo.com") ||
+                                        ytHost.endsWith("googleapis.com") ||
+                                        ytHost.endsWith("gstatic.com") ||
+                                        ytHost.endsWith("google.com")
+                                    // If it's a main-frame navigation away from YouTube → block.
+                                    // Sub-resource loads (scripts, XHR, media) → allow.
+                                    if (request?.isForMainFrame == true && !isYtSubdomain) {
+                                        return true
+                                    }
+                                    return false
                                 }
                                 if (reqUrl.startsWith("intent:", true) || reqUrl.startsWith("market:", true) ||
                                     reqUrl.startsWith("whatsapp:", true) || reqUrl.startsWith("tg:", true)
@@ -1343,6 +1438,8 @@ private fun PlayerScreen(
                                             )
                                         }
                                     }, 14_000L)
+                                } else if (useWatchPage) {
+                                    view?.evaluateJavascript(cleanCinemaJs, null)
                                 }
                             }
 
@@ -1350,170 +1447,12 @@ private fun PlayerScreen(
                                 super.onPageFinished(view, url)
                                 if (!webViewActive.get()) return
                                 if (isYouTube) {
-                                    val cleanScript = """
-                                        (function() {
-                                            var selectors = [
-                                                '#player-controls',
-                                                '#player-control-overlay',
-                                                '.player-controls-content',
-                                                '.player-controls-background',
-                                                '.player-controls-background-container',
-                                                'creator-endscreen',
-                                                'expanding-endscreen-element',
-                                                'ytm-custom-control',
-                                                'ytm-watch-player-controls',
-                                                'ytm-endscreen-video-renderer',
-                                                'ytm-video-with-context-renderer',
-                                                'video-cover',
-                                                'cued-overlay',
-                                                '.ytmCuedOverlayPlayButton',
-                                                '.ytmWatchPlayerControlsBackgroundActionItems',
-                                                '.ytmExpandingEndscreenElementScrim',
-                                                '.ytmExpandingEndscreenElementOverlay',
-                                                '.ytFullscreenVideoRecommendationsRecommendation',
-                                                '#bottom-sheet-wrapper',
-                                                '.ytp-chrome-top',
-                                                '.ytp-chrome-top-buttons',
-                                                '.ytp-chrome-bottom',
-                                                '.ytp-watermark',
-                                                '.ytp-watermark-small',
-                                                '.ytp-muted-autoplay-watermark',
-                                                'a.ytp-watermark',
-                                                '.ytp-pause-overlay',
-                                                '.ytp-pause-overlay-backdrop',
-                                                '.ytp-pause-overlay-container',
-                                                '.ytp-expand-pause-overlay',
-                                                '.ytp-scroll-min',
-                                                '.ytp-endscreen-content',
-                                                '.ytp-ce-element',
-                                                '.ytp-ce-covering-overlay',
-                                                '.ytp-ce-element-show',
-                                                '.ytp-ce-video',
-                                                '.ytp-ce-channel',
-                                                '.ytp-gradient-top',
-                                                '.ytp-gradient-bottom',
-                                                '.ytp-show-cards-title',
-                                                '.ytp-cards-teaser',
-                                                '.ytp-cards-button',
-                                                '.ytp-title',
-                                                '.ytp-title-link',
-                                                '.ytp-title-text',
-                                                '.ytp-title-channel',
-                                                '.ytp-title-channel-logo',
-                                                '.ytp-title-channel-name',
-                                                '.ytp-shorts-title-channel',
-                                                '.ytp-shorts-title-channel-logo',
-                                                '.ytp-cued-thumbnail-overlay',
-                                                '.ytp-cued-thumbnail-overlay-image',
-                                                '.ytp-large-play-button',
-                                                '.html5-endscreen',
-                                                '.autonav-endscreen',
-                                                '.ytp-more-videos-view',
-                                                '.ytp-more-videos-view-container',
-                                                '.ytp-watch-again-on-youtube-endscreen-more-videos-container',
-                                                '.ytp-watch-on-youtube-button',
-                                                '.ytp-youtube-button',
-                                                '.ytp-contextmenu',
-                                                '.ytp-popup',
-                                                '.ytp-bezel',
-                                                '.ytp-spinner',
-                                                'a[href*="youtube.com"]',
-                                                'a[href*="youtu.be"]'
-                                            ];
-
-                                            function injectCss() {
-                                                try {
-                                                    var s = document.getElementById('madar-clean-style');
-                                                    if (!s) {
-                                                        s = document.createElement('style');
-                                                        s.id = 'madar-clean-style';
-                                                        s.type = 'text/css';
-                                                        var target = document.head || document.documentElement;
-                                                        if (target) target.appendChild(s);
-                                                    }
-                                                    if (s && s.parentNode) {
-                                                        s.parentNode.appendChild(s);
-                                                    }
-                                                    var selList = selectors.join(', ');
-                                                    var css = selList + ' { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; width: 0 !important; height: 0 !important; max-width: 0 !important; max-height: 0 !important; position: absolute !important; left: -9999px !important; top: -9999px !important; z-index: -9999 !important; } ' +
-                                                              'html body #player-controls, html body #player-control-overlay, html body creator-endscreen, html body expanding-endscreen-element, html body ytm-custom-control, html body ytm-watch-player-controls, html body ytm-endscreen-video-renderer, html body ytm-video-with-context-renderer, html body .ytFullscreenVideoRecommendationsRecommendation, html body #bottom-sheet-wrapper, html body video-cover, html body cued-overlay, html body .player-controls-content, html body .player-controls-background, html body div.html5-video-player .ytp-chrome-top, html body div.html5-video-player .ytp-chrome-bottom, html body div.html5-video-player .ytp-watermark, html body div.html5-video-player a.ytp-watermark, html body div.html5-video-player .ytp-pause-overlay, html body div.html5-video-player .ytp-title, html body div.html5-video-player .ytp-title-channel, html body div.html5-video-player a[href*="youtube.com"] { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; width: 0 !important; height: 0 !important; position: absolute !important; left: -9999px !important; top: -9999px !important; z-index: -9999 !important; } ' +
-                                                              'html, body, #player, #movie_player, .html5-video-player { margin: 0 !important; padding: 0 !important; background: #000000 !important; overflow: hidden !important; width: 100% !important; height: 100% !important; } ' +
-                                                              '.html5-video-container { width: 100% !important; height: 100% !important; display: flex !important; align-items: center !important; justify-content: center !important; background: #000000 !important; } ' +
-                                                              'video.video-stream.html5-main-video { width: 100% !important; height: 100% !important; max-width: 100% !important; max-height: 100% !important; object-fit: contain !important; top: 0 !important; left: 0 !important; }';
-                                                    if (s.textContent !== css) {
-                                                        s.textContent = css;
-                                                    }
-                                                } catch(e) {}
-                                            }
-
-                                            function removeJunk() {
-                                                try {
-                                                    var junk = document.querySelectorAll('#player-controls, #player-control-overlay, .player-controls-content, .player-controls-background, creator-endscreen, expanding-endscreen-element, ytm-custom-control, ytm-watch-player-controls, ytm-endscreen-video-renderer, ytm-video-with-context-renderer, video-cover, cued-overlay, .ytFullscreenVideoRecommendationsRecommendation, #bottom-sheet-wrapper, .ytp-chrome-top, .ytp-chrome-bottom, .ytp-watermark, .ytp-pause-overlay, .ytp-pause-overlay-container, .ytp-gradient-top, .ytp-gradient-bottom');
-                                                    for (var i = 0; i < junk.length; i++) {
-                                                        var el = junk[i];
-                                                        if (el && el.parentNode && el.tagName !== 'VIDEO') {
-                                                            el.style.setProperty('display', 'none', 'important');
-                                                            el.style.setProperty('visibility', 'hidden', 'important');
-                                                            el.style.setProperty('opacity', '0', 'important');
-                                                            el.style.setProperty('pointer-events', 'none', 'important');
-                                                            el.parentNode.removeChild(el);
-                                                        }
-                                                    }
-                                                } catch(e) {}
-                                            }
-
-                                            window.__madar_clean = function() {
-                                                injectCss();
-                                                removeJunk();
-                                            };
-
-                                            injectCss();
-                                            removeJunk();
-
-                                            function attachVideo() {
-                                                var v = document.querySelector('video');
-                                                if (!v) { setTimeout(attachVideo, 250); return; }
-                                                if (v.__madar_attached) return;
-                                                v.__madar_attached = true;
-
-                                                var notify = function() {
-                                                    if (window.MadarBridge) {
-                                                        window.MadarBridge.onTimeUpdate(v.currentTime || 0, v.duration || 0);
-                                                    }
-                                                    removeJunk();
-                                                };
-                                                v.addEventListener('timeupdate', notify);
-                                                v.addEventListener('durationchange', notify);
-                                                v.addEventListener('play', function() {
-                                                    if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
-                                                    removeJunk();
-                                                });
-                                                v.addEventListener('playing', function() {
-                                                    if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
-                                                    removeJunk();
-                                                });
-                                                v.addEventListener('pause', function() {
-                                                    if (window.MadarBridge) window.MadarBridge.onStateChange('paused');
-                                                    removeJunk();
-                                                });
-                                                v.addEventListener('waiting', function() {
-                                                    if (window.MadarBridge) window.MadarBridge.onStateChange('buffering');
-                                                    removeJunk();
-                                                });
-                                                v.addEventListener('ended', function() {
-                                                    if (window.MadarBridge) window.MadarBridge.onStateChange('ended');
-                                                    removeJunk();
-                                                });
-
-                                                notify();
-                                                if (v.paused) {
-                                                    try { v.play(); } catch(e) {}
-                                                }
-                                            }
-                                            attachVideo();
-                                        })();
-                                    """.trimIndent()
-                                    view?.evaluateJavascript(cleanScript, null)
+                                    if (useWatchPage) {
+                                        view?.evaluateJavascript(cleanCinemaJs, null)
+                                        pageProbeHandler.postDelayed({ view?.evaluateJavascript(cleanCinemaJs, null) }, 300L)
+                                        pageProbeHandler.postDelayed({ view?.evaluateJavascript(cleanCinemaJs, null) }, 800L)
+                                        pageProbeHandler.postDelayed({ view?.evaluateJavascript(cleanCinemaJs, null) }, 1800L)
+                                    }
                                     return
                                 }
                                 val pageView = view ?: return
@@ -1602,32 +1541,69 @@ private fun PlayerScreen(
                         if (isYouTube) {
                             val ytId = extractYouTubeId(effectiveStreamUrl)
                             if (ytId.isNotBlank()) {
-                                // YouTube requires an HTTP Referer in Android WebViews.
-                                // Loading the embed as a nested iframe can lose the app
-                                // identity and produces player error 153. The package ID
-                                // is the stable app identity registered with Android.
-                                val youtubeUrl = Uri.Builder()
-                                    .scheme("https")
-                                    .authority("www.youtube.com")
-                                    .appendPath("embed")
-                                    .appendPath(ytId)
-                                    .appendQueryParameter("autoplay", "1")
-                                    .appendQueryParameter("controls", "0")
-                                    .appendQueryParameter("rel", "0")
-                                    .appendQueryParameter("modestbranding", "1")
-                                    .appendQueryParameter("iv_load_policy", "3")
-                                    .appendQueryParameter("fs", "0")
-                                    .appendQueryParameter("disablekb", "1")
-                                    .appendQueryParameter("playsinline", "1")
-                                    .appendQueryParameter("enablejsapi", "1")
-                                    .appendQueryParameter("cc_load_policy", "0")
-                                    .appendQueryParameter("origin", YOUTUBE_EMBED_ORIGIN)
-                                    .build()
-                                    .toString()
-                                loadUrl(
-                                    youtubeUrl,
-                                    mapOf("Referer" to "$YOUTUBE_EMBED_ORIGIN/"),
-                                )
+                                if (useWatchPage) {
+                                    loadUrl("https://m.youtube.com/watch?v=$ytId")
+                                } else {
+                                    val html = """
+                                        <!DOCTYPE html>
+                                        <html>
+                                        <head>
+                                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                                        <meta name="referrer" content="strict-origin-when-cross-origin">
+                                        <style>
+                                          * { margin:0; padding:0; box-sizing:border-box; background:#000; }
+                                          html, body { width:100%; height:100%; overflow:hidden; background:#000; }
+                                          #player { position:absolute; top:0; left:0; width:100%; height:100%; border:none; }
+                                        </style>
+                                        </head>
+                                        <body>
+                                        <iframe id="player"
+                                          src="https://www.youtube.com/embed/$ytId?autoplay=1&playsinline=1&controls=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&enablejsapi=1&origin=https://www.youtube.com"
+                                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                          referrerpolicy="strict-origin-when-cross-origin"
+                                          allowfullscreen>
+                                        </iframe>
+                                        <script>
+                                          var tag = document.createElement('script');
+                                          tag.src = "https://www.youtube.com/iframe_api";
+                                          var firstScriptTag = document.getElementsByTagName('script')[0];
+                                          firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+                                          var player;
+                                          function onYouTubeIframeAPIReady() {
+                                            player = new YT.Player('player', {
+                                              events: {
+                                                'onReady': function(e) {
+                                                  try { e.target.playVideo(); } catch(x) {}
+                                                },
+                                                'onStateChange': function(e) {
+                                                  if (window.MadarBridge) {
+                                                    if (e.data === 1) window.MadarBridge.onStateChange('playing');
+                                                    else if (e.data === 2) window.MadarBridge.onStateChange('paused');
+                                                    else if (e.data === 3) window.MadarBridge.onStateChange('buffering');
+                                                    else if (e.data === 0) window.MadarBridge.onStateChange('ended');
+                                                  }
+                                                },
+                                                'onError': function(e) {
+                                                  if (window.MadarBridge) window.MadarBridge.onPlayerError(e.data);
+                                                }
+                                              }
+                                            });
+                                          }
+
+                                          setInterval(function() {
+                                            if (player && typeof player.getCurrentTime === 'function') {
+                                              var cur = player.getCurrentTime() || 0;
+                                              var dur = player.getDuration() || 0;
+                                              if (window.MadarBridge) window.MadarBridge.onTimeUpdate(cur, dur);
+                                            }
+                                          }, 400);
+                                        </script>
+                                        </body>
+                                        </html>
+                                    """.trimIndent()
+                                    loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
+                                }
                             } else {
                                 playbackError = "رابط فيديو YouTube غير صالح."
                                 isBuffering = false
@@ -1742,48 +1718,7 @@ private fun PlayerScreen(
             }
         }
 
-        // ── YouTube Copyright / Embed Restriction Banner ───────────────────
-        if (isYouTube && showYouTubeFallbackPrompt && !ytIsPlaying) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(horizontal = 24.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xF0181A20))
-                    .border(1.dp, Color(0xFF580F8B), RoundedCornerShape(20.dp))
-                    .padding(20.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text("⚠️ حقوق البث الرسمية لـ beIN SPORTS", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Text("بعض الملخصات تمنع تشغيلها كفيديو مدمج داخل التطبيقات وتتطلب المشاهدة الرسمية", color = Color(0xFFB0B3C1), fontSize = 12.sp, textAlign = TextAlign.Center)
-                    Button(
-                        onClick = {
-                            val ytId = extractYouTubeId(effectiveStreamUrl)
-                            val watchUrl = "https://www.youtube.com/watch?v=$ytId"
-                            try {
-                                val ytIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$ytId")).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(ytIntent)
-                            } catch (_: Exception) {
-                                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(watchUrl)).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(browserIntent)
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFCC0000)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("▶ فتح فوراً في YouTube بجودة فائقة (1080p)", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
+
 
         // ── Black Screen Recovery Dialog ────────────────────────────────────
         playbackError?.let { errorCode ->
@@ -2007,6 +1942,7 @@ private fun PlayerScreen(
                 currentBitrateKbps = currentBitrateKbps,
                 currentTrackInfo = currentTrackInfo,
                 onSelect = { quality ->
+                    bufferingSinceMs = 0L
                     applyQuality(trackSelector, quality, availableVideoTracks, qualityLabels)
                     selectedQuality = quality
                     preferences.edit().putString("quality", quality).apply()
@@ -2070,12 +2006,12 @@ private fun PlayerScreen(
                             .border(1.5.dp, Color(0xFFD4AF37), CircleShape)
                             .clickable {
                                 if (ytIsPlaying) {
-                                    webViewRef?.evaluateJavascript("var v=document.querySelector('video'); if(v) v.pause();", null)
+                                    webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.pauseVideo){player.pauseVideo();}else{var v=document.querySelector('video');if(v)v.pause();}", null)
                                 } else {
                                     if (ytDurationSec > 0f && ytCurrentSec >= ytDurationSec - 1f) {
-                                        webViewRef?.evaluateJavascript("var v=document.querySelector('video'); if(v) { v.currentTime=0; v.play(); }", null)
+                                        webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.seekTo){player.seekTo(0,true);player.playVideo();}else{var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}}", null)
                                     } else {
-                                        webViewRef?.evaluateJavascript("var v=document.querySelector('video'); if(v) v.play();", null)
+                                        webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.playVideo){player.playVideo();}else{var v=document.querySelector('video');if(v)v.play();}", null)
                                     }
                                 }
                                 lastInteractionTime = System.currentTimeMillis()
@@ -2151,7 +2087,7 @@ private fun PlayerScreen(
                                 },
                                 onValueChangeFinished = {
                                     ytSliderValue?.let { target ->
-                                        webViewRef?.evaluateJavascript("var v=document.querySelector('video'); if(v) v.currentTime = $target;", null)
+                                webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.seekTo){player.seekTo($target,true);}else{var v=document.querySelector('video');if(v)v.currentTime=$target;}", null)
                                         ytCurrentSec = target
                                     }
                                     ytSliderValue = null
@@ -2212,7 +2148,7 @@ private fun PlayerScreen(
                                         else -> 1.0f
                                     }
                                     ytSpeed = nextSpeed
-                                    webViewRef?.evaluateJavascript("var v=document.querySelector('video'); if(v) v.playbackRate = $nextSpeed;", null)
+                                    webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.setPlaybackRate){player.setPlaybackRate($nextSpeed);}else{var v=document.querySelector('video');if(v)v.playbackRate=$nextSpeed;}", null)
                                     lastInteractionTime = System.currentTimeMillis()
                                 },
                                 color = Color(0xCC1E1420),
@@ -3329,10 +3265,10 @@ private fun applyQuality(
         // ── 1. Smart selection: choose an efficient HD source rendition. ──
         choice == "ضغط ذكي (HD موفّر)" || choice == "ضغط ذكي" -> {
             params.setMaxVideoSize(1280, 720)
-            params.setMaxVideoBitrate(2_000_000)
+            params.setMaxVideoBitrate(2_500_000)
             val hdTracks = tracks.filter { it.height in 480..720 }
             val selected = if (hdTracks.isNotEmpty()) {
-                hdTracks.minByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE }
+                hdTracks.maxByOrNull { it.bitrate.takeIf { rate -> rate > 0 } ?: 0 }
             } else {
                 tracks.filter { it.height <= 720 }.maxWithOrNull(
                     compareBy<VideoQualityTrack> { it.height }
@@ -3361,11 +3297,11 @@ private fun applyQuality(
         // ── 3. جودة متوازنة (Medium Saver): توازن بين الوضوح وسرعة البث ──
         choice == "جودة متوازنة" || choice == "متوسط" -> {
             params.setMaxVideoSize(1280, 720)
-            params.setMaxVideoBitrate(1_500_000)
+            params.setMaxVideoBitrate(2_000_000)
             val midTracks = tracks.filter { it.height in 480..720 }
-            val selected = midTracks.minByOrNull {
-                it.bitrate.takeIf { rate -> rate > 0 } ?: Int.MAX_VALUE
-            } ?: tracks.minByOrNull { it.height }
+            val selected = midTracks.maxByOrNull {
+                it.bitrate.takeIf { rate -> rate > 0 } ?: 0
+            } ?: tracks.filter { it.height <= 720 }.maxByOrNull { it.height }
             if (selected != null) {
                 params.addOverride(TrackSelectionOverride(selected.group, selected.index))
             }
@@ -3400,12 +3336,15 @@ private fun applyQuality(
             val wantedHeight = Regex("(\\d{3,4})p").find(choice)?.groupValues?.getOrNull(1)?.toIntOrNull()
             if (wantedHeight != null) {
                 params.setMaxVideoSize((wantedHeight * 16) / 9, wantedHeight)
+                params.setMaxVideoBitrate(Int.MAX_VALUE)
             } else {
                 params.setMaxVideoBitrate(Int.MAX_VALUE)
             }
-            val selected = tracks.firstOrNull { qualityLabels.getOrNull(tracks.indexOf(it)) == choice }
+            // Match by label index first (most precise), then by height
+            val selected = tracks.indices.firstOrNull { i -> qualityLabels.getOrNull(i) == choice }
+                ?.let { tracks[it] }
                 ?: wantedHeight?.let { wanted ->
-                    tracks.filter { it.height == wanted }.minByOrNull { it.bitrate }
+                    tracks.filter { it.height == wanted }.maxByOrNull { it.bitrate }
                         ?: tracks.filter { it.height <= wanted }.maxWithOrNull(compareBy<VideoQualityTrack> { it.height }.thenBy { it.bitrate })
                         ?: tracks.minByOrNull { it.height }
                 }
@@ -3415,7 +3354,7 @@ private fun applyQuality(
         }
     }
 
-    trackSelector.setParameters(params)
+    trackSelector.setParameters(params.build())
 }
 
 data class SavedStreamItem(
