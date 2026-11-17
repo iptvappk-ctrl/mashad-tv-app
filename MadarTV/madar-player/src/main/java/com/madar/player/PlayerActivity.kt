@@ -699,6 +699,10 @@ private fun PlayerScreen(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
+    val preferences = remember(context) { context.getSharedPreferences("madar_player", 0) }
+    var subtitlesEnabled by remember {
+        mutableStateOf(preferences.getBoolean("subtitles_enabled", true))
+    }
     val diagnosticScope = rememberCoroutineScope()
     val effectiveStreamUrl = remember(streamUrl) { toCleanEmbedUrl(streamUrl) }
     val isYouTube = remember(effectiveStreamUrl) { isYouTubeStream(effectiveStreamUrl) }
@@ -731,17 +735,20 @@ private fun PlayerScreen(
     var ytDoubleTapKey by remember { mutableIntStateOf(0) }
     var showDoubleTapIndicator by remember { mutableStateOf(false) }
 
-    val cleanCinemaJs = remember {
+    val cleanCinemaJs = remember(subtitlesEnabled) {
+        val hideSubsCss = if (!subtitlesEnabled) {
+            " .ytp-caption-window-container, .caption-window, ytm-caption-window-renderer, .ytp-caption-segment, .caption-visual-line, div[class*=\"caption-window\"], div[class*=\"ytp-caption\"], .player-subtitles-content { display: none !important; visibility: hidden !important; opacity: 0 !important; }"
+        } else ""
         """
             (function() {
-                var css = 'html, body { overflow: hidden !important; background: #000 !important; margin: 0 !important; padding: 0 !important; width: 100vw !important; height: 100vh !important; } ytm-mobile-topbar-renderer, ytm-pivot-bar-renderer, ytm-item-section-renderer, ytm-comment-section-renderer, .watch-below-the-player, ytm-reel-shelf-renderer, #related, #comments, .ytm-cinema, ytm-engagement-panel-section-list-renderer, ytm-single-column-watch-next-results-renderer, .fullscreen-icon, .player-controls-bottom { display: none !important; } .player-container, #player-container-id, .html5-video-player, #player { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 999999 !important; background: #000 !important; } video { width: 100vw !important; height: 100vh !important; object-fit: contain !important; }';
+                var css = 'html, body { overflow: hidden !important; background: #000 !important; margin: 0 !important; padding: 0 !important; width: 100vw !important; height: 100vh !important; } ytm-mobile-topbar-renderer, ytm-pivot-bar-renderer, ytm-item-section-renderer, ytm-comment-section-renderer, .watch-below-the-player, ytm-reel-shelf-renderer, #related, #comments, .ytm-cinema, ytm-engagement-panel-section-list-renderer, ytm-single-column-watch-next-results-renderer, .fullscreen-icon, .player-controls-bottom { display: none !important; } .player-container, #player-container-id, .html5-video-player, #player { position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 999999 !important; background: #000 !important; } video { width: 100vw !important; height: 100vh !important; object-fit: contain !important; }$hideSubsCss';
                 var style = document.getElementById('zag-yt-cinema-css');
                 if (!style) {
                     style = document.createElement('style');
                     style.id = 'zag-yt-cinema-css';
-                    style.textContent = css;
                     (document.head || document.documentElement).appendChild(style);
                 }
+                style.textContent = css;
                 var v = document.querySelector('video');
                 if (v) {
                     if (v.paused) {
@@ -754,6 +761,13 @@ private fun PlayerScreen(
                                 });
                             }
                         } catch(e) {}
+                    }
+                    if (v.textTracks) {
+                        for (var i = 0; i < v.textTracks.length; i++) {
+                            try {
+                                v.textTracks[i].mode = $subtitlesEnabled ? 'showing' : 'disabled';
+                            } catch(e) {}
+                        }
                     }
                     if (!v.__madar_hooked) {
                         v.__madar_hooked = true;
@@ -804,6 +818,54 @@ private fun PlayerScreen(
             kotlinx.coroutines.delay(350)
             webViewRef?.evaluateJavascript(cleanCinemaJs, null)
         }
+    }
+
+    LaunchedEffect(subtitlesEnabled, webViewRef) {
+        val js = """
+            (function(enable) {
+                var existingStyle = document.getElementById('zag-hide-subtitles-css');
+                if (!enable) {
+                    if (!existingStyle) {
+                        var s = document.createElement('style');
+                        s.id = 'zag-hide-subtitles-css';
+                        s.textContent = '.ytp-caption-window-container, .caption-window, ytm-caption-window-renderer, .ytp-caption-segment, .caption-visual-line, div[class*="caption-window"], div[class*="ytp-caption"], .player-subtitles-content { display: none !important; visibility: hidden !important; opacity: 0 !important; }';
+                        (document.head || document.documentElement).appendChild(s);
+                    }
+                } else {
+                    if (existingStyle && existingStyle.parentNode) {
+                        existingStyle.parentNode.removeChild(existingStyle);
+                    }
+                }
+                var v = document.querySelector('video');
+                if (v && v.textTracks) {
+                    for (var i = 0; i < v.textTracks.length; i++) {
+                        try {
+                            v.textTracks[i].mode = enable ? 'showing' : 'disabled';
+                        } catch(e) {}
+                    }
+                }
+                var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+                if (p) {
+                    try {
+                        if (!enable) {
+                            if (typeof p.unloadModule === 'function') p.unloadModule('captions');
+                            if (typeof p.setOption === 'function') p.setOption('captions', 'track', {});
+                        } else {
+                            if (typeof p.loadModule === 'function') p.loadModule('captions');
+                            if (typeof p.toggleSubtitlesOn === 'function') p.toggleSubtitlesOn();
+                        }
+                    } catch(e) {}
+                }
+                var ccBtn = document.querySelector('button[aria-label*="subtitles" i], button[aria-label*="captions" i], .ytp-subtitles-button');
+                if (ccBtn) {
+                    var isPressed = ccBtn.getAttribute('aria-pressed') === 'true';
+                    if (enable !== isPressed) {
+                        ccBtn.click();
+                    }
+                }
+            })($subtitlesEnabled);
+        """.trimIndent()
+        webViewRef?.evaluateJavascript(js, null)
     }
 
     val ytSeekBy: (Float) -> Unit = remember(webViewRef) {
@@ -862,7 +924,6 @@ private fun PlayerScreen(
     val trackSelector = remember(effectiveStreamUrl, streamHeaders, useWebViewFallback, exoRetryKey) {
         DefaultTrackSelector(context)
     }
-    val preferences = remember(context) { context.getSharedPreferences("madar_player", 0) }
     var selectedQuality by remember {
         mutableStateOf(preferences.getString("quality", "أعلى جودة") ?: "أعلى جودة")
     }
@@ -902,6 +963,12 @@ private fun PlayerScreen(
     LaunchedEffect(trackSelector, selectedQuality, availableVideoTracks, qualityLabels) {
         val effectiveQuality = selectedQuality
         applyQuality(trackSelector, effectiveQuality, availableVideoTracks, qualityLabels)
+    }
+
+    LaunchedEffect(subtitlesEnabled, trackSelector) {
+        val params = trackSelector.buildUponParameters()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subtitlesEnabled)
+        trackSelector.setParameters(params.build())
     }
 
     val player = remember(effectiveStreamUrl, streamHeaders, useWebViewFallback, exoRetryKey) {
@@ -1650,9 +1717,13 @@ private fun PlayerScreen(
                             },
                         )
                         this.player = player
+                        subtitleView?.visibility = if (subtitlesEnabled) View.VISIBLE else View.GONE
                     }
                 },
-                update = { it.player = player },
+                update = {
+                    it.player = player
+                    it.subtitleView?.visibility = if (subtitlesEnabled) View.VISIBLE else View.GONE
+                },
             )
         }
 
@@ -1868,6 +1939,29 @@ private fun PlayerScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+                }
+
+                // ── Subtitles / CC Toggle button (زر الترجمة والكلام المكتوب) ──
+                Surface(
+                    onClick = {
+                        subtitlesEnabled = !subtitlesEnabled
+                        preferences.edit().putBoolean("subtitles_enabled", subtitlesEnabled).apply()
+                        lastInteractionTime = System.currentTimeMillis()
+                    },
+                    color = if (subtitlesEnabled) Color(0xD92E7D32) else Color(0xD9272C3D),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            if (subtitlesEnabled) "💬 الترجمة: مفعّلة" else "💬 الترجمة: معطّلة",
+                            color = if (subtitlesEnabled) Color.White else Color(0xFFB0B3C0),
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 

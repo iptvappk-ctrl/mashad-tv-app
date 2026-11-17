@@ -42,6 +42,8 @@ export const RECAP_CHANNELS: RecapChannel[] = [
   { name: "محترف موفيز", channelId: "UCsqradczzQY7fTKpDCVP9QA", emoji: "🎯" },
   { name: "إكسلانس أفلام", channelId: "UCGV-VN8Ui_NAJrcZcs-SSRg", emoji: "💎" },
   { name: "فيلم في الخلاصة", channelId: "UChO6HRowsTQHmELCeGy4G_Q", emoji: "💡" },
+  { name: "فيلم في الخمسينة", channelId: "UCqQkYvn14_QAjheEhCD5cnA", emoji: "⏱️" },
+  { name: "فيلمتشو", channelId: "UC26gMQ-F5XJ0COgPnQfL1uQ", emoji: "🍿" },
 ];
 
 // In-memory cache for ultra-fast response
