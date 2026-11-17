@@ -88,18 +88,25 @@ $playerApk = "C:\Users\hassa\Desktop\zag-player-latest.apk"
 $hasPlayer = Test-Path -LiteralPath $playerApk
 $playerObj = $null
 if ($hasPlayer) {
+    $playerBadging = (& $aapt dump badging $playerApk)[0]
+    $playerVersionCode = 27
+    $playerVersionName = "1.1.27"
+    if ($playerBadging -match "package: name='(?<package>[^']+)' versionCode='(?<code>[^']+)' versionName='(?<version>[^']+)'") {
+        $playerVersionCode = [long]$Matches.code
+        $playerVersionName = $Matches.version
+    }
     $playerSha = (Get-FileHash -LiteralPath $playerApk -Algorithm SHA256).Hash.ToLowerInvariant()
-    $playerAssetName = "zag-player-1.1.20.apk"
+    $playerAssetName = "zag-player-$playerVersionName.apk"
     $playerTempPath = Join-Path ([IO.Path]::GetTempPath()) $playerAssetName
     Copy-Item -LiteralPath $playerApk -Destination $playerTempPath -Force
     gh release upload $tag $playerTempPath --repo $Repository --clobber
     $playerObj = [ordered]@{
         packageName = "com.madar.player"
-        versionCode = 20
-        versionName = "1.1.20"
+        versionCode = $playerVersionCode
+        versionName = $playerVersionName
         apkUrl = "https://github.com/$Repository/releases/download/$tag/$playerAssetName"
         sha256 = $playerSha
-        releaseNotes = "مشغل ZAG Player 1.1.20: هوية بصرية جديدة، ويف بار تفاعلي، دعم كامل ومستقل."
+        releaseNotes = "مشغل ZAG Player ${playerVersionName}: زر تشغيل وإخفاء الترجمة والنصوص التوضيحية CC، تشغيل تلقائي بأعلى جودة، ودعم كامل لمشاهدة ملخصات beIN Sports."
     }
 }
 
