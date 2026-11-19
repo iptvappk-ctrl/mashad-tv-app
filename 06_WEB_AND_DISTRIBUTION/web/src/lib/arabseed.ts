@@ -257,7 +257,10 @@ export async function searchArabseed(query: string): Promise<ArabseedItem[]> {
 export async function getArabseedDetail(pageUrl: string, force = false): Promise<ArabseedDetail | null> {
   const now = Date.now();
   const cached = detailCache.get(pageUrl);
-  if (!force && cached && now - cached.time < DETAIL_TTL) {
+  const cacheTtl = cached?.data?.servers?.some((s) => s.embedUrl.includes("vids.php") || s.embedUrl.includes("myseed"))
+    ? 50 * 1000
+    : DETAIL_TTL;
+  if (!force && cached && now - cached.time < cacheTtl) {
     return cached.data;
   }
 
@@ -432,9 +435,12 @@ function isEpisodeUrlOrTitle(title: string, url: string): boolean {
       return numA - numB;
     });
 
-    // Background pre-resolve 1st server
+    // Pre-resolve 1st server live
+    let directStream: string | undefined;
     if (servers.length > 0) {
-      resolveDirectStream(servers[0].embedUrl).catch(() => {});
+      try {
+        directStream = await resolveDirectStream(servers[0].embedUrl, pageUrl);
+      } catch {}
     }
 
     const isSeries =
@@ -458,6 +464,7 @@ function isEpisodeUrlOrTitle(title: string, url: string): boolean {
       servers,
       seasons,
       episodes,
+      directStream,
     };
 
     if (servers.length > 0 || episodes.length > 0) {

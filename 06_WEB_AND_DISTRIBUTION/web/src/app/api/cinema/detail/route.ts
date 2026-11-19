@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     let proxiedStream = detail.directStream;
     if (!proxiedStream && cleanedServers.length > 0) {
       try {
-        const resolved = await resolveDirectStream(cleanedServers[0].embedUrl);
+        const resolved = await resolveDirectStream(cleanedServers[0].embedUrl, pageUrl);
         if (resolved) proxiedStream = resolved;
       } catch {}
     }

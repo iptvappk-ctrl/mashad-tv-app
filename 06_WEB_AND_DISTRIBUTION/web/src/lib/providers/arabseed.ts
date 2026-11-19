@@ -64,7 +64,8 @@ export class ArabseedProvider implements BaseProvider {
         servers,
         seasons: detail.seasons,
         episodes: detail.episodes,
-        proxiedStream: detail.proxiedStream,
+        directStream: detail.directStream,
+        proxiedStream: detail.directStream || detail.proxiedStream,
       };
     } catch (err) {
       console.error("[ArabseedProvider] getDetail error:", err);
