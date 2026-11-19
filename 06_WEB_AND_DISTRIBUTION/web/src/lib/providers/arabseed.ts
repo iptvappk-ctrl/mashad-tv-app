@@ -47,7 +47,7 @@ export class ArabseedProvider implements BaseProvider {
       if (!detail) return null;
 
       const servers: UnifiedServer[] = detail.servers.map((s) => ({
-        name: `[عرب سيد] ${s.name}`,
+        name: s.name.replace(/^\[.*?\]\s*/, ""),
         embedUrl: s.embedUrl,
         providerId: this.id,
         isHls: true,

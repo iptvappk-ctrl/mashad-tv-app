@@ -2,7 +2,7 @@ import * as cheerio from "cheerio";
 import { BaseProvider, UnifiedMediaDetail, UnifiedMediaItem, UnifiedServer } from "./types";
 import { extractMediaMetadata } from "./metadata";
 
-const BASE_URL = "https://wb49584.fasel4k.site";
+const BASE_URL = "https://www.faselhd.club";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 

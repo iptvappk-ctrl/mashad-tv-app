@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aggregator } from "@/lib/providers/aggregator";
+import { resolveDirectStream } from "@/lib/arabseed";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,22 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Not found" }, { status: 404 });
     }
 
-    // Format directStream with proxy if present
+    // Clean server names: strip [عرب سيد] and other provider tags
+    const cleanedServers = (detail.servers || []).map((s, idx) => ({
+      ...s,
+      name: s.name.replace(/^\[.*?\]\s*/, "") || `سيرفر ${idx + 1}`,
+    }));
+
+    // Pre-resolve 1st server for instant playback when user clicks "شاهد الآن"
     let proxiedStream = detail.directStream;
-    if (proxiedStream && (proxiedStream.includes(".m3u8") || proxiedStream.includes("datahowa"))) {
+    if (!proxiedStream && cleanedServers.length > 0) {
+      try {
+        const resolved = await resolveDirectStream(cleanedServers[0].embedUrl);
+        if (resolved) proxiedStream = resolved;
+      } catch {}
+    }
+
+    if (proxiedStream && !proxiedStream.startsWith("/api/proxy/stream") && (proxiedStream.includes(".m3u8") || proxiedStream.includes("datahowa"))) {
       proxiedStream = `/api/proxy/stream?url=${encodeURIComponent(proxiedStream)}&ref=${encodeURIComponent("https://govid.live/")}`;
     }
 
@@ -27,6 +41,7 @@ export async function GET(req: NextRequest) {
       success: true,
       data: {
         ...detail,
+        servers: cleanedServers,
         proxiedStream,
       },
     });

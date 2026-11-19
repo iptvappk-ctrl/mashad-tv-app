@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     const finalUrl = direct || serverUrl;
 
     let playUrl = finalUrl;
-    if (finalUrl.includes(".m3u8") || finalUrl.includes("datahowa")) {
+    if (!playUrl.startsWith("/api/proxy/stream") && (finalUrl.includes(".m3u8") || finalUrl.includes("datahowa"))) {
       playUrl = `/api/proxy/stream?url=${encodeURIComponent(finalUrl)}&ref=${encodeURIComponent("https://govid.live/")}`;
     }
 

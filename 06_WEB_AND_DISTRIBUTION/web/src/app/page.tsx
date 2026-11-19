@@ -240,9 +240,15 @@ export default function HomePage() {
     const poster = selectedDetailItem?.poster;
 
     const rawStreams: StreamSource[] = servers.map((s, i) => ({
-      name: s.name || `سيرفر ${i + 1}`,
+      name: s.name.replace(/^\[.*?\]\s*/, "") || `سيرفر ${i + 1}`,
       url: s.embedUrl,
     }));
+
+    if (selectedDetailData?.proxiedStream) {
+      rawStreams[0] = { name: rawStreams[0].name, url: selectedDetailData.proxiedStream };
+      handlePlayStream({ title, poster, streams: rawStreams });
+      return;
+    }
 
     setResolvingServer(servers[0].embedUrl);
     try {

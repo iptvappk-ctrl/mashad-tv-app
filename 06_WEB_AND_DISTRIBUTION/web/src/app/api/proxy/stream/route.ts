@@ -40,6 +40,8 @@ export async function GET(req: NextRequest) {
       upstreamHeaders["Referer"] = referer;
     } else if (targetUrl.includes("datahowa.asia") || targetUrl.includes("govid.live")) {
       upstreamHeaders["Referer"] = "https://govid.live/";
+    } else if (targetUrl.includes("cdn.makeup") || targetUrl.includes("myseed") || targetUrl.includes("player-gateway")) {
+      upstreamHeaders["Referer"] = "https://d.myseed.tv/";
     }
 
     // Forward range header if browser requests partial video bytes

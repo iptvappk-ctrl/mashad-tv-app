@@ -412,6 +412,16 @@ export default function PlayerModal({
     };
   }, [isYouTube]);
 
+  // Guarantee buffering spinner dismisses for Embed / Iframe players
+  useEffect(() => {
+    if (isEmbed || useIframeFallback) {
+      const timer = setTimeout(() => {
+        setIsBuffering(false);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [isEmbed, useIframeFallback, currentIndex]);
+
   // HLS / Direct Video stream attachment (When NOT YouTube or Iframe Embed)
   useEffect(() => {
     if (isYouTube || isEmbed || useIframeFallback) return;
@@ -1002,6 +1012,7 @@ export default function PlayerModal({
             className="w-full h-full border-0 sm:rounded-3xl"
             allowFullScreen
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            onLoad={() => setIsBuffering(false)}
           />
         ) : (
           /* Native HTML5 / HLS Video */
@@ -1197,7 +1208,11 @@ export default function PlayerModal({
                   </span>
                 )}
               </div>
-              {subtitle && <p className="text-xs text-amber-300 font-bold mt-0.5">{subtitle}</p>}
+              {(subtitle || currentStream?.name) && (
+                <p className="text-xs text-amber-300 font-bold mt-0.5">
+                  {(subtitle || currentStream?.name || "").replace(/^\[.*?\]\s*/, "")}
+                </p>
+              )}
             </div>
           </div>
 
@@ -1677,7 +1692,7 @@ export default function PlayerModal({
               )}
 
               {/* Server Switcher Dropdown (Inside Player) */}
-              {streams.length > 1 && (
+              {streamList.length > 1 && (
                 <div className="relative">
                   <button
                     type="button"
@@ -1688,31 +1703,40 @@ export default function PlayerModal({
                       setShowAspectMenu(false);
                       setShowSubtitleMenu(false);
                     }}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-bold text-slate-200 border border-white/10 transition"
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition border text-xs font-bold ${
+                      showServerMenu
+                        ? "border-amber-400 bg-amber-500/20 text-amber-300"
+                        : "border-white/10 bg-black/50 hover:bg-white/10 text-slate-200"
+                    }`}
                     title="تبديل السيرفر"
                   >
                     <Server size={14} className="text-amber-400" />
-                    <span className="hidden sm:inline">سيرفر {currentIndex + 1}</span>
+                    <span className="hidden sm:inline">
+                      {(streamList[currentIndex]?.name || `سيرفر ${currentIndex + 1}`).replace(/^\[.*?\]\s*/, "")}
+                    </span>
                   </button>
 
                   {showServerMenu && (
-                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-44 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
-                      <div className="px-3 py-1.5 border-b border-white/10 text-[10px] font-black text-amber-400">
-                        السيرفرات المتاحة
+                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-60 sm:w-64 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
+                      <div className="px-3 py-1.5 border-b border-white/10 text-[10px] font-black text-amber-400 flex items-center justify-between">
+                        <span>السيرفرات المتاحة</span>
+                        <span className="text-slate-400 font-mono text-[9px]">{streamList.length} سيرفر</span>
                       </div>
-                      {streams.map((stream, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => handleSwitchServer(idx)}
-                          className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
-                            currentIndex === idx ? "text-amber-300 font-black bg-amber-500/10" : "text-slate-300"
-                          }`}
-                        >
-                          <span className="truncate">{stream.name || `سيرفر ${idx + 1}`}</span>
-                          {currentIndex === idx && <Check size={14} className="text-amber-400 shrink-0" />}
-                        </button>
-                      ))}
+                      <div className="max-h-60 overflow-y-auto">
+                        {streamList.map((stream, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => handleSwitchServer(idx)}
+                            className={`w-full px-3.5 py-2.5 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between gap-2 ${
+                              currentIndex === idx ? "text-amber-300 font-black bg-amber-500/10" : "text-slate-300"
+                            }`}
+                          >
+                            <span className="truncate">{(stream.name || `سيرفر ${idx + 1}`).replace(/^\[.*?\]\s*/, "")}</span>
+                            {currentIndex === idx && <Check size={14} className="text-amber-400 shrink-0" />}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

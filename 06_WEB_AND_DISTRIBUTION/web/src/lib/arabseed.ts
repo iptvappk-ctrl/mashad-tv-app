@@ -471,15 +471,19 @@ function isEpisodeUrlOrTitle(title: string, url: string): boolean {
 }
 
 /**
- * Resolves direct video stream link (.m3u8 or .mp4) from embed servers (Govid etc.)
+ * Resolves direct video stream link (.m3u8 or .mp4) from embed servers (MySeed, Govid, Voe, Vidsharing, etc.)
  */
 export async function resolveDirectStream(serverUrl: string): Promise<string | undefined> {
   if (!serverUrl) return undefined;
 
+  const isVids = serverUrl.includes("vids.php") || serverUrl.includes("player-gateway");
+
   const now = Date.now();
-  const cached = streamCache.get(serverUrl);
-  if (cached && now - cached.time < STREAM_TTL) {
-    return cached.url;
+  if (!isVids) {
+    const cached = streamCache.get(serverUrl);
+    if (cached && now - cached.time < STREAM_TTL) {
+      return cached.url;
+    }
   }
 
   try {
@@ -488,8 +492,41 @@ export async function resolveDirectStream(serverUrl: string): Promise<string | u
       return serverUrl;
     }
 
-    // Govid.live resolver
-    if (serverUrl.includes("govid.live")) {
+    // 1. MySeed vids.php / player-gateway resolver (Live chain, 60s tokens)
+    if (serverUrl.includes("vids.php") || serverUrl.includes("player-gateway") || serverUrl.includes("myseed")) {
+      try {
+        let vidsHtml = "";
+        let gatewayUrl = "";
+
+        if (serverUrl.includes("player-gateway")) {
+          gatewayUrl = serverUrl;
+        } else {
+          vidsHtml = await fetchHtml(serverUrl, `${BASE_URL}/`, 5000);
+          const gwMatch = vidsHtml.match(/src=["']([^"']+player-gateway[^"']+)["']/i);
+          if (gwMatch?.[1]) {
+            gatewayUrl = gwMatch[1].replace(/&amp;/g, "&");
+          }
+        }
+
+        if (gatewayUrl) {
+          const gwHtml = await fetchHtml(gatewayUrl, serverUrl, 5000);
+          const srcMatch = gwHtml.match(/<source[^>]+src=["']([^"']+\.(?:mp4|m3u8)[^"']*)["']/i);
+          const rawDirect = srcMatch?.[1] ||
+            gwHtml.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)/i)?.[1] ||
+            gwHtml.match(/["'](https?:\/\/[^"']+\.mp4[^"']*)/i)?.[1];
+
+          if (rawDirect && rawDirect.startsWith("http")) {
+            const proxied = `/api/proxy/stream?url=${encodeURIComponent(rawDirect)}&ref=${encodeURIComponent("https://d.myseed.tv/")}`;
+            return proxied;
+          }
+        }
+      } catch (e) {
+        console.warn("MySeed vids.php resolution failed:", e);
+      }
+    }
+
+    // 2. Govid.live resolver
+    if (serverUrl.includes("govid.live") || serverUrl.includes("datahowa")) {
       let embedPageUrl = serverUrl;
 
       if (serverUrl.includes("/play/")) {
@@ -506,15 +543,19 @@ export async function resolveDirectStream(serverUrl: string): Promise<string | u
       if (mohixMatch && mohixMatch[1]) {
         const direct = hexToString(mohixMatch[1]);
         if (direct && (direct.includes(".m3u8") || direct.includes(".mp4") || direct.startsWith("http"))) {
-          streamCache.set(serverUrl, { url: direct, time: now });
-          return direct;
+          const proxied = direct.includes(".m3u8") || direct.includes("datahowa")
+            ? `/api/proxy/stream?url=${encodeURIComponent(direct)}&ref=${encodeURIComponent("https://govid.live/")}`
+            : direct;
+          streamCache.set(serverUrl, { url: proxied, time: now });
+          return proxied;
         }
       }
 
       const m3u8Match = embedHtml.match(/https?:\/\/[^"']+\.m3u8[^"']*/i);
       if (m3u8Match) {
-        streamCache.set(serverUrl, { url: m3u8Match[0], time: now });
-        return m3u8Match[0];
+        const proxied = `/api/proxy/stream?url=${encodeURIComponent(m3u8Match[0])}&ref=${encodeURIComponent("https://govid.live/")}`;
+        streamCache.set(serverUrl, { url: proxied, time: now });
+        return proxied;
       }
 
       const mp4Match = embedHtml.match(/https?:\/\/[^"']+\.mp4[^"']*/i);
@@ -522,6 +563,32 @@ export async function resolveDirectStream(serverUrl: string): Promise<string | u
         streamCache.set(serverUrl, { url: mp4Match[0], time: now });
         return mp4Match[0];
       }
+    }
+
+    // 3. Vidsharing / bysezejataos resolver
+    if (serverUrl.includes("vidsharing") || serverUrl.includes("bysezejataos")) {
+      try {
+        const vsHtml = await fetchHtml(serverUrl, `${BASE_URL}/`, 4000);
+        const m = vsHtml.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)["']/i) || vsHtml.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
+        if (m?.[1] && m[1].startsWith("http")) {
+          const proxied = `/api/proxy/stream?url=${encodeURIComponent(m[1])}&ref=${encodeURIComponent(serverUrl)}`;
+          streamCache.set(serverUrl, { url: proxied, time: now });
+          return proxied;
+        }
+      } catch {}
+    }
+
+    // 4. Voe resolver
+    if (serverUrl.includes("voe.")) {
+      try {
+        const voeHtml = await fetchHtml(serverUrl, `${BASE_URL}/`, 4000);
+        const m = voeHtml.match(/['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^"']*)['"]/i);
+        if (m?.[1] && m[1].startsWith("http")) {
+          const proxied = `/api/proxy/stream?url=${encodeURIComponent(m[1])}&ref=${encodeURIComponent(serverUrl)}`;
+          streamCache.set(serverUrl, { url: proxied, time: now });
+          return proxied;
+        }
+      } catch {}
     }
   } catch (err) {
     console.error(`Failed to resolve stream for ${serverUrl}:`, err);

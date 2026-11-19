@@ -288,53 +288,7 @@ export default function DetailView({
         </div>
       </section>
 
-      {/* Streaming Servers */}
-      <section className="rounded-[26px] border border-amber-500/20 bg-[#12131D] p-5 shadow-sm sm:p-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400">المشاهدة أونلاين</p>
-            <h2 className="mt-0.5 flex items-center gap-2 text-lg font-black text-white">
-              <Radio size={18} className="text-amber-400" /> سيرفرات المشاهدة
-            </h2>
-          </div>
-          {loading && <LoaderCircle size={18} className="animate-spin text-amber-400" />}
-        </div>
 
-        {rawServers.length > 0 ? (
-          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {rawServers.map((server, index) => (
-              <button
-                key={`${server.embedUrl}-${index}`}
-                type="button"
-                disabled={resolvingServer === server.embedUrl}
-                onClick={() => onPlayServer(server.embedUrl, server.name)}
-                className="flex items-center justify-between gap-3 rounded-2xl border border-white/5 bg-[#161726] px-4 py-3.5 text-right transition hover:border-amber-400/60 hover:bg-amber-500/10 hover:shadow-[0_0_20px_rgba(212,175,55,0.15)] disabled:opacity-50 group"
-              >
-                <span className="flex items-center gap-3">
-                  <span className="grid h-10 w-10 place-items-center rounded-xl border border-amber-500/25 bg-amber-500/15 text-amber-400 shadow-sm transition group-hover:scale-105 group-hover:bg-amber-500 group-hover:text-slate-950">
-                    <Play size={15} className="fill-current" />
-                  </span>
-                  <span>
-                    <b className="block text-sm font-extrabold text-white group-hover:text-amber-300 transition">
-                      {server.name || `سيرفر ${index + 1}`}
-                    </b>
-                    <small className="text-[10px] font-semibold text-slate-400">بث فائق الجودة</small>
-                  </span>
-                </span>
-                {resolvingServer === server.embedUrl ? (
-                  <LoaderCircle size={16} className="animate-spin text-amber-400" />
-                ) : (
-                  <ArrowRight size={15} className="rotate-180 text-amber-400/60 group-hover:text-amber-400 transition" />
-                )}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-4 rounded-2xl border border-white/5 bg-[#161726] p-4 text-sm text-slate-400">
-            {loading ? "جاري تجهيز سيرفرات المشاهدة..." : "لا توجد سيرفرات مشاهدة متاحة حاليًا."}
-          </p>
-        )}
-      </section>
 
       {/* Seasons / Parts Section (Strictly filtered, no single episodes) */}
       {seasons.length > 0 && (
