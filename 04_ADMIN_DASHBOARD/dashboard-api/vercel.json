@@ -1,12 +1,21 @@
 {
   "version": 2,
   "rewrites": [
+    { "source": "/api/status",          "destination": "/api/status" },
     { "source": "/api/telemetry/(.*)", "destination": "/api/telemetry?route=$1" },
     { "source": "/api/export/(.*)",    "destination": "/api/export?route=$1" },
     { "source": "/api/admin/(.*)",     "destination": "/api/admin?route=$1" },
     { "source": "/api/(.*)",           "destination": "/api/$1" }
   ],
   "headers": [
+    {
+      "source": "/api/status",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin",  "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
+        { "key": "Cache-Control",                "value": "s-maxage=60, stale-while-revalidate=300" }
+      ]
+    },
     {
       "source": "/api/(.*)",
       "headers": [

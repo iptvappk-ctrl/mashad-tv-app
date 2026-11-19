@@ -10,7 +10,7 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -19,13 +19,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ════════════════════════════════════════
 
 class _Cfg {
-  // Vercel CDN endpoint (60-second cached, handles 1M+ users)
-  static const vercelStatusUrl =
-      'https://zaqzouka-hub.vercel.app/api/status';
+  // Vercel CDN endpoints (60-second cached, handles 1M+ users)
+  static const vercelStatusUrls = [
+    'https://zaqzouka-dashboard-api.vercel.app/api/status',
+    'https://zaqzouka-hub.vercel.app/api/status',
+    'https://zaqzouka-updates.vercel.app/api/status',
+  ];
 
   // Static fallback JSON on Vercel CDN edge (ultimate fallback)
-  static const staticFallbackUrl =
-      'https://zaqzouka-hub.vercel.app/status/system.json';
+  static const staticFallbackUrls = [
+    'https://zaqzouka-hub.vercel.app/status/system.json',
+    'https://zaqzouka-updates.vercel.app/status/system.json',
+  ];
 
   // Firebase RTDB direct (last resort only)
   static const firebaseUrl =
@@ -178,31 +183,35 @@ class ZaqzoukaQuotaGuard {
   // ─────────────────────────────────────
 
   Future<SystemStatus?> _fetchVercel() async {
-    try {
-      final response = await http
-          .get(Uri.parse(_Cfg.vercelStatusUrl))
-          .timeout(_Cfg.networkTimeout);
-      if (response.statusCode == 200) {
-        final j = jsonDecode(response.body) as Map<String, dynamic>;
-        final s = SystemStatus.fromJson(j, source: 'vercel_cdn');
-        debugPrint('[QuotaGuard] L2 Vercel OK: ${s.status}');
-        return s;
+    for (final url in _Cfg.vercelStatusUrls) {
+      try {
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(_Cfg.networkTimeout);
+        if (response.statusCode == 200) {
+          final j = jsonDecode(response.body) as Map<String, dynamic>;
+          final s = SystemStatus.fromJson(j, source: 'vercel_cdn');
+          debugPrint('[QuotaGuard] L2 Vercel OK from $url: ${s.status}');
+          return s;
+        }
+      } catch (e) {
+        debugPrint('[QuotaGuard] L2 Vercel FAIL ($url): $e');
       }
-    } catch (e) {
-      debugPrint('[QuotaGuard] L2 Vercel FAIL: $e');
     }
 
-    // Try static fallback JSON
-    try {
-      final response = await http
-          .get(Uri.parse(_Cfg.staticFallbackUrl))
-          .timeout(_Cfg.networkTimeout);
-      if (response.statusCode == 200) {
-        final j = jsonDecode(response.body) as Map<String, dynamic>;
-        return SystemStatus.fromJson(j, source: 'static_cdn');
+    // Try static fallback JSONs
+    for (final fallbackUrl in _Cfg.staticFallbackUrls) {
+      try {
+        final response = await http
+            .get(Uri.parse(fallbackUrl))
+            .timeout(_Cfg.networkTimeout);
+        if (response.statusCode == 200) {
+          final j = jsonDecode(response.body) as Map<String, dynamic>;
+          return SystemStatus.fromJson(j, source: 'static_cdn');
+        }
+      } catch (e) {
+        debugPrint('[QuotaGuard] L2 Static CDN FAIL ($fallbackUrl): $e');
       }
-    } catch (e) {
-      debugPrint('[QuotaGuard] L2 Static CDN FAIL: $e');
     }
     return null;
   }
@@ -286,18 +295,18 @@ class ZaqzoukaQuotaGuard {
 // Wraps any widget - shows error UI if frozen/wiped
 // ════════════════════════════════════════
 
-import 'package:flutter/material.dart';
-
 class SystemStatusGuard extends StatefulWidget {
   final Widget child;
   final Widget Function(SystemStatus)? frozenBuilder;
   final Widget Function(SystemStatus)? wipedBuilder;
+  final VoidCallback? onWipe;
 
   const SystemStatusGuard({
     super.key,
     required this.child,
     this.frozenBuilder,
     this.wipedBuilder,
+    this.onWipe,
   });
 
   @override
@@ -313,7 +322,12 @@ class _SystemStatusGuardState extends State<SystemStatusGuard> {
     super.initState();
     _guard.initialize().then((_) {
       _guard.statusStream.listen((s) {
-        if (mounted) setState(() => _status = s);
+        if (mounted) {
+          setState(() => _status = s);
+          if (s.isWiped) {
+            widget.onWipe?.call();
+          }
+        }
       });
     });
   }

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'services/native_scraper_service.dart';
+import 'src/firebase_quota_guard.dart';
 part 'src/app_shared.dart';
 part 'src/catalog.dart';
 part 'src/catalog_widgets.dart';
@@ -108,7 +109,14 @@ class ZakzoukaFlutterApp extends StatelessWidget {
       textDirection: TextDirection.rtl,
       child: child ?? const SizedBox.shrink(),
     ),
-    home: const _KillSwitchGate(child: _UpdatePromptGate(child: _StartupIntro(child: RootTabs()))),
+    home: SystemStatusGuard(
+      onWipe: () {
+        try {
+          NativeBridge.clearAllData();
+        } catch (_) {}
+      },
+      child: const _KillSwitchGate(child: _UpdatePromptGate(child: _StartupIntro(child: RootTabs()))),
+    ),
   );
 }
 
