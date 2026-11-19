@@ -28,6 +28,9 @@ import {
   ShieldCheck,
   Activity,
   Wifi,
+  Subtitles,
+  Server,
+  Keyboard,
 } from "lucide-react";
 
 export interface StreamSource {
@@ -180,6 +183,11 @@ export default function PlayerModal({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showAspectMenu, setShowAspectMenu] = useState(false);
+  const [subtitlesEnabled, setSubtitlesEnabled] = useState(false);
+  const [subtitleTracks, setSubtitleTracks] = useState<{ id: number; name: string }[]>([]);
+  const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+  const [showServerMenu, setShowServerMenu] = useState(false);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   const [showControls, setShowControls] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -768,6 +776,59 @@ export default function PlayerModal({
     }
   };
 
+  const toggleSubtitles = () => {
+    const video = videoRef.current;
+    const nextState = !subtitlesEnabled;
+    setSubtitlesEnabled(nextState);
+
+    if (video && video.textTracks) {
+      for (let i = 0; i < video.textTracks.length; i++) {
+        video.textTracks[i].mode = nextState ? "showing" : "hidden";
+      }
+    }
+
+    if (hlsRef.current) {
+      hlsRef.current.subtitleTrack = nextState ? 0 : -1;
+    }
+
+    setSeekFeedback(nextState ? "💬 تم تفعيل الترجمة" : "تم إيقاف الترجمة");
+    setTimeout(() => setSeekFeedback(null), 1500);
+  };
+
+  const cycleAspectRatio = () => {
+    setAspectMode((prev) => {
+      const next: AspectRatioMode = prev === "contain" ? "cover" : prev === "cover" ? "fill" : "contain";
+      const labels: Record<AspectRatioMode, string> = {
+        contain: "احتواء كامل",
+        cover: "ملء الشاشة",
+        fill: "تمدد كامل",
+      };
+      setSeekFeedback(`📺 أبعاد الشاشة: ${labels[next]}`);
+      setTimeout(() => setSeekFeedback(null), 1500);
+      return next;
+    });
+  };
+
+  const handleSelectSubtitleTrack = (trackId: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.subtitleTrack = trackId;
+      setSubtitlesEnabled(trackId >= 0);
+      setShowSubtitleMenu(false);
+      const name = subtitleTracks.find((t) => t.id === trackId)?.name || "ترجمة مخصصة";
+      setSeekFeedback(`💬 تم اختيار: ${name}`);
+      setTimeout(() => setSeekFeedback(null), 1500);
+    }
+  };
+
+  const handleSwitchServer = (idx: number) => {
+    setCurrentIndex(idx);
+    setShowServerMenu(false);
+    onSwitchStream?.(idx);
+    const serverName = streams[idx]?.name || `سيرفر ${idx + 1}`;
+    setSeekFeedback(`⚡ جاري التبديل إلى: ${serverName}`);
+    setTimeout(() => setSeekFeedback(null), 1500);
+  };
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -793,6 +854,52 @@ export default function PlayerModal({
         case "KeyF":
           e.preventDefault();
           toggleFullscreen();
+          break;
+        case "KeyC":
+          e.preventDefault();
+          toggleSubtitles();
+          break;
+        case "KeyA":
+          e.preventDefault();
+          cycleAspectRatio();
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          if (videoRef.current) {
+            const nextVol = Math.min(1, Number((videoRef.current.volume + 0.1).toFixed(1)));
+            videoRef.current.volume = nextVol;
+            videoRef.current.muted = false;
+            setVolume(nextVol);
+            setIsMuted(false);
+            setSeekFeedback(`🔊 الصوت: ${Math.round(nextVol * 100)}%`);
+            setTimeout(() => setSeekFeedback(null), 1200);
+          }
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          if (videoRef.current) {
+            const nextVol = Math.max(0, Number((videoRef.current.volume - 0.1).toFixed(1)));
+            videoRef.current.volume = nextVol;
+            setVolume(nextVol);
+            setSeekFeedback(`🔉 الصوت: ${Math.round(nextVol * 100)}%`);
+            setTimeout(() => setSeekFeedback(null), 1200);
+          }
+          break;
+        case "KeyN":
+          if (hasNextEpisode && onNextEpisode) {
+            e.preventDefault();
+            onNextEpisode();
+            setSeekFeedback("⏭️ الحلقة التالية");
+            setTimeout(() => setSeekFeedback(null), 1500);
+          }
+          break;
+        case "KeyP":
+          if (hasPrevEpisode && onPrevEpisode) {
+            e.preventDefault();
+            onPrevEpisode();
+            setSeekFeedback("⏮️ الحلقة السابقة");
+            setTimeout(() => setSeekFeedback(null), 1500);
+          }
           break;
         case "Escape":
           e.preventDefault();
@@ -890,6 +997,30 @@ export default function PlayerModal({
             onClick={handlePlayPause}
             className={`w-full h-full cursor-pointer transition-all duration-300 ${videoAspectClass}`}
           />
+        )}
+
+        {/* 🔊 Floating Autoplay Unmute Banner (Fixes Browser Autoplay Mute Gracefully) */}
+        {isAutoplayMuted && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+            <button
+              type="button"
+              onClick={() => {
+                if (videoRef.current) {
+                  videoRef.current.muted = false;
+                  videoRef.current.volume = 1;
+                  setIsMuted(false);
+                  setVolume(1);
+                }
+                setIsAutoplayMuted(false);
+                setSeekFeedback("🔊 تم تشغيل الصوت");
+                setTimeout(() => setSeekFeedback(null), 1200);
+              }}
+              className="flex items-center gap-2.5 px-6 py-3 rounded-full bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 text-slate-950 font-black text-xs sm:text-sm shadow-2xl shadow-amber-500/40 hover:scale-105 active:scale-95 transition animate-bounce border border-amber-300"
+            >
+              <Volume2 size={18} />
+              <span>الصوت مكتوم تلقائياً — اضغط هنا لتشغيله</span>
+            </button>
+          </div>
         )}
 
         {/* 🌟 Dynamic Zakzouka TV Watermark */}
@@ -1457,6 +1588,156 @@ export default function PlayerModal({
                   )}
                 </div>
               )}
+
+              {/* Subtitles Button (CC) - Matches ZAG Player Updates */}
+              {!isYouTube && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (subtitleTracks.length > 0) {
+                        setShowSubtitleMenu(!showSubtitleMenu);
+                        setShowQualityMenu(false);
+                        setShowSpeedMenu(false);
+                        setShowAspectMenu(false);
+                        setShowServerMenu(false);
+                      } else {
+                        toggleSubtitles();
+                      }
+                    }}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl transition border text-xs font-bold ${
+                      subtitlesEnabled
+                        ? "bg-amber-500/25 border-amber-400 text-amber-300 shadow-[0_0_12px_rgba(212,175,55,0.3)]"
+                        : "bg-black/50 hover:bg-white/10 text-slate-300 border-white/10"
+                    }`}
+                    title="الترجمة الفورية (C)"
+                  >
+                    <Subtitles size={14} className={subtitlesEnabled ? "text-amber-400" : "text-slate-400"} />
+                    <span className="hidden sm:inline">CC</span>
+                  </button>
+
+                  {showSubtitleMenu && subtitleTracks.length > 0 && (
+                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-40 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleSelectSubtitleTrack(-1);
+                          setSubtitlesEnabled(false);
+                        }}
+                        className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                          !subtitlesEnabled ? "text-amber-300 font-black" : "text-slate-300"
+                        }`}
+                      >
+                        <span>إيقاف الترجمة</span>
+                        {!subtitlesEnabled && <Check size={14} />}
+                      </button>
+                      {subtitleTracks.map((track) => (
+                        <button
+                          key={track.id}
+                          type="button"
+                          onClick={() => handleSelectSubtitleTrack(track.id)}
+                          className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                            subtitlesEnabled ? "text-amber-300 font-black" : "text-slate-300"
+                          }`}
+                        >
+                          <span className="truncate">{track.name}</span>
+                          {subtitlesEnabled && <Check size={14} />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Server Switcher Dropdown (Inside Player) */}
+              {streams.length > 1 && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowServerMenu(!showServerMenu);
+                      setShowQualityMenu(false);
+                      setShowSpeedMenu(false);
+                      setShowAspectMenu(false);
+                      setShowSubtitleMenu(false);
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl bg-black/50 hover:bg-white/10 text-xs font-bold text-slate-200 border border-white/10 transition"
+                    title="تبديل السيرفر"
+                  >
+                    <Server size={14} className="text-amber-400" />
+                    <span className="hidden sm:inline">سيرفر {currentIndex + 1}</span>
+                  </button>
+
+                  {showServerMenu && (
+                    <div className="absolute bottom-full right-0 mb-2 py-1.5 w-44 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 overflow-hidden backdrop-blur-xl">
+                      <div className="px-3 py-1.5 border-b border-white/10 text-[10px] font-black text-amber-400">
+                        السيرفرات المتاحة
+                      </div>
+                      {streams.map((stream, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleSwitchServer(idx)}
+                          className={`w-full px-3.5 py-2 text-xs text-right font-bold hover:bg-white/5 transition flex items-center justify-between ${
+                            currentIndex === idx ? "text-amber-300 font-black bg-amber-500/10" : "text-slate-300"
+                          }`}
+                        >
+                          <span className="truncate">{stream.name || `سيرفر ${idx + 1}`}</span>
+                          {currentIndex === idx && <Check size={14} className="text-amber-400 shrink-0" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Keyboard Shortcuts Info Button (Desktop Only) */}
+              <div className="relative hidden md:block">
+                <button
+                  type="button"
+                  onClick={() => setShowShortcutsHelp(!showShortcutsHelp)}
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-black/50 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition border border-white/10"
+                  title="اختصارات لوحة المفاتيح"
+                >
+                  <Keyboard size={16} />
+                </button>
+
+                {showShortcutsHelp && (
+                  <div className="absolute bottom-full left-0 mb-2 p-3.5 w-60 bg-[#12131D] border border-amber-500/30 rounded-2xl shadow-2xl z-30 text-right backdrop-blur-xl text-xs space-y-2">
+                    <p className="font-black text-amber-400 border-b border-white/10 pb-1.5">
+                      ⌨️ اختصارات لوحة المفاتيح
+                    </p>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span>تشغيل / إيقاف:</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-amber-300">Space</kbd>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span>شاشة كاملة:</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-amber-300">F</kbd>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span>كتم الصوت:</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-amber-300">M</kbd>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span>الترجمة (CC):</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-amber-300">C</kbd>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span>أبعاد الشاشة:</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-amber-300">A</kbd>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span>تقديم / تأخير 10ث:</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-amber-300">← / →</kbd>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-300">
+                      <span>التحكم بالصوت:</span>
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/10 font-mono text-[10px] text-amber-300">↑ / ↓</kbd>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* PiP Button */}
               {!isYouTube && (

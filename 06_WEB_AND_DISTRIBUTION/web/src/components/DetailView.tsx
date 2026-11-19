@@ -164,7 +164,15 @@ export default function DetailView({
             )}
           </div>
 
-          <h1 className="mt-4 text-2xl font-black leading-tight tracking-tight text-white sm:text-3xl lg:text-4xl">
+          <h1
+            className={`mt-4 font-black leading-tight tracking-tight text-white transition-all ${
+              item.title.length > 45
+                ? "text-xl sm:text-2xl lg:text-3xl"
+                : item.title.length > 30
+                ? "text-2xl sm:text-3xl lg:text-4xl"
+                : "text-2xl sm:text-3xl lg:text-5xl"
+            }`}
+          >
             {item.title}
           </h1>
 

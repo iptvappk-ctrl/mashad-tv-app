@@ -160,6 +160,9 @@ Layer 5: Hardcoded "active" fallback (لا يوقف التطبيق أبدًا)
 | `06_DEPLOYMENT_GUIDE.md` | دليل النشر |
 | `07_FIREBASE_QUOTA_PROTECTION.md` | حماية الكوتا |
 | `08_CLEAN_ARCHITECTURE.md` | الهيكل المنظم |
+| `09_SCRAPING_HOW_IT_WORKS.md` | دليل عمل السكرابينج |
+| `10_QUICK_START_GUIDE.md` | دليل البدء السريع |
+| `11_WEB_PLATFORM_ECOSYSTEM.md` | الدليل الفني لموقع الويب (Zaqzouka Web) |
 
 ---
 

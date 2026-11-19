@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -14,6 +14,8 @@ import {
   Sparkles,
   Star,
   Tv,
+  Info,
+  SlidersHorizontal,
 } from "lucide-react";
 import { ArabseedItem } from "@/lib/arabseed";
 
@@ -33,7 +35,7 @@ interface CinemaViewProps {
   onBrowseTab?: (tab: "movies" | "series") => void;
 }
 
-const filters = [
+const FILTERS = [
   { id: "all", label: "الكل", icon: Sparkles },
   { id: "foreign_movies", label: "أفلام أجنبية", icon: Film },
   { id: "arabic_movies", label: "أفلام عربية", icon: Film },
@@ -48,10 +50,10 @@ const filters = [
   { id: "wrestling", label: "مصارعة", icon: Flame },
 ];
 
-const sectionNames: Record<string, string> = {
+const SECTION_TITLES: Record<string, string> = {
   all: "أحدث الإضافات",
-  movies: "أفلام مميزة",
-  series: "مسلسلات مميزة",
+  movies: "مكتبة الأفلام",
+  series: "مكتبة المسلسلات",
   foreign_movies: "أفلام أجنبية",
   arabic_movies: "أفلام عربية",
   turkish_movies: "أفلام تركية",
@@ -61,9 +63,17 @@ const sectionNames: Record<string, string> = {
   ramadan: "مسلسلات رمضان",
   anime: "أنمي وكرتون",
   action: "أكشن ومغامرة",
-  horror: "رعب وغموض",
+  horror: "رعب وتشويق",
   wrestling: "عروض مصارعة",
 };
+
+// Adaptive title font sizing helper (matches mobile app commit 82c7af8)
+function getAdaptiveTitleClass(title: string): string {
+  const len = title.trim().length;
+  if (len > 45) return "text-xs sm:text-sm";
+  if (len > 30) return "text-sm sm:text-base";
+  return "text-base sm:text-lg";
+}
 
 function PosterCard({
   item,
@@ -80,57 +90,66 @@ function PosterCard({
   onPlay: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onFavorite: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
+  const posterUrl = (item.poster?.startsWith("//") ? "https:" + item.poster : item.poster) || "/logo.jpg";
+
   return (
     <article
       onClick={onOpen}
-      className="media-poster-card group relative min-w-0 cursor-pointer overflow-hidden rounded-[22px] border border-amber-500/15 bg-[#12131D] shadow-[0_8px_25px_rgba(0,0,0,0.5)] transition duration-300 hover:-translate-y-1.5 hover:border-amber-400/60 hover:shadow-[0_12px_32px_rgba(212,175,55,0.22)]"
+      className="media-poster-card group relative min-w-0 cursor-pointer overflow-hidden rounded-2xl sm:rounded-[22px] border border-amber-500/15 bg-[#12131D] shadow-[0_8px_25px_rgba(0,0,0,0.5)] transition-all duration-300 hover:-translate-y-1.5 hover:border-amber-400/60 hover:shadow-[0_12px_35px_rgba(212,175,55,0.22)]"
     >
       <div className="relative aspect-[0.72] overflow-hidden bg-[#0A0B10]">
         <img
-          src={(item.poster?.startsWith("//") ? "https:" + item.poster : item.poster) || "/logo.jpg"}
+          src={posterUrl}
           alt={item.title}
           loading="lazy"
           decoding="async"
           className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-          onError={(event) => { event.currentTarget.src = "/logo.jpg"; }}
+          onError={(e) => {
+            e.currentTarget.src = "/logo.jpg";
+          }}
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#090A0E] via-[#090A0E]/30 to-transparent" />
-        
-        {/* Quality or Type Badge */}
-        <span className="absolute right-2.5 top-2.5 rounded-full border border-amber-500/30 bg-[#090A0E]/85 px-2.5 py-0.5 text-[10px] font-extrabold text-amber-300 shadow-md backdrop-blur-md">
+        {/* Ambient Gradient */}
+        <div className="absolute inset-0 bg-gradient-to-t from-[#090A0E] via-[#090A0E]/30 to-transparent opacity-90 transition group-hover:opacity-100" />
+
+        {/* Quality / Type Badge */}
+        <span className="absolute right-2 top-2 sm:right-2.5 sm:top-2.5 rounded-full border border-amber-500/30 bg-[#090A0E]/90 px-2 sm:px-2.5 py-0.5 text-[9px] sm:text-[10px] font-black text-amber-300 shadow-md backdrop-blur-md">
           {item.quality || (item.isSeries ? "مسلسل" : "فيلم")}
         </span>
 
         {/* Rating */}
         {item.rating && (
-          <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-[#090A0E]/85 px-2.5 py-0.5 text-[10px] font-bold text-amber-400 backdrop-blur-md">
-            <Star size={11} className="fill-amber-400 text-amber-400" /> {item.rating}
+          <span className="absolute left-2 top-2 sm:left-2.5 sm:top-2.5 inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-[#090A0E]/90 px-2 sm:px-2.5 py-0.5 text-[9px] sm:text-[10px] font-bold text-amber-400 backdrop-blur-md">
+            <Star size={10} className="fill-amber-400 text-amber-400" /> {item.rating}
           </span>
         )}
 
         {/* Favorite Button */}
         <button
           type="button"
-          aria-label={isFavorite ? "إزالة من قائمتي" : "إضافة إلى قائمتي"}
+          aria-label={isFavorite ? "إزالة من المفضلة" : "إضافة للمفضلة"}
           onClick={onFavorite}
-          className={`absolute left-2.5 top-10 grid h-8 w-8 place-items-center rounded-full border shadow-md transition ${
+          className={`absolute left-2 top-8 sm:left-2.5 sm:top-9 grid h-7 w-7 sm:h-8 sm:w-8 place-items-center rounded-full border shadow-md transition ${
             isFavorite
               ? "border-rose-500 bg-rose-600 text-white shadow-rose-600/40"
-              : "border-white/10 bg-[#090A0E]/75 text-slate-300 hover:border-rose-400 hover:text-rose-400 backdrop-blur-md"
+              : "border-white/10 bg-[#090A0E]/80 text-slate-300 hover:border-rose-400 hover:text-rose-400 backdrop-blur-md"
           }`}
         >
-          <Heart size={14} className={isFavorite ? "fill-current" : ""} />
+          <Heart size={13} className={isFavorite ? "fill-current" : ""} />
         </button>
 
-        {/* Meta & Title */}
-        <div className="absolute inset-x-0 bottom-0 p-3.5 text-white">
-          <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-amber-400/90">
-            <span className="rounded-md border border-white/10 bg-white/10 px-2 py-0.5 backdrop-blur-md text-white">
+        {/* Bottom Info & Full Adaptive Title */}
+        <div className="absolute inset-x-0 bottom-0 p-2.5 sm:p-3.5 text-white">
+          <div className="mb-1 flex flex-wrap items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] font-bold text-amber-400/90">
+            <span className="rounded border border-white/10 bg-white/10 px-1.5 sm:px-2 py-0.5 backdrop-blur-md text-white">
               {item.category || (item.isSeries ? "مسلسل" : "فيلم")}
             </span>
             {item.year && <span>{item.year}</span>}
           </div>
-          <h3 className="line-clamp-2 text-sm font-extrabold leading-tight text-white group-hover:text-amber-300 transition">
+          <h3
+            className={`font-black leading-tight text-white group-hover:text-amber-300 transition line-clamp-2 ${getAdaptiveTitleClass(
+              item.title
+            )}`}
+          >
             {item.title}
           </h3>
         </div>
@@ -141,20 +160,20 @@ function PosterCard({
           onClick={onPlay}
           disabled={resolving}
           aria-label={`تشغيل ${item.title}`}
-          className="absolute bottom-3 left-3 grid h-10 w-10 translate-y-2 place-items-center rounded-full bg-gradient-to-r from-amber-400 to-amber-600 text-slate-950 font-black opacity-0 shadow-lg shadow-amber-500/40 transition group-hover:translate-y-0 group-hover:opacity-100 focus:translate-y-0 focus:opacity-100 max-sm:translate-y-0 max-sm:opacity-100"
+          className="absolute bottom-2.5 left-2.5 sm:bottom-3 sm:left-3 grid h-9 w-9 sm:h-10 sm:w-10 translate-y-2 place-items-center rounded-full bg-gradient-to-r from-amber-400 to-amber-600 text-slate-950 font-black opacity-0 shadow-lg shadow-amber-500/40 transition group-hover:translate-y-0 group-hover:opacity-100 focus:translate-y-0 focus:opacity-100 max-sm:translate-y-0 max-sm:opacity-100"
         >
-          {resolving ? <LoaderCircle size={17} className="animate-spin text-slate-950" /> : <Play size={16} className="fill-current" />}
+          {resolving ? (
+            <LoaderCircle size={16} className="animate-spin text-slate-950" />
+          ) : (
+            <Play size={15} className="fill-current" />
+          )}
         </button>
       </div>
 
-      <button
-        type="button"
-        onClick={(event) => { event.stopPropagation(); onOpen(); }}
-        className="flex w-full items-center justify-between border-t border-white/5 bg-[#141522] px-3.5 py-2.5 text-right text-[11px] font-bold text-slate-400 transition hover:bg-[#181A2A] hover:text-amber-300"
-      >
-        <span>التفاصيل والحلقات</span>
-        <ArrowLeft size={13} className="text-amber-400" />
-      </button>
+      <div className="flex w-full items-center justify-between border-t border-white/5 bg-[#141522] px-3 py-2 text-right text-[10px] sm:text-[11px] font-bold text-slate-400 transition group-hover:bg-[#181A2A] group-hover:text-amber-300">
+        <span>التفاصيل والسيرفرات</span>
+        <ArrowLeft size={12} className="text-amber-400 transition group-hover:-translate-x-1" />
+      </div>
     </article>
   );
 }
@@ -178,6 +197,10 @@ export default function CinemaView({
   const [hasMore, setHasMore] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
 
+  // Multi-Slide Featured Carousel State
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const carouselTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     if (selectedGenre) setFilter(selectedGenre);
     else setFilter("all");
@@ -192,8 +215,10 @@ export default function CinemaView({
       try {
         const query = searchQuery.trim();
         if (query) {
-          const response = await fetch(`/api/cinema/search?q=${encodeURIComponent(query)}`, { signal: controller.signal });
-          const result = await response.json();
+          const res = await fetch(`/api/cinema/search?q=${encodeURIComponent(query)}`, {
+            signal: controller.signal,
+          });
+          const result = await res.json();
           if (!cancelled) {
             setItems(result.success && Array.isArray(result.data) ? result.data : []);
             setHomeMovies([]);
@@ -214,8 +239,10 @@ export default function CinemaView({
             setHasMore(movies.length >= 8 || series.length >= 8);
           };
           const readList = async (kind: "movies" | "series") => {
-            const response = await fetch(`/api/cinema/${kind}?page=${page}`, { signal: controller.signal });
-            const result = await response.json();
+            const res = await fetch(`/api/cinema/${kind}?page=${page}`, {
+              signal: controller.signal,
+            });
+            const result = await res.json();
             const list = result.success && Array.isArray(result.data) ? result.data : [];
             if (kind === "movies") movies = list;
             else series = list;
@@ -226,11 +253,12 @@ export default function CinemaView({
         }
 
         const slug = filter !== "all" ? filter : activeTab;
-        const endpoint = filter === "all" && (activeTab === "movies" || activeTab === "series")
-          ? `/api/cinema/${activeTab}?page=${page}`
-          : `/api/cinema/category?slug=${encodeURIComponent(slug)}&page=${page}`;
-        const response = await fetch(endpoint, { signal: controller.signal });
-        const result = await response.json();
+        const endpoint =
+          filter === "all" && (activeTab === "movies" || activeTab === "series")
+            ? `/api/cinema/${activeTab}?page=${page}`
+            : `/api/cinema/category?slug=${encodeURIComponent(slug)}&page=${page}`;
+        const res = await fetch(endpoint, { signal: controller.signal });
+        const result = await res.json();
         if (!cancelled) {
           const nextItems = result.success && Array.isArray(result.data) ? result.data : [];
           setItems(nextItems);
@@ -238,9 +266,8 @@ export default function CinemaView({
           setHomeSeries([]);
           setHasMore(nextItems.length >= 8);
         }
-      } catch (error) {
-        if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
-          console.error("Cinema listing could not be loaded:", error);
+      } catch (err) {
+        if (!cancelled && !(err instanceof DOMException && err.name === "AbortError")) {
           setItems([]);
           setHomeMovies([]);
           setHomeSeries([]);
@@ -257,28 +284,50 @@ export default function CinemaView({
     };
   }, [activeTab, filter, page, searchQuery]);
 
-  const featured = useMemo(() => items.find((item) => item.poster) || items[0], [items]);
+  // Featured carousel items (top 5 items with posters)
+  const featuredItems = useMemo(() => {
+    return items.filter((i) => i.poster && !i.poster.includes("default")).slice(0, 5);
+  }, [items]);
+
+  const activeFeatured = featuredItems[carouselIndex] || featuredItems[0] || items[0];
+
+  // Auto-advance featured carousel every 7 seconds
+  useEffect(() => {
+    if (featuredItems.length <= 1) return;
+    carouselTimerRef.current = setInterval(() => {
+      setCarouselIndex((prev) => (prev + 1) % featuredItems.length);
+    }, 7000);
+    return () => {
+      if (carouselTimerRef.current) clearInterval(carouselTimerRef.current);
+    };
+  }, [featuredItems.length]);
+
   const isHome = activeTab === "home" && filter === "all" && !searchQuery.trim();
   const pageTitle = searchQuery.trim()
     ? `نتائج البحث عن «${searchQuery.trim()}»`
-    : sectionNames[filter === "all" ? activeTab : filter] || "أحدث الأعمال";
+    : SECTION_TITLES[filter === "all" ? activeTab : filter] || "أحدث الأعمال";
 
   const playQuickly = async (event: React.MouseEvent<HTMLButtonElement>, item: ArabseedItem) => {
     event.stopPropagation();
     setResolvingId(item.id);
     try {
-      const response = await fetch(`/api/cinema/detail?url=${encodeURIComponent(item.pageUrl)}`);
-      const result = await response.json();
+      const res = await fetch(`/api/cinema/detail?url=${encodeURIComponent(item.pageUrl)}`);
+      const result = await res.json();
       const detail = result.data;
       const server = detail?.servers?.[0];
       if (!result.success || !server?.embedUrl) {
         onSelectItem(item);
         return;
       }
-      const resolvedResponse = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(server.embedUrl)}`);
-      const resolved = await resolvedResponse.json();
+      const resolvedRes = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(server.embedUrl)}`);
+      const resolved = await resolvedRes.json();
       const url = resolved.playUrl || resolved.data?.playUrl || server.embedUrl;
-      onPlayStream({ title: item.title, subtitle: server.name, poster: item.poster, streams: [{ name: server.name, url }] });
+      onPlayStream({
+        title: item.title,
+        subtitle: server.name,
+        poster: item.poster,
+        streams: [{ name: server.name, url }],
+      });
     } catch {
       onSelectItem(item);
     } finally {
@@ -290,21 +339,26 @@ export default function CinemaView({
     <PosterCard
       key={`${item.providerId || "source"}:${item.id}`}
       item={item}
-      isFavorite={favorites.some((favorite) => favorite.id === item.id)}
+      isFavorite={favorites.some((f) => f.id === item.id)}
       resolving={resolvingId === item.id}
       onOpen={() => onSelectItem(item)}
-      onPlay={(event) => { void playQuickly(event, item); }}
-      onFavorite={(event) => { event.stopPropagation(); onToggleFavorite(item); }}
+      onPlay={(e) => {
+        void playQuickly(e, item);
+      }}
+      onFavorite={(e) => {
+        e.stopPropagation();
+        onToggleFavorite(item);
+      }}
     />
   );
 
   if (loading && items.length === 0) {
     return (
       <div className="space-y-7">
-        <div className="h-64 sm:h-80 w-full rounded-[28px] skeleton-shimmer border border-amber-500/10" />
+        <div className="h-64 sm:h-96 w-full rounded-[28px] skeleton-shimmer border border-amber-500/10" />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {Array.from({ length: 12 }).map((_, i) => (
-            <div key={i} className="aspect-[0.72] rounded-[22px] skeleton-shimmer border border-white/5" />
+            <div key={i} className="aspect-[0.72] rounded-2xl sm:rounded-[22px] skeleton-shimmer border border-white/5" />
           ))}
         </div>
       </div>
@@ -312,96 +366,138 @@ export default function CinemaView({
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 sm:space-y-10">
       {/* Filters Bar */}
       {!searchQuery.trim() && (
         <div className="no-scrollbar -mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
-          {filters.map(({ id, label, icon: Icon }) => {
+          {FILTERS.map(({ id, label, icon: Icon }) => {
             const active = filter === id;
             return (
               <button
                 key={id}
                 type="button"
-                onClick={() => { setFilter(id); setPage(1); }}
-                className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-bold transition duration-200 ${
+                onClick={() => {
+                  setFilter(id);
+                  setPage(1);
+                }}
+                className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-3.5 sm:px-4 py-2 sm:py-2.5 text-xs font-bold transition duration-200 ${
                   active
                     ? "border border-amber-500/40 bg-gradient-to-r from-amber-500/25 to-amber-500/15 text-amber-300 shadow-[0_0_15px_rgba(212,175,55,0.2)]"
                     : "border border-white/5 bg-[#12131D] text-slate-300 hover:border-amber-500/30 hover:bg-[#161726] hover:text-white"
                 }`}
               >
                 <Icon size={14} className={active ? "text-amber-400" : "text-slate-400"} />
-                {label}
+                <span>{label}</span>
               </button>
             );
           })}
         </div>
       )}
 
-      {/* Featured Hero Banner */}
-      {isHome && featured && (
-        <section className="home-hero relative overflow-hidden rounded-[30px] border border-amber-500/20 bg-[#12131D] shadow-[0_15px_40px_rgba(0,0,0,0.6)]">
-          <div className="home-hero-backdrop absolute inset-0 z-0">
+      {/* Featured Hero Carousel Banner (Home Mode) */}
+      {isHome && activeFeatured && (
+        <section className="relative overflow-hidden rounded-3xl sm:rounded-[32px] border border-amber-500/25 bg-[#12131D] shadow-[0_15px_50px_rgba(0,0,0,0.7)] transition-all duration-500">
+          {/* Blurred Cinematic Backdrop */}
+          <div className="absolute inset-0 z-0">
             <img
-              src={featured.poster || "/logo.jpg"}
+              src={activeFeatured.poster || "/logo.jpg"}
               alt=""
-              className="h-full w-full object-cover object-center opacity-30 blur-md scale-105"
+              className="h-full w-full object-cover object-center opacity-30 blur-xl scale-110 transition-all duration-700"
             />
             <div className="absolute inset-0 bg-gradient-to-r from-[#090A0E] via-[#090A0E]/85 to-transparent" />
             <div className="absolute inset-0 bg-gradient-to-t from-[#090A0E] via-transparent to-transparent" />
           </div>
 
-          <div className="relative z-10 flex flex-col md:flex-row items-center gap-6 p-6 sm:p-8 lg:p-10">
-            <div className="relative w-36 sm:w-48 shrink-0 overflow-hidden rounded-[22px] border border-amber-500/30 shadow-[0_10px_30px_rgba(212,175,55,0.25)]">
+          <div className="relative z-10 flex flex-col md:flex-row items-center gap-6 p-6 sm:p-8 lg:p-12">
+            {/* Foreground Poster Card */}
+            <div className="relative w-36 sm:w-52 shrink-0 overflow-hidden rounded-2xl sm:rounded-[24px] border border-amber-500/40 shadow-[0_10px_35px_rgba(212,175,55,0.3)] transition duration-500 hover:scale-105">
               <img
-                src={featured.poster || "/logo.jpg"}
-                alt={featured.title}
+                src={activeFeatured.poster || "/logo.jpg"}
+                alt={activeFeatured.title}
                 className="aspect-[0.72] w-full object-cover"
                 loading="eager"
-                fetchPriority="high"
               />
             </div>
-            <div className="flex-1 text-center md:text-right space-y-3">
+
+            {/* Meta & Full Adaptive Title */}
+            <div className="flex-1 text-center md:text-right space-y-3 sm:space-y-4">
               <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
-                <span className="rounded-full border border-amber-500/30 bg-amber-500/15 px-3 py-1 text-[11px] font-black text-amber-300">
-                  اختيار اليوم
+                <span className="rounded-full border border-amber-500/30 bg-amber-500/20 px-3 py-1 text-[11px] font-black text-amber-300 shadow-sm">
+                  ✨ اختيار اليوم المميز
                 </span>
-                <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-bold text-slate-300">
-                  {featured.isSeries ? "مسلسل" : "فيلم"}
+                <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-bold text-slate-200">
+                  {activeFeatured.isSeries ? "مسلسل" : "فيلم"}
                 </span>
-                {featured.year && (
+                {activeFeatured.year && (
                   <span className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-bold text-slate-300">
-                    {featured.year}
+                    {activeFeatured.year}
                   </span>
                 )}
-                {featured.rating && (
+                {activeFeatured.quality && (
+                  <span className="rounded-full border border-amber-500/20 bg-[#090A0E]/80 px-3 py-1 text-[11px] font-extrabold text-amber-400">
+                    {activeFeatured.quality}
+                  </span>
+                )}
+                {activeFeatured.rating && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/25 bg-[#090A0E]/80 px-3 py-1 text-[11px] font-extrabold text-amber-400">
-                    <Star size={12} className="fill-current" /> {featured.rating}
+                    <Star size={12} className="fill-current" /> {activeFeatured.rating}
                   </span>
                 )}
               </div>
-              <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white leading-tight">
-                {featured.title}
+
+              {/* Dynamic Adaptive Font Sizing (Complete title, no truncation) */}
+              <h2
+                className={`font-black text-white leading-tight transition-all duration-300 ${
+                  activeFeatured.title.length > 40
+                    ? "text-xl sm:text-2xl lg:text-3xl"
+                    : activeFeatured.title.length > 25
+                    ? "text-2xl sm:text-3xl lg:text-4xl"
+                    : "text-3xl sm:text-4xl lg:text-5xl"
+                }`}
+              >
+                {activeFeatured.title}
               </h2>
-              <p className="hero-description max-w-2xl text-xs sm:text-sm text-slate-300 leading-relaxed">
-                اعرف القصة، اختار الموسم والحلقة، وانتقل إلى سيرفر المشاهدة المتاح للعمل.
+
+              <p className="max-w-2xl text-xs sm:text-sm text-slate-300 leading-relaxed">
+                شاهد بجودة فائقة السرعة مع إمكانية اختيار الجودة والترجمة وتخطي السيرفرات المتوقفة تلقائياً.
               </p>
+
+              {/* Action Buttons */}
               <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => onSelectItem(featured)}
-                  className="hero-primary inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95"
+                  onClick={() => onSelectItem(activeFeatured)}
+                  className="inline-flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-7 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95"
                 >
-                  <Play size={16} className="fill-current" />
+                  <Play size={17} className="fill-current" />
                   مشاهدة الآن
                 </button>
                 <button
                   type="button"
-                  onClick={() => onSelectItem(featured)}
-                  className="hero-secondary inline-flex items-center gap-2 rounded-2xl border border-amber-500/30 bg-[#141524]/80 px-5 py-3 text-sm font-bold text-slate-200 transition hover:border-amber-400 hover:text-white"
+                  onClick={() => onSelectItem(activeFeatured)}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-amber-500/30 bg-[#141524]/90 px-6 py-3.5 text-sm font-bold text-slate-200 transition hover:border-amber-400 hover:text-white"
                 >
-                  التفاصيل وسيرفرات التحميل
+                  <Info size={16} />
+                  الحلقات وسيرفرات التحميل
                 </button>
               </div>
+
+              {/* Carousel Slide Indicators */}
+              {featuredItems.length > 1 && (
+                <div className="flex items-center justify-center md:justify-start gap-2 pt-3">
+                  {featuredItems.map((_, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setCarouselIndex(idx)}
+                      className={`h-2 rounded-full transition-all duration-300 ${
+                        carouselIndex === idx ? "w-8 bg-amber-400 shadow-sm shadow-amber-400" : "w-2 bg-white/20 hover:bg-white/40"
+                      }`}
+                      aria-label={`الشريحة ${idx + 1}`}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -409,14 +505,14 @@ export default function CinemaView({
 
       {/* Main Content Sections */}
       {isHome ? (
-        <div className="space-y-10">
+        <div className="space-y-12">
           {/* Movies Section */}
           {homeMovies.length > 0 && (
             <section className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400">سينما مختارة</p>
-                  <h3 className="text-xl font-black text-white">أحدث الأفلام العالمية والعربية</h3>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-400">سينما مختارة</p>
+                  <h3 className="text-xl sm:text-2xl font-black text-white">أحدث الأفلام العالمية والعربية</h3>
                 </div>
                 {onBrowseTab && (
                   <button
@@ -424,7 +520,7 @@ export default function CinemaView({
                     onClick={() => onBrowseTab("movies")}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-400 hover:text-amber-300 transition"
                   >
-                    <span>عرض المزيد</span>
+                    <span>عرض الكل ({homeMovies.length})</span>
                     <ArrowLeft size={14} />
                   </button>
                 )}
@@ -440,8 +536,8 @@ export default function CinemaView({
             <section className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400">دراما حصرية</p>
-                  <h3 className="text-xl font-black text-white">أحدث المسلسلات والمواسم الكاملة</h3>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-amber-400">دراما حصرية</p>
+                  <h3 className="text-xl sm:text-2xl font-black text-white">أحدث المسلسلات والمواسم الكاملة</h3>
                 </div>
                 {onBrowseTab && (
                   <button
@@ -449,7 +545,7 @@ export default function CinemaView({
                     onClick={() => onBrowseTab("series")}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-400 hover:text-amber-300 transition"
                   >
-                    <span>عرض المزيد</span>
+                    <span>عرض الكل ({homeSeries.length})</span>
                     <ArrowLeft size={14} />
                   </button>
                 )}
@@ -461,14 +557,14 @@ export default function CinemaView({
           )}
         </div>
       ) : (
-        <section className="space-y-5">
+        <section className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400">تصفح المكتبة</p>
-              <h2 className="text-2xl font-black text-white">{pageTitle}</h2>
+              <p className="text-[10px] font-black uppercase tracking-widest text-amber-400">تصفح المكتبة</p>
+              <h2 className="text-2xl sm:text-3xl font-black text-white">{pageTitle}</h2>
             </div>
             {items.length > 0 && (
-              <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-400">
+              <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3.5 py-1 text-xs font-bold text-amber-400">
                 {items.length} عمل متاح
               </span>
             )}
@@ -476,9 +572,9 @@ export default function CinemaView({
 
           {items.length === 0 ? (
             <div className="rounded-[28px] border border-dashed border-amber-500/20 bg-[#12131D] p-12 text-center">
-              <Search size={40} className="mx-auto text-amber-400/50" />
-              <h3 className="mt-3 text-lg font-bold text-white">لم يتم العثور على نتائج</h3>
-              <p className="mt-1 text-xs text-slate-400">جرب البحث بكلمات مختلفة أو اسم آخر للعمل.</p>
+              <Search size={40} className="mx-auto text-amber-400/50 mb-3" />
+              <h3 className="text-lg font-bold text-white">لم يتم العثور على نتائج</h3>
+              <p className="mt-1 text-xs text-slate-400">جرب البحث باسم آخر أو بكلمات أبسط.</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
@@ -487,12 +583,15 @@ export default function CinemaView({
           )}
 
           {/* Pagination */}
-          {!searchQuery.trim() && (
-            <div className="flex items-center justify-center gap-3 pt-6">
+          {!searchQuery.trim() && items.length > 0 && (
+            <div className="flex items-center justify-center gap-3 pt-8">
               <button
                 type="button"
                 disabled={page <= 1}
-                onClick={() => { setPage((p) => Math.max(1, p - 1)); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                onClick={() => {
+                  setPage((p) => Math.max(1, p - 1));
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
                 className="inline-flex items-center gap-2 rounded-2xl border border-amber-500/20 bg-[#12131D] px-5 py-2.5 text-xs font-bold text-white transition hover:border-amber-400 hover:text-amber-300 disabled:opacity-40"
               >
                 <ChevronRight size={16} /> الصفحة السابقة
@@ -503,7 +602,10 @@ export default function CinemaView({
               <button
                 type="button"
                 disabled={!hasMore}
-                onClick={() => { setPage((p) => p + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                onClick={() => {
+                  setPage((p) => p + 1);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
                 className="inline-flex items-center gap-2 rounded-2xl border border-amber-500/20 bg-[#12131D] px-5 py-2.5 text-xs font-bold text-white transition hover:border-amber-400 hover:text-amber-300 disabled:opacity-40"
               >
                 الصفحة التالية <ChevronLeft size={16} />
