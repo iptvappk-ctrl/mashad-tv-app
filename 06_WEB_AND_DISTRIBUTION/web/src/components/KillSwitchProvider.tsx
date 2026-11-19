@@ -11,9 +11,9 @@ interface SystemState {
 }
 
 const STATUS_ENDPOINTS = [
+  "/api/status",
   "https://zaqzouka-dashboard-api.vercel.app/api/status",
   "https://zaqzouka-vercel-hub.vercel.app/api/status",
-  "/api/status",
 ];
 
 export default function KillSwitchProvider({ children }: { children: React.ReactNode }) {
@@ -49,7 +49,7 @@ export default function KillSwitchProvider({ children }: { children: React.React
         const res = await fetch(url, {
           method: "GET",
           headers: { Accept: "application/json" },
-          cache: "default", // utilizes Vercel Edge CDN cache (s-maxage=60)
+          cache: "no-store",
           signal: AbortSignal.timeout(5000),
         });
 
@@ -88,8 +88,8 @@ export default function KillSwitchProvider({ children }: { children: React.React
     // Initial check
     checkStatus();
 
-    // Periodic lightweight check every 60s (hits CDN cache, 0 load on Firebase)
-    const interval = setInterval(checkStatus, 60000);
+    // Periodic lightweight check every 10s
+    const interval = setInterval(checkStatus, 10000);
     return () => clearInterval(interval);
   }, [checkStatus]);
 

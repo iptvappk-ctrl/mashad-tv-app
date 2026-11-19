@@ -20,18 +20,12 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const response = await fetch('https://madartv-default-rtdb.firebaseio.com/system_control.json');
+    const response = await fetch('https://zaqzouka-dashboard-api.vercel.app/api/status');
     if (response.ok) {
-      const val = await response.json();
-      const result = val || {
-        status: 'active',
-        message: 'المنظومة نشطة وتعمل بشكل طبيعي',
-        updatedAt: now,
-        wipeTimestamp: 0,
-      };
+      const result = await response.json();
       _cache = result;
       _cacheTime = now;
-      return res.status(200).json({ ...result, _source: 'firebase_live' });
+      return res.status(200).json({ ...result, _source: 'dashboard_api' });
     }
   } catch (err) {
     if (_cache) {
