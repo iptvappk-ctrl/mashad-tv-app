@@ -445,6 +445,10 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
       statusColor = Colors.redAccent;
       statusTitle = 'تم المسح والتدمير بالكامل 🔴';
       statusSubtitle = 'البيانات صفرية وجميع أجهزة المستخدمين محظورة';
+    } else if (status == 'unknown') {
+      statusColor = const Color(0xFFE67E22);
+      statusTitle = 'تعذر الاتصال بالسحابة 🟠';
+      statusSubtitle = _statusData['message']?.toString() ?? 'تأكد من اتصالك بالإنترنت';
     }
 
     return Scaffold(

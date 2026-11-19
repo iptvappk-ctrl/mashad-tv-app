@@ -15,9 +15,6 @@ import {
   ExternalLink,
   X,
   PlaySquare,
-  Activity,
-  ShieldAlert,
-  Power,
 } from "lucide-react";
 
 export type Tab =
@@ -310,58 +307,6 @@ export default function Navbar({
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2 text-xs font-bold text-amber-300 shrink-0">
-                  <Download size={14} />
-                  تحميل APK
-                </div>
-              </a>
-
-              {/* App 3: Master Control / Kill Switch */}
-              <a
-                href="https://zaqzouka-vercel-hub.vercel.app/downloads/zaqzouka-master-control.apk"
-                download="zaqzouka-master-control.apk"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-red-500/25 bg-[#17121C] p-3.5 sm:p-4 transition hover:border-red-400 hover:bg-[#1E1424]"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 group-hover:scale-105 transition">
-                    <Power size={20} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-extrabold text-white text-sm">تطبيق التحكم وزر الإيقاف الفوري (Master Control)</span>
-                      <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-bold text-red-300">Kill Switch</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">مركز التحكم عن بُعد لإيقاف أو تشغيل كافة الخدمات والسيرفرات بضغطة زر</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/15 px-3.5 py-2 text-xs font-bold text-red-300 shrink-0">
-                  <Download size={14} />
-                  تحميل APK
-                </div>
-              </a>
-
-              {/* App 4: Admin & Analytics */}
-              <a
-                href="https://zaqzouka-vercel-hub.vercel.app/downloads/zaqzouka-admin.apk"
-                download="zaqzouka-admin.apk"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-cyan-500/25 bg-[#111827] p-3.5 sm:p-4 transition hover:border-cyan-400 hover:bg-[#152033]"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 group-hover:scale-105 transition">
-                    <Activity size={20} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-extrabold text-white text-sm">تطبيق التحليلات والإدارة (Zaqzouka Analytics)</span>
-                      <span className="rounded bg-cyan-500/20 px-1.5 py-0.5 text-[9px] font-bold text-cyan-300">Admin</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">لوحة متابعة وتحليلات مباشرة: المستخدمين النشطين، وحالة السيرفرات والبثوث</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-3.5 py-2 text-xs font-bold text-cyan-300 shrink-0">
                   <Download size={14} />
                   تحميل APK
                 </div>
