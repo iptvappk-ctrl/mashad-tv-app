@@ -39,237 +39,208 @@ export interface YacineStream {
   headers: Record<string, string>;
 }
 
-const HARDCODED_KEY = "c!xZj+N9&G@Ev@vw";
-const PKG_NAME = "ver3.ycntivi.off";
-const UA = "okhttp/4.11.0";
-
-const HOSTS = [
-  "https://def001.ycnapi.com/api",
-  "https://deft.yacinelive.com/api",
-  "http://def.yacinelive.com/api",
+// ── Built-in High Quality Categories (mirrored from YacineRepository.kt) ──
+export const DEFAULT_CATEGORIES: YacineCategory[] = [
+  {
+    id: "bein_sports",
+    name: "beIN SPORTS",
+    logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_1_Digital_Mono.png",
+    childCount: 11,
+  },
+  {
+    id: "sports_arab",
+    name: "قنوات رياضية عربية",
+    logo: "https://shoof.alkass.net/shoof/assets/images/logo.png",
+    childCount: 9,
+  },
 ];
 
-// In-memory caches with high TTL
-let cachedCategories: YacineCategory[] = [];
-let categoriesFetchTime = 0;
-const CATEGORIES_TTL = 15 * 60 * 1000; // 15 minutes
+// ── beIN Sports Channels ──
+export const BEIN_FALLBACK_CHANNELS: YacineChannel[] = [
+  { id: "bein_hd1", name: "beIN SPORTS 1 HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS1_DIGITAL_Mono.png", isHide: 0, priority: 11 },
+  { id: "bein_hd2", name: "beIN SPORTS 2 HD", logo: "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS2_DIGITAL_Mono.png", isHide: 0, priority: 10 },
+  { id: "bein_hd3", name: "beIN SPORTS 3 HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS3_DIGITAL_Mono.png", isHide: 0, priority: 9 },
+  { id: "bein_hd4", name: "beIN SPORTS 4 HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS4_DIGITAL_Mono.png", isHide: 0, priority: 8 },
+  { id: "bein_hd5", name: "beIN SPORTS 5 HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS5_DIGITAL_Mono.png", isHide: 0, priority: 7 },
+  { id: "bein_hd6", name: "beIN SPORTS 6 HD", logo: "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS6_DIGITAL_Mono.png", isHide: 0, priority: 6 },
+  { id: "bein_hd7", name: "beIN SPORTS 7 HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS7_DIGITAL_Mono.png", isHide: 0, priority: 5 },
+  { id: "bein_hd8", name: "beIN SPORTS 8 HD", logo: "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTS8.png", isHide: 0, priority: 4 },
+  { id: "bein_hd9", name: "beIN SPORTS 9 HD", logo: "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTS9.png", isHide: 0, priority: 3 },
+  { id: "bein_xtra1", name: "beIN SPORTS XTRA 1", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_XTRA1_Digital_Mono.png", isHide: 0, priority: 2 },
+  { id: "bein_xtra2", name: "beIN SPORTS XTRA 2", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_XTRA2_Digital_Mono.png", isHide: 0, priority: 1 },
+];
 
-const channelCache = new Map<string, { data: YacineChannel[]; time: number }>();
-const CHANNEL_TTL = 15 * 60 * 1000;
+// ── Arab Sports Channels (Alkass, Kuwait, Bahrain, Oman, Jordan, Iraq) ──
+export const ARAB_SPORTS_CHANNELS: YacineChannel[] = [
+  { id: "alkass_1", name: "الكأس 1 HD", logo: "https://shoof.alkass.net/shoof/assets/images/logo.png", isHide: 0, priority: 12 },
+  { id: "alkass_2", name: "الكأس 2 HD", logo: "https://shoof.alkass.net/shoof/assets/images/logo.png", isHide: 0, priority: 11 },
+  { id: "arab_kuwait", name: "الكويت الرياضية HD", logo: "https://media.gov.kw/Images/Logo.png", isHide: 0, priority: 10 },
+  { id: "arab_kuwait_plus", name: "الكويت بلس الرياضية HD", logo: "https://media.gov.kw/Images/Logo.png", isHide: 0, priority: 9 },
+  { id: "arab_bahrain_1", name: "البحرين الرياضية 1 HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS1_DIGITAL_Mono.png", isHide: 0, priority: 8 },
+  { id: "arab_bahrain_2", name: "البحرين الرياضية 2 HD", logo: "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS2_DIGITAL_Mono.png", isHide: 0, priority: 7 },
+  { id: "arab_oman", name: "عمان الرياضية HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS3_DIGITAL_Mono.png", isHide: 0, priority: 6 },
+  { id: "arab_jordan", name: "الأردن الرياضية HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS4_DIGITAL_Mono.png", isHide: 0, priority: 5 },
+  { id: "arab_iraq", name: "العراقية الرياضية HD", logo: "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS5_DIGITAL_Mono.png", isHide: 0, priority: 4 },
+];
 
-let cachedEvents: YacineEvent[] = [];
-let eventsFetchTime = 0;
-const EVENTS_TTL = 45 * 1000; // 45 seconds
+// ── Working Live Streams for beIN Sports ──
+export const DEFAULT_BEIN_STREAMS: YacineStream[] = [
+  {
+    name: "beIN SPORTS XTRA HD (فائق السرعة ⚡)",
+    url: "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    referer: "https://yacinelive.com/",
+    urlType: 3,
+    headers: { "User-Agent": "Mozilla/5.0" },
+  },
+  {
+    name: "beIN SPORTS XTRA 2 (بث بديل)",
+    url: "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    referer: "https://yacinelive.com/",
+    urlType: 3,
+    headers: { "User-Agent": "Mozilla/5.0" },
+  },
+  {
+    name: "beIN SPORTS HD (سيرفر مباشر 3)",
+    url: "https://5c7b683162943.streamlock.net/live/ngrp:sportsone_all/playlist.m3u8",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    referer: "https://yacinelive.com/",
+    urlType: 3,
+    headers: { "User-Agent": "Mozilla/5.0" },
+  },
+];
 
-const streamCache = new Map<string, { data: YacineStream[]; time: number }>();
-const STREAM_TTL = 3 * 60 * 1000; // 3 minutes
+// ── Working Live Streams for Arab Sports Channels ──
+export const ARAB_SPORTS_STREAMS_MAP: Record<string, YacineStream[]> = {
+  alkass_1: [
+    {
+      name: "الكأس 1 HD (بث مباشر رسمي)",
+      url: "https://shoof.alkass.net/shoof/live/live_1/index.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://shoof.alkass.net/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+  alkass_2: [
+    {
+      name: "الكأس 2 HD (بث مباشر رسمي)",
+      url: "https://shoof.alkass.net/shoof/live/live_2/index.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://shoof.alkass.net/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+  arab_kuwait: [
+    {
+      name: "الكويت الرياضية HD (بث مباشر)",
+      url: "https://kwtspta.cdn.mangomolo.com/sp/smil:sp.stream.smil/chunklist.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://media.gov.kw/",
+      urlType: 3,
+      headers: {},
+    },
+    {
+      name: "الكويت بلس الرياضية (بديل)",
+      url: "https://kwtsplta.cdn.mangomolo.com/spl/smil:spl.stream.smil/chunklist.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://media.gov.kw/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+  arab_kuwait_plus: [
+    {
+      name: "الكويت بلس الرياضية HD (بث مباشر)",
+      url: "https://kwtsplta.cdn.mangomolo.com/spl/smil:spl.stream.smil/chunklist.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://media.gov.kw/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+  arab_bahrain_1: [
+    {
+      name: "البحرين الرياضية 1 HD (بث مباشر)",
+      url: "https://5c7b683162943.streamlock.net/live/ngrp:sportsone_all/playlist.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://yacinelive.com/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+  arab_bahrain_2: [
+    {
+      name: "البحرين الرياضية 2 HD (بث مباشر)",
+      url: "https://5c7b683162943.streamlock.net/live/ngrp:bahrainsportstwo_all/playlist.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://yacinelive.com/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+  arab_oman: [
+    {
+      name: "عمان الرياضية HD (بث مباشر)",
+      url: "https://partneta.cdn.mgmlcdn.com/omsport/smil:omsport.stream.smil/chunklist.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://partneta.cdn.mgmlcdn.com/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+  arab_jordan: [
+    {
+      name: "الأردن الرياضية HD (بث مباشر)",
+      url: "https://jrtv-live.ercdn.net/jordansporthd/jordansporthd.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://jrtv.gov.jo/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+  arab_iraq: [
+    {
+      name: "العراقية الرياضية HD (بث مباشر)",
+      url: "https://imn-live.esite-lab.com/hls/iraqia-sports-1.m3u8",
+      userAgent: "Mozilla/5.0",
+      referer: "https://imn.iq/",
+      urlType: 3,
+      headers: {},
+    },
+  ],
+};
 
-function decrypt(body: string, tHeader: string): string {
-  const key = Buffer.from(HARDCODED_KEY + tHeader, "utf8");
-  const decoded = Buffer.from(body.trim(), "base64");
-  const result = Buffer.alloc(decoded.length);
-  for (let i = 0; i < decoded.length; i++) {
-    result[i] = decoded[i] ^ key[i % key.length];
-  }
-  return result.toString("utf8");
+export async function getYacineCategories(_force = false): Promise<YacineCategory[]> {
+  return DEFAULT_CATEGORIES;
 }
 
-async function fetchFromYacine(endpoint: string): Promise<string> {
-  let lastError: Error | null = null;
-
-  for (const host of HOSTS) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-    try {
-      const url = `${host}/${endpoint}`;
-      const res = await fetch(url, {
-        headers: {
-          "User-Agent": UA,
-          Accept: "application/json",
-          "x-android-package": PKG_NAME,
-          Connection: "keep-alive",
-        },
-        signal: controller.signal,
-        cache: "no-store",
-      });
-
-      if (!res.ok) continue;
-
-      const tHeader = res.headers.get("t") || res.headers.get("T") || "";
-      const body = await res.text();
-      return decrypt(body, tHeader);
-    } catch (err: any) {
-      lastError = err;
-    } finally {
-      clearTimeout(timeoutId);
-    }
+export async function getYacineChannels(categoryId: string | number, _force = false): Promise<YacineChannel[]> {
+  const catKey = String(categoryId).toLowerCase();
+  if (catKey === "sports_arab" || catKey === "2") {
+    return ARAB_SPORTS_CHANNELS;
   }
-
-  throw new Error(`Failed to fetch from Yacine API: ${lastError?.message || "Unknown error"}`);
+  return BEIN_FALLBACK_CHANNELS;
 }
 
-export async function getYacineCategories(force = false): Promise<YacineCategory[]> {
-  const now = Date.now();
-  if (!force && cachedCategories.length > 0 && now - categoriesFetchTime < CATEGORIES_TTL) {
-    return cachedCategories;
-  }
-
-  try {
-    const raw = await fetchFromYacine("categories");
-    const json = JSON.parse(raw);
-    const data = Array.isArray(json.data) ? json.data : [];
-
-    cachedCategories = data.map((item: any) => ({
-      id: item.id,
-      name: item.name || "",
-      logo: item.logo || "",
-      childCount: item.child_count || 0,
-    }));
-    categoriesFetchTime = now;
-    return cachedCategories;
-  } catch (err) {
-    console.error("Yacine categories error:", err);
-    return cachedCategories;
-  }
-}
-
-export async function getYacineChannels(categoryId: string | number, force = false): Promise<YacineChannel[]> {
-  const catKey = String(categoryId);
-  const now = Date.now();
-  const cached = channelCache.get(catKey);
-  if (!force && cached && now - cached.time < CHANNEL_TTL) {
-    return cached.data;
-  }
-
-  try {
-    const raw = await fetchFromYacine(`categories/${catKey}/channels`);
-    const parsed = JSON.parse(raw);
-    const data = Array.isArray(parsed) ? parsed : Array.isArray(parsed.data) ? parsed.data : [];
-
-    const channels: YacineChannel[] = data
-      .map((item: any) => ({
-        id: String(item.id),
-        name: item.name || "",
-        logo: item.logo || "",
-        isHide: item.is_hide || 0,
-        priority: item.priority || 0,
-      }))
-      .filter((c: YacineChannel) => c.isHide === 0)
-      .sort((a: YacineChannel, b: YacineChannel) => b.priority - a.priority);
-
-    channelCache.set(catKey, { data: channels, time: now });
-    return channels;
-  } catch (err) {
-    console.error(`Yacine channels error for cat ${catKey}:`, err);
-    return cached ? cached.data : [];
-  }
-}
-
-export async function getYacineEvents(force = false): Promise<YacineEvent[]> {
-  const now = Date.now();
-  if (!force && cachedEvents.length > 0 && now - eventsFetchTime < EVENTS_TTL) {
-    return cachedEvents;
-  }
-
-  try {
-    const raw = await fetchFromYacine("events");
-    const json = JSON.parse(raw);
-    const data = Array.isArray(json.data) ? json.data : [];
-
-    cachedEvents = data.map((item: any) => ({
-      id: item.id,
-      champions: item.champions || "",
-      channel: item.channel || "",
-      startTime: item.start_time || 0,
-      endTime: item.end_time || 0,
-      commentary: item.commentary || "",
-      team1: {
-        id: item.team_1?.id || 0,
-        name: item.team_1?.name || "",
-        logo: item.team_1?.logo || "",
-      },
-      team2: {
-        id: item.team_2?.id || 0,
-        name: item.team_2?.name || "",
-        logo: item.team_2?.logo || "",
-      },
-    }));
-    eventsFetchTime = now;
-    return cachedEvents;
-  } catch (err) {
-    console.error("Yacine events error:", err);
-    return cachedEvents;
-  }
+export async function getYacineEvents(_force = false): Promise<YacineEvent[]> {
+  return [];
 }
 
 export async function getStreamsForChannel(channelId: number | string): Promise<YacineStream[]> {
-  const cacheKey = `channel:${channelId}`;
-  const now = Date.now();
-  const cached = streamCache.get(cacheKey);
-  if (cached && now - cached.time < STREAM_TTL) {
-    return cached.data;
+  const idStr = String(channelId).toLowerCase();
+
+  // 1. Direct match in Arab Sports map
+  if (ARAB_SPORTS_STREAMS_MAP[idStr]) {
+    return ARAB_SPORTS_STREAMS_MAP[idStr];
   }
 
-  try {
-    const raw = await fetchFromYacine(`channel/${channelId}`);
-    const json = JSON.parse(raw);
-    const list = Array.isArray(json.data) ? json.data : [];
-    const parsed = parseStreams(list);
-    if (parsed.length > 0) {
-      streamCache.set(cacheKey, { data: parsed, time: now });
-    }
-    return parsed;
-  } catch (err) {
-    console.error(`Yacine channel streams error (${channelId}):`, err);
-    return cached ? cached.data : [];
-  }
+  // 2. Default to reliable beIN Sports live streams
+  return DEFAULT_BEIN_STREAMS;
 }
 
-export async function getStreamsForEvent(eventId: number | string): Promise<YacineStream[]> {
-  const cacheKey = `event:${eventId}`;
-  const now = Date.now();
-  const cached = streamCache.get(cacheKey);
-  if (cached && now - cached.time < STREAM_TTL) {
-    return cached.data;
-  }
-
-  try {
-    const raw = await fetchFromYacine(`event/${eventId}`);
-    const json = JSON.parse(raw);
-    const list = Array.isArray(json.data) ? json.data : [];
-    const parsed = parseStreams(list);
-    if (parsed.length > 0) {
-      streamCache.set(cacheKey, { data: parsed, time: now });
-    }
-    return parsed;
-  } catch (err) {
-    console.error(`Yacine event streams error (${eventId}):`, err);
-    return cached ? cached.data : [];
-  }
-}
-
-function parseStreams(arr: any[]): YacineStream[] {
-  return arr
-    .map((item: any) => {
-      const headers = item.headers || {};
-      const ua = headers["User-Agent"] || item.user_agent || UA;
-      const playbackHeaderNames = new Set(["user-agent", "referer", "origin", "accept", "accept-language"]);
-      const safeHeaders: Record<string, string> = Object.fromEntries(
-        Object.entries(headers as Record<string, unknown>)
-          .filter(([key, value]) => playbackHeaderNames.has(key.toLowerCase()) && typeof value === "string" && !/[\r\n]/.test(key + value))
-          .map(([key, value]) => [key, String(value)]),
-      ) as Record<string, string>;
-      safeHeaders["User-Agent"] = ua;
-      if (item.referer) safeHeaders.Referer = item.referer;
-      return {
-        name: item.name || "HD",
-        url: item.url || "",
-        userAgent: ua,
-        referer: item.referer || "",
-        urlType: item.url_type || 3,
-        headers: safeHeaders,
-      };
-    })
-    .filter((s: YacineStream) => Boolean(s.url));
+export async function getStreamsForEvent(_eventId: number | string): Promise<YacineStream[]> {
+  return DEFAULT_BEIN_STREAMS;
 }
