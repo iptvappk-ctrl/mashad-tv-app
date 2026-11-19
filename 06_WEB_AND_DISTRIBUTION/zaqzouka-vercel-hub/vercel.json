@@ -1,0 +1,54 @@
+{
+  "version": 2,
+  "routes": [
+    {
+      "src": "/api/status",
+      "dest": "/api/status.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "s-maxage=60, stale-while-revalidate=300"
+      }
+    },
+    {
+      "src": "/api/system_control",
+      "dest": "/api/system_control.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*"
+      }
+    },
+    {
+      "src": "/api/version",
+      "dest": "/api/version.js"
+    },
+    {
+      "src": "/status/system.json",
+      "dest": "/public/status/system.json",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "s-maxage=120, stale-while-revalidate=600",
+        "Content-Type": "application/json"
+      }
+    },
+    {
+      "src": "/updates/android/latest.json",
+      "dest": "/public/updates/android/latest.json",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      }
+    },
+    {
+      "src": "/downloads/(.*)",
+      "dest": "/public/downloads/$1",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Disposition": "attachment"
+      }
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
+    }
+  ]
+}

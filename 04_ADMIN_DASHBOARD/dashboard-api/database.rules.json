@@ -1,0 +1,29 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "system_control": {
+      ".read": true,
+      ".write": false
+    },
+    "servers_catalog": {
+      ".read": true,
+      ".write": false
+    },
+    "cached_feeds": {
+      ".read": true,
+      ".write": false
+    },
+    "sessions": {
+      ".indexOn": ["deviceId", "status", "lastSeen", "openedAt"],
+      ".read": false,
+      ".write": false
+    },
+    "stats": {
+      ".indexOn": ["firstOpens", "webVisits"]
+    },
+    "activityLog": {
+      ".indexOn": ["timestamp"]
+    }
+  }
+}

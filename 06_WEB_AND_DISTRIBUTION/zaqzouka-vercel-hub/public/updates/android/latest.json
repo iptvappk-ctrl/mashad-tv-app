@@ -1,0 +1,22 @@
+{
+  "packageName": "com.madar.madar_flutter",
+  "versionCode": 76,
+  "versionName": "1.0.71",
+  "releaseNotes": "تحديث زقزوقة الجديد: حل مشكلة ميلان الشاشة، إخفاء كتم الصوت بالكامل، وتفعيل الترجمة الاحترافية، وربط نظام التحكم اللحظي والأوامر الطارئة.",
+  "apkUrl": "https://zaqzouka-updates.vercel.app/downloads/zaqzouka-app.apk",
+  "sha256": "bad9e5b78083abf12a66e86108604419f7c3167b38b3a8f760d818b15fc48eb6",
+  "player": {
+    "versionCode": 28,
+    "versionName": "1.1.28",
+    "releaseNotes": "مشغل ZAG Player المحدث: حل ميلان الشاشة والبار الأسود، إزالة أيقونة كتم الصوت، تشغيل الملخصات والفيديوهات بملء الشاشة، ودعم الترجمة.",
+    "apkUrl": "https://zaqzouka-updates.vercel.app/downloads/zag-player.apk",
+    "sha256": "efbc2254c3df8cf8f9e04cf23c02237e568767f956d8d6cf3d7985ef4830c9bf"
+  },
+  "masterControl": {
+    "versionCode": 1,
+    "versionName": "1.0.0",
+    "releaseNotes": "تطبيق زقزوقة للتحكم المركزي والحماية الكاملة (إيقاف فوري - تدمير شامل عليا وعلى أعدائي - استعادة شاملة).",
+    "apkUrl": "https://zaqzouka-updates.vercel.app/downloads/zaqzouka-master-control.apk",
+    "sha256": "26a4e05101e5ff430644b2111897948eb51a33a9a7b858f41b1aff87d292e89e"
+  }
+}

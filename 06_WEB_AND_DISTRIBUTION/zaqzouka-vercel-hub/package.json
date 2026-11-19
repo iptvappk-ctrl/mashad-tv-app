@@ -1,0 +1,9 @@
+{
+  "name": "zaqzouka-updates-hub",
+  "version": "1.0.0",
+  "description": "Zaqzouka Official Update & Download Hub for Vercel",
+  "scripts": {
+    "start": "serve public"
+  },
+  "dependencies": {}
+}

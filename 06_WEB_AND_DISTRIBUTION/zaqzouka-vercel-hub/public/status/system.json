@@ -1,0 +1,8 @@
+{
+  "status": "active",
+  "message": "المنظومة نشطة وتعمل بشكل طبيعي",
+  "updatedAt": 1700000000000,
+  "wipeTimestamp": 0,
+  "_source": "static_cdn",
+  "_note": "This file is the ultimate fallback if Vercel API is unreachable. Served from Vercel CDN edge."
+}
