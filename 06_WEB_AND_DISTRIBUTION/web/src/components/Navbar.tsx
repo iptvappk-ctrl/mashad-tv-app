@@ -15,6 +15,9 @@ import {
   ExternalLink,
   X,
   PlaySquare,
+  Activity,
+  ShieldAlert,
+  Power,
 } from "lucide-react";
 
 export type Tab =
@@ -238,7 +241,7 @@ export default function Navbar({
         >
           <div
             dir="rtl"
-            className="relative w-full max-w-lg rounded-3xl border border-amber-500/30 bg-[#0F101A] p-6 sm:p-8 shadow-[0_0_60px_rgba(212,175,55,0.2)] text-right"
+            className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl border border-amber-500/30 bg-[#0F101A] p-5 sm:p-7 shadow-[0_0_60px_rgba(212,175,55,0.2)] text-right"
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -254,19 +257,19 @@ export default function Navbar({
                 <Smartphone size={24} />
               </div>
               <div>
-                <h3 className="text-lg font-black text-white">تحميل تطبيقات زقزوقة الرسمية</h3>
-                <p className="text-xs text-amber-400/80 font-semibold">بث فائق السرعة، بدون إعلانات، وتحكم بالترجمة والجودة</p>
+                <h3 className="text-lg font-black text-white">تطبيقات منظومة زقزوقة الرسمية</h3>
+                <p className="text-xs text-amber-400/80 font-semibold">حزمة تطبيقات الأندرويد الرسمية بصيغة APK جاهزة للتثبيت المباشر</p>
               </div>
             </div>
 
-            <div className="space-y-3.5 mb-6">
+            <div className="space-y-3 mb-6">
               {/* App 1: Zaqzouka Client App */}
               <a
                 href="https://zaqzouka-vercel-hub.vercel.app/downloads/zaqzouka-app.apk"
                 download="zaqzouka-app.apk"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex items-center justify-between gap-4 rounded-2xl border border-amber-500/25 bg-[#141525] p-4 transition hover:border-amber-400 hover:bg-[#181A2D]"
+                className="group flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-amber-500/25 bg-[#141525] p-3.5 sm:p-4 transition hover:border-amber-400 hover:bg-[#181A2D]"
               >
                 <div className="flex items-center gap-3">
                   <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 group-hover:scale-105 transition">
@@ -274,15 +277,15 @@ export default function Navbar({
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-extrabold text-white text-sm">تطبيق زقزوقة TV</span>
+                      <span className="font-extrabold text-white text-sm">تطبيق زقزوقة TV الرئيسي</span>
                       <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">v1.0.71</span>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-0.5">التطبيق الرئيسي للمسلسلات، الأفلام، والرياضة المباشرة</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 px-3.5 py-2 text-xs font-black text-slate-950 shadow-md">
+                <div className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-600 px-3.5 py-2 text-xs font-black text-slate-950 shadow-md shrink-0">
                   <Download size={14} />
-                  تحميل
+                  تحميل APK
                 </div>
               </a>
 
@@ -292,7 +295,7 @@ export default function Navbar({
                 download="zag-player.apk"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-[#141525] p-4 transition hover:border-amber-400 hover:bg-[#181A2D]"
+                className="group flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-white/10 bg-[#141525] p-3.5 sm:p-4 transition hover:border-amber-400 hover:bg-[#181A2D]"
               >
                 <div className="flex items-center gap-3">
                   <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white/5 border border-white/10 text-slate-300 group-hover:scale-105 transition">
@@ -303,18 +306,70 @@ export default function Navbar({
                       <span className="font-extrabold text-white text-sm">مشغل ZAG Player الأصلي</span>
                       <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-slate-300">v1.1.28</span>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">مشغل عالي الأداء يدعم الترجمة، ملء الشاشة، وجودات HLS المتعددة</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">مشغل فيديو فائق الخفة والسرعة يدعم كافة صيغ HLS و MP4 والترجمة</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2 text-xs font-bold text-amber-300">
+                <div className="flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2 text-xs font-bold text-amber-300 shrink-0">
                   <Download size={14} />
-                  تحميل
+                  تحميل APK
+                </div>
+              </a>
+
+              {/* App 3: Master Control / Kill Switch */}
+              <a
+                href="https://zaqzouka-vercel-hub.vercel.app/downloads/zaqzouka-master-control.apk"
+                download="zaqzouka-master-control.apk"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-red-500/25 bg-[#17121C] p-3.5 sm:p-4 transition hover:border-red-400 hover:bg-[#1E1424]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 group-hover:scale-105 transition">
+                    <Power size={20} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-white text-sm">تطبيق التحكم وزر الإيقاف الفوري (Master Control)</span>
+                      <span className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-bold text-red-300">Kill Switch</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">مركز التحكم عن بُعد لإيقاف أو تشغيل كافة الخدمات والسيرفرات بضغطة زر</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 rounded-xl border border-red-500/30 bg-red-500/15 px-3.5 py-2 text-xs font-bold text-red-300 shrink-0">
+                  <Download size={14} />
+                  تحميل APK
+                </div>
+              </a>
+
+              {/* App 4: Admin & Analytics */}
+              <a
+                href="https://zaqzouka-vercel-hub.vercel.app/downloads/zaqzouka-admin.apk"
+                download="zaqzouka-admin.apk"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-cyan-500/25 bg-[#111827] p-3.5 sm:p-4 transition hover:border-cyan-400 hover:bg-[#152033]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 group-hover:scale-105 transition">
+                    <Activity size={20} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-white text-sm">تطبيق التحليلات والإدارة (Zaqzouka Analytics)</span>
+                      <span className="rounded bg-cyan-500/20 px-1.5 py-0.5 text-[9px] font-bold text-cyan-300">Admin</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">لوحة متابعة وتحليلات مباشرة: المستخدمين النشطين، وحالة السيرفرات والبثوث</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/15 px-3.5 py-2 text-xs font-bold text-cyan-300 shrink-0">
+                  <Download size={14} />
+                  تحميل APK
                 </div>
               </a>
             </div>
 
             <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-[11px] text-slate-400 leading-relaxed text-center">
-              💡 بعد تحميل ملف الـ APK، اضغط عليه لتثبيته وفعّل خيار «تثبيت التطبيقات من مصادر غير معروفة».
+              💡 جميع التطبيقات موقعة ومطابقة لأحدث إصدارات المشروع، تعمل مباشرة على أجهزة Android و TV Box.
             </div>
           </div>
         </div>
