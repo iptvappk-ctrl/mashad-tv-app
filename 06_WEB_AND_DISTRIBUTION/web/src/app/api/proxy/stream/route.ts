@@ -132,13 +132,12 @@ export async function GET(req: NextRequest) {
     responseHeaders.set("Cache-Control", "public, max-age=86400, immutable");
 
     const isTsChunk =
-      targetUrl.includes(".ts") ||
-      targetUrl.includes(".pdf") ||
-      targetUrl.includes(".js") ||
-      targetUrl.includes("/0021012254/") ||
-      contentType.includes("video/mp2t") ||
-      contentType.includes("image/jpeg") ||
-      contentType.includes("application/octet-stream");
+      !targetUrl.includes(".mp4") &&
+      (targetUrl.includes(".ts") ||
+        targetUrl.includes(".pdf") ||
+        targetUrl.includes(".js") ||
+        targetUrl.includes("/0021012254/") ||
+        contentType.includes("video/mp2t"));
 
     if (isTsChunk && response.ok) {
       responseHeaders.set("Content-Type", "video/mp2t");
@@ -161,10 +160,16 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Default binary streaming
-    if (contentType) {
+    // Default binary streaming (e.g. MP4 video)
+    if (targetUrl.includes(".mp4")) {
+      responseHeaders.set("Content-Type", "video/mp4");
+      responseHeaders.set("Accept-Ranges", "bytes");
+    } else if (contentType) {
       responseHeaders.set("Content-Type", contentType);
     }
+    const contentRange = response.headers.get("content-range");
+    if (contentRange) responseHeaders.set("Content-Range", contentRange);
+
     const contentLength = response.headers.get("content-length");
     if (contentLength) responseHeaders.set("Content-Length", contentLength);
 
