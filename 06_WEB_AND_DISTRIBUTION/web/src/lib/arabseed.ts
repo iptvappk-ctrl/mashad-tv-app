@@ -473,7 +473,7 @@ function isEpisodeUrlOrTitle(title: string, url: string): boolean {
 /**
  * Resolves direct video stream link (.m3u8 or .mp4) from embed servers (MySeed, Govid, Voe, Vidsharing, etc.)
  */
-export async function resolveDirectStream(serverUrl: string): Promise<string | undefined> {
+export async function resolveDirectStream(serverUrl: string, pageUrl?: string): Promise<string | undefined> {
   if (!serverUrl) return undefined;
 
   const isVids = serverUrl.includes("vids.php") || serverUrl.includes("player-gateway");
@@ -492,24 +492,46 @@ export async function resolveDirectStream(serverUrl: string): Promise<string | u
       return serverUrl;
     }
 
-    // 1. MySeed vids.php / player-gateway resolver (Live chain, 60s tokens)
+    // 1. MySeed vids.php / player-gateway resolver (Live chain with auto-refresh on 60s expiration)
     if (serverUrl.includes("vids.php") || serverUrl.includes("player-gateway") || serverUrl.includes("myseed")) {
       try {
+        let targetUrl = serverUrl;
         let vidsHtml = "";
         let gatewayUrl = "";
 
-        if (serverUrl.includes("player-gateway")) {
-          gatewayUrl = serverUrl;
+        if (targetUrl.includes("player-gateway")) {
+          gatewayUrl = targetUrl;
         } else {
-          vidsHtml = await fetchHtml(serverUrl, `${BASE_URL}/`, 5000);
-          const gwMatch = vidsHtml.match(/src=["']([^"']+player-gateway[^"']+)["']/i);
+          try {
+            vidsHtml = await fetchHtml(targetUrl, `${BASE_URL}/`, 5000);
+          } catch {
+            vidsHtml = "";
+          }
+
+          let gwMatch = vidsHtml.match(/src=["']([^"']+player-gateway[^"']+)["']/i);
+          // If token expired or gateway not found, refresh live from watch page!
+          if (!gwMatch && pageUrl) {
+            try {
+              const cleanP = pageUrl.replace(/\/$/, "");
+              const watchHtml = await fetchHtml(`${cleanP}/watch/`, `${cleanP}/`, 5000);
+              const freshMatch = watchHtml.match(/data-(?:link|embed|url)=["']([^"']*vids\.php[^"']*)["']/i) ||
+                watchHtml.match(/src=["']([^"']*vids\.php[^"']*)["']/i);
+              if (freshMatch?.[1]) {
+                const freshVids = freshMatch[1].startsWith("http") ? freshMatch[1] : `${BASE_URL}${freshMatch[1]}`;
+                targetUrl = freshVids;
+                vidsHtml = await fetchHtml(targetUrl, `${BASE_URL}/`, 5000);
+                gwMatch = vidsHtml.match(/src=["']([^"']+player-gateway[^"']+)["']/i);
+              }
+            } catch {}
+          }
+
           if (gwMatch?.[1]) {
             gatewayUrl = gwMatch[1].replace(/&amp;/g, "&");
           }
         }
 
         if (gatewayUrl) {
-          const gwHtml = await fetchHtml(gatewayUrl, serverUrl, 5000);
+          const gwHtml = await fetchHtml(gatewayUrl, targetUrl, 5000);
           const srcMatch = gwHtml.match(/<source[^>]+src=["']([^"']+\.(?:mp4|m3u8)[^"']*)["']/i);
           const rawDirect = srcMatch?.[1] ||
             gwHtml.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)/i)?.[1] ||

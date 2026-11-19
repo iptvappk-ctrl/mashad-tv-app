@@ -72,9 +72,9 @@ export class ArabseedProvider implements BaseProvider {
     }
   }
 
-  async resolveStream(serverUrl: string): Promise<string | null> {
+  async resolveStream(serverUrl: string, pageUrl?: string): Promise<string | null> {
     try {
-      const direct = await resolveDirectStream(serverUrl);
+      const direct = await resolveDirectStream(serverUrl, pageUrl);
       return direct || null;
     } catch (err) {
       console.error("[ArabseedProvider] resolveStream error:", err);

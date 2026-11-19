@@ -43,6 +43,7 @@ interface PlayerModalProps {
   title: string;
   subtitle?: string;
   poster?: string;
+  pageUrl?: string;
   streams: StreamSource[];
   activeStreamIndex?: number;
   onClose: () => void;
@@ -140,6 +141,7 @@ export default function PlayerModal({
   title,
   subtitle,
   poster,
+  pageUrl,
   streams,
   activeStreamIndex = 0,
   onClose,
@@ -850,7 +852,8 @@ export default function PlayerModal({
       !extractYouTubeId(target.url)
     ) {
       try {
-        const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(target.url)}`);
+        const pageParam = pageUrl ? `&pageUrl=${encodeURIComponent(pageUrl)}` : "";
+        const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(target.url)}${pageParam}`);
         const json = await res.json();
         const resolvedUrl = json.playUrl || json.data?.playUrl;
         if (resolvedUrl) {

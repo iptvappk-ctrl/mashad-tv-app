@@ -52,5 +52,5 @@ export interface BaseProvider {
   search(query: string): Promise<UnifiedMediaItem[]>;
   getCategory(slug: string, page?: number): Promise<UnifiedMediaItem[]>;
   getDetail(pageUrl: string): Promise<UnifiedMediaDetail | null>;
-  resolveStream(serverUrl: string): Promise<string | null>;
+  resolveStream(serverUrl: string, pageUrl?: string): Promise<string | null>;
 }

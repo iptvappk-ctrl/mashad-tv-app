@@ -39,6 +39,7 @@ export default function HomePage() {
     title: string;
     subtitle?: string;
     poster?: string;
+    pageUrl?: string;
     streams: StreamSource[];
   }>({ isOpen: false, title: "", streams: [] });
 
@@ -194,7 +195,7 @@ export default function HomePage() {
   };
 
   const handlePlayStream = (data: { title: string; subtitle?: string; poster?: string; streams: StreamSource[] }) => {
-    setPlayerState({ isOpen: true, title: data.title, subtitle: data.subtitle, poster: data.poster, streams: data.streams });
+    setPlayerState({ isOpen: true, title: data.title, subtitle: data.subtitle, poster: data.poster, pageUrl: (data as any).pageUrl || selectedDetailItem?.pageUrl, streams: data.streams });
   };
 
   const handlePlayServer = async (serverUrl: string, serverName: string) => {
@@ -258,7 +259,8 @@ export default function HomePage() {
         !firstUrl.endsWith(".m3u8") &&
         !firstUrl.endsWith(".mp4")
       ) {
-        const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(firstUrl)}`);
+        const pageParam = selectedDetailItem?.pageUrl ? `&pageUrl=${encodeURIComponent(selectedDetailItem.pageUrl)}` : "";
+        const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(firstUrl)}${pageParam}`);
         const json = await res.json();
         firstUrl = json.playUrl || json.data?.playUrl || firstUrl;
       }
@@ -443,6 +445,7 @@ export default function HomePage() {
           title={playerState.title}
           subtitle={playerState.subtitle}
           poster={playerState.poster}
+          pageUrl={playerState.pageUrl || selectedDetailItem?.pageUrl}
           streams={playerState.streams}
           onClose={() => setPlayerState((state) => ({ ...state, isOpen: false }))}
           onNextEpisode={hasNextEpisode ? handleNextEpisode : undefined}

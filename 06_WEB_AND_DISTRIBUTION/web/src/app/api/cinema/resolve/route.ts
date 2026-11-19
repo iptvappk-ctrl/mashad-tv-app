@@ -11,13 +11,14 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const serverUrl = searchParams.get("serverUrl");
+  const pageUrl = searchParams.get("pageUrl") || undefined;
 
   if (!serverUrl) {
     return NextResponse.json({ success: false, error: "Missing serverUrl" }, { status: 400 });
   }
 
   try {
-    const direct = await aggregator.resolveStream(serverUrl);
+    const direct = await aggregator.resolveStream(serverUrl, pageUrl);
     const finalUrl = direct || serverUrl;
 
     let playUrl = finalUrl;

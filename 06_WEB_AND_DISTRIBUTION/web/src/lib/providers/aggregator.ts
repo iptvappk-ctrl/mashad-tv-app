@@ -255,14 +255,14 @@ export class MultiProviderAggregator {
     }
   }
 
-  async resolveStream(serverUrl: string): Promise<string | null> {
+  async resolveStream(serverUrl: string, pageUrl?: string): Promise<string | null> {
     if (!serverUrl) return null;
     if (serverUrl.includes(".m3u8") || serverUrl.includes(".mp4") || serverUrl.includes("/api/proxy/stream")) {
       return serverUrl;
     }
     const provider = this.getProviderForUrl(serverUrl);
     try {
-      const direct = await provider.resolveStream(serverUrl);
+      const direct = await provider.resolveStream(serverUrl, pageUrl);
       return direct || serverUrl;
     } catch {
       return serverUrl;
