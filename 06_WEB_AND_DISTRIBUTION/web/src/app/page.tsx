@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useEffect, useRef, useState } from "react";
 import Navbar from "@/components/Navbar";
@@ -202,7 +202,7 @@ export default function HomePage() {
     try {
       if (serverUrl.includes("/api/proxy/stream") || serverUrl.endsWith(".m3u8") || serverUrl.endsWith(".mp4")) {
         handlePlayStream({
-          title: selectedDetailItem?.title || "مشاهدة العمل",
+          title: selectedDetailItem?.title || "ظ…ط´ط§ظ‡ط¯ط© ط§ظ„ط¹ظ…ظ„",
           subtitle: serverName,
           poster: selectedDetailItem?.poster,
           streams: [{ name: serverName, url: serverUrl }],
@@ -213,14 +213,14 @@ export default function HomePage() {
       const result = await response.json();
       const playUrl = result.playUrl || result.data?.playUrl || serverUrl;
       handlePlayStream({
-        title: selectedDetailItem?.title || "مشاهدة العمل",
+        title: selectedDetailItem?.title || "ظ…ط´ط§ظ‡ط¯ط© ط§ظ„ط¹ظ…ظ„",
         subtitle: serverName,
         poster: selectedDetailItem?.poster,
         streams: [{ name: serverName, url: playUrl }],
       });
     } catch {
       handlePlayStream({
-        title: selectedDetailItem?.title || "مشاهدة العمل",
+        title: selectedDetailItem?.title || "ظ…ط´ط§ظ‡ط¯ط© ط§ظ„ط¹ظ…ظ„",
         subtitle: serverName,
         poster: selectedDetailItem?.poster,
         streams: [{ name: serverName, url: serverUrl }],
@@ -230,6 +230,41 @@ export default function HomePage() {
     }
   };
 
+  /**
+   * "شاهد الآن" — يفتح المشغل بكل السيرفرات المتاحة دفعة واحدة.
+   * المشغل يحتوي على switcher يتيح للمستخدم التبديل بينها داخلياً.
+   */
+  const handlePlayAllServers = async (servers: { embedUrl: string; name: string }[]) => {
+    if (!servers.length) return;
+    const title = selectedDetailItem?.title || "مشاهدة العمل";
+    const poster = selectedDetailItem?.poster;
+
+    const rawStreams: StreamSource[] = servers.map((s, i) => ({
+      name: s.name || `سيرفر ${i + 1}`,
+      url: s.embedUrl,
+    }));
+
+    setResolvingServer(servers[0].embedUrl);
+    try {
+      let firstUrl = servers[0].embedUrl;
+      if (
+        !firstUrl.includes("/api/proxy/stream") &&
+        !firstUrl.endsWith(".m3u8") &&
+        !firstUrl.endsWith(".mp4")
+      ) {
+        const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(firstUrl)}`);
+        const json = await res.json();
+        firstUrl = json.playUrl || json.data?.playUrl || firstUrl;
+      }
+      rawStreams[0] = { name: rawStreams[0].name, url: firstUrl };
+    } catch {
+      // keep original embedUrl if resolve fails
+    } finally {
+      setResolvingServer(null);
+    }
+
+    handlePlayStream({ title, poster, streams: rawStreams });
+  };
   const changeTab = (tab: Tab) => {
     detailRequestId.current += 1;
     setActiveTab(tab);
@@ -283,6 +318,7 @@ export default function HomePage() {
             loading={loadingDetail}
             onBack={handleBackFromDetail}
             onPlayServer={handlePlayServer}
+            onPlayAllServers={handlePlayAllServers}
             resolvingServer={resolvingServer}
             isFavorite={favorites.some((favorite) => favorite.id === selectedDetailItem.id)}
             onToggleFavorite={() => handleToggleFavorite(selectedDetailItem)}
@@ -311,9 +347,9 @@ export default function HomePage() {
           <section className="space-y-6">
             <div className="flex items-end justify-between gap-3">
               <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400">محفوظاتك</p>
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-amber-400">ظ…ط­ظپظˆط¸ط§طھظƒ</p>
                 <h1 className="mt-1 text-2xl font-black text-white">
-                  قائمتي <span className="text-base font-bold text-slate-400">({favorites.length})</span>
+                  ظ‚ط§ط¦ظ…طھظٹ <span className="text-base font-bold text-slate-400">({favorites.length})</span>
                 </h1>
               </div>
               {favorites.length > 0 && (
@@ -322,7 +358,7 @@ export default function HomePage() {
                   onClick={() => { setFavorites([]); localStorage.removeItem("zakzouka_favorites"); }}
                   className="inline-flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition"
                 >
-                  <Trash2 size={14} /> مسح القائمة
+                  <Trash2 size={14} /> ظ…ط³ط­ ط§ظ„ظ‚ط§ط¦ظ…ط©
                 </button>
               )}
             </div>
@@ -330,13 +366,13 @@ export default function HomePage() {
             {favorites.length === 0 ? (
               <div className="rounded-[28px] border border-dashed border-amber-500/20 bg-[#12131D] px-5 py-16 text-center">
                 <Bookmark size={42} className="mx-auto text-amber-400/40" />
-                <h2 className="mt-3 font-extrabold text-white text-lg">لم تقم بحفظ أعمال بعد</h2>
-                <p className="mt-1 text-sm text-slate-400">اضغط على زر القلب في أي فيلم أو مسلسل لتجده محفوظاً هنا.</p>
+                <h2 className="mt-3 font-extrabold text-white text-lg">ظ„ظ… طھظ‚ظ… ط¨ط­ظپط¸ ط£ط¹ظ…ط§ظ„ ط¨ط¹ط¯</h2>
+                <p className="mt-1 text-sm text-slate-400">ط§ط¶ط؛ط· ط¹ظ„ظ‰ ط²ط± ط§ظ„ظ‚ظ„ط¨ ظپظٹ ط£ظٹ ظپظٹظ„ظ… ط£ظˆ ظ…ط³ظ„ط³ظ„ ظ„طھط¬ط¯ظ‡ ظ…ط­ظپظˆط¸ط§ظ‹ ظ‡ظ†ط§.</p>
                 <button
                   onClick={() => changeTab("home")}
                   className="mt-5 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-600 px-6 py-3 text-xs font-black text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105"
                 >
-                  اكتشف المكتبة الآن
+                  ط§ظƒطھط´ظپ ط§ظ„ظ…ظƒطھط¨ط© ط§ظ„ط¢ظ†
                 </button>
               </div>
             ) : (
@@ -355,12 +391,12 @@ export default function HomePage() {
                         onError={(event) => { event.currentTarget.src = "/logo.jpg"; }}
                       />
                       <span className="absolute right-2.5 top-2.5 rounded-full border border-amber-500/30 bg-[#090A0E]/90 px-2 py-0.5 text-[9px] font-extrabold text-amber-300">
-                        {item.quality || (item.isSeries ? "مسلسل" : "فيلم")}
+                        {item.quality || (item.isSeries ? "ظ…ط³ظ„ط³ظ„" : "ظپظٹظ„ظ…")}
                       </span>
                       <button
                         type="button"
                         onClick={(event) => { event.stopPropagation(); handleToggleFavorite(item); }}
-                        aria-label="إزالة من قائمتي"
+                        aria-label="ط¥ط²ط§ظ„ط© ظ…ظ† ظ‚ط§ط¦ظ…طھظٹ"
                         className="absolute left-2.5 top-2.5 grid h-8 w-8 place-items-center rounded-full border border-rose-500/40 bg-[#090A0E]/80 text-rose-400 shadow-sm transition hover:bg-rose-500 hover:text-white"
                       >
                         <Trash2 size={13} />
@@ -370,7 +406,7 @@ export default function HomePage() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between p-3 text-[10px] font-bold text-slate-400 border-t border-white/5 bg-[#141524]">
-                      <span>{item.category || (item.isSeries ? "مسلسل" : "فيلم")}</span>
+                      <span>{item.category || (item.isSeries ? "ظ…ط³ظ„ط³ظ„" : "ظپظٹظ„ظ…")}</span>
                       {item.rating && (
                         <span className="inline-flex items-center gap-1 text-amber-400">
                           <Star size={11} className="fill-amber-400 text-amber-400" />{item.rating}
@@ -412,3 +448,5 @@ export default function HomePage() {
     </div>
   );
 }
+
+

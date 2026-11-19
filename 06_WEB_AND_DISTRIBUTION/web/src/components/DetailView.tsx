@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState } from "react";
 import {
@@ -23,6 +23,7 @@ interface DetailViewProps {
   loading: boolean;
   onBack: () => void;
   onPlayServer: (serverUrl: string, serverName: string) => void;
+  onPlayAllServers: (servers: { embedUrl: string; name: string }[]) => void;
   resolvingServer: string | null;
   isFavorite: boolean;
   onToggleFavorite: () => void;
@@ -40,6 +41,7 @@ export default function DetailView({
   loading,
   onBack,
   onPlayServer,
+  onPlayAllServers,
   resolvingServer,
   isFavorite,
   onToggleFavorite,
@@ -182,24 +184,30 @@ export default function DetailView({
 
           {/* Action Buttons */}
           <div className="mt-6 flex flex-wrap justify-center gap-3 lg:justify-start">
-            {rawServers[0] && (
+            {rawServers.length > 0 ? (
               <button
                 type="button"
-                onClick={() => onPlayServer(rawServers[0].embedUrl, rawServers[0].name)}
-                className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95"
+                onClick={() => onPlayAllServers(rawServers)}
+                disabled={Boolean(resolvingServer)}
+                className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95 disabled:opacity-60"
               >
-                <Play size={16} className="fill-current" /> شاهد الآن
+                {resolvingServer ? (
+                  <LoaderCircle size={16} className="animate-spin text-slate-950" />
+                ) : (
+                  <Play size={16} className="fill-current" />
+                )}
+                <span>شاهد الآن</span>
               </button>
-            )}
-            {!rawServers.length && detail?.proxiedStream && (
+            ) : detail?.proxiedStream ? (
               <button
                 type="button"
                 onClick={() => onPlayServer(detail.proxiedStream!, "السيرفر المباشر")}
                 className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/30"
               >
-                <Play size={16} className="fill-current" /> شاهد الآن
+                <Play size={16} className="fill-current" />
+                <span>شاهد الآن</span>
               </button>
-            )}
+            ) : null}
             <button
               type="button"
               onClick={handleDirectDownload}

@@ -156,6 +156,8 @@ function parseListing(html: string): ArabseedItem[] {
 
 // Category mappings for Arabseed (Mobile Endpoint)
 const CATEGORY_MAP: Record<string, string> = {
+  trending: "trend/",
+  recent: "recently/",
   movies: "movies/",
   series: "series/",
   foreign_movies: "category/foreign-movies/",

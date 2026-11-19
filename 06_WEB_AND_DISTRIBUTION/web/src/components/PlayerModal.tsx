@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
@@ -197,7 +197,14 @@ export default function PlayerModal({
   const [downloadingVideo, setDownloadingVideo] = useState(false);
   const [seekFeedback, setSeekFeedback] = useState<string | null>(null);
 
-  const currentStream = streams[currentIndex] || streams[0];
+  const [streamList, setStreamList] = useState<StreamSource[]>(streams);
+
+  useEffect(() => {
+    setStreamList(streams);
+    setCurrentIndex(activeStreamIndex);
+  }, [streams, activeStreamIndex]);
+
+  const currentStream = streamList[currentIndex] || streamList[0] || streams[0];
   const youtubeVideoId = extractYouTubeId(currentStream?.url);
   const isYouTube = Boolean(youtubeVideoId);
 
@@ -222,10 +229,7 @@ export default function PlayerModal({
       !isYouTube &&
       !currentStream.url.includes(".m3u8") &&
       !currentStream.url.includes("/api/proxy/stream") &&
-      !currentStream.url.includes(".mp4") &&
-      !currentStream.url.includes("govid.live") &&
-      !currentStream.url.includes("datahowa") &&
-      !currentStream.url.includes("pl.dood")
+      !currentStream.url.includes(".mp4")
   );
 
   // Apply Smart Bandwidth profile constraints to HLS instance
@@ -408,9 +412,9 @@ export default function PlayerModal({
     };
   }, [isYouTube]);
 
-  // HLS / Direct Video stream attachment (When NOT YouTube)
+  // HLS / Direct Video stream attachment (When NOT YouTube or Iframe Embed)
   useEffect(() => {
-    if (isYouTube) return;
+    if (isYouTube || isEmbed || useIframeFallback) return;
     const video = videoRef.current;
     if (!video || !currentStream) return;
 
@@ -820,12 +824,35 @@ export default function PlayerModal({
     }
   };
 
-  const handleSwitchServer = (idx: number) => {
+  const handleSwitchServer = async (idx: number) => {
     setCurrentIndex(idx);
     setShowServerMenu(false);
     onSwitchStream?.(idx);
-    const serverName = streams[idx]?.name || `سيرفر ${idx + 1}`;
+    const target = streamList[idx] || streams[idx];
+    const serverName = target?.name || `سيرفر ${idx + 1}`;
     setSeekFeedback(`⚡ جاري التبديل إلى: ${serverName}`);
+
+    if (
+      target?.url &&
+      !target.url.includes(".m3u8") &&
+      !target.url.includes(".mp4") &&
+      !target.url.includes("/api/proxy/stream") &&
+      !extractYouTubeId(target.url)
+    ) {
+      try {
+        const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(target.url)}`);
+        const json = await res.json();
+        const resolvedUrl = json.playUrl || json.data?.playUrl;
+        if (resolvedUrl) {
+          setStreamList((prev) => {
+            const next = [...prev];
+            next[idx] = { ...next[idx], url: resolvedUrl };
+            return next;
+          });
+        }
+      } catch {}
+    }
+
     setTimeout(() => setSeekFeedback(null), 1500);
   };
 

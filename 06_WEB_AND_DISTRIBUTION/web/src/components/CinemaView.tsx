@@ -35,36 +35,66 @@ interface CinemaViewProps {
   onBrowseTab?: (tab: "movies" | "series") => void;
 }
 
-const FILTERS = [
-  { id: "all", label: "الكل", icon: Sparkles },
-  { id: "foreign_movies", label: "أفلام أجنبية", icon: Film },
-  { id: "arabic_movies", label: "أفلام عربية", icon: Film },
-  { id: "turkish_movies", label: "أفلام تركية", icon: Film },
-  { id: "foreign_series", label: "مسلسلات أجنبية", icon: Tv },
-  { id: "arabic_series", label: "مسلسلات عربية", icon: Tv },
-  { id: "turkish_series", label: "مسلسلات تركية", icon: Tv },
-  { id: "ramadan", label: "رمضان", icon: Sparkles },
-  { id: "anime", label: "أنمي وكرتون", icon: Sparkles },
-  { id: "action", label: "أكشن", icon: Flame },
-  { id: "horror", label: "رعب وغموض", icon: Film },
-  { id: "wrestling", label: "مصارعة", icon: Flame },
-];
+// ── Hierarchical Category Structure (matches mobile ArabseedItem.kt) ──
+const MAIN_TABS = [
+  { id: "home",   label: "الرئيسية",    icon: Sparkles },
+  { id: "movies", label: "الأفلام",     icon: Film },
+  { id: "series", label: "المسلسلات",   icon: Tv },
+  { id: "anime",  label: "أنمي",        icon: Flame },
+] as const;
+
+type MainTabId = (typeof MAIN_TABS)[number]["id"];
+
+const SUB_CATEGORIES: Record<MainTabId, { id: string; label: string }[]> = {
+  home: [
+    { id: "all",      label: "كل الأعمال" },
+    { id: "trending", label: "الأكثر مشاهدة" },
+    { id: "recent",   label: "أضيف حديثاً" },
+  ],
+  movies: [
+    { id: "movies",           label: "كل الأفلام" },
+    { id: "foreign_movies",   label: "أجنبي" },
+    { id: "arabic_movies",    label: "عربي" },
+    { id: "turkish_movies",   label: "تركي" },
+    { id: "animation_movies", label: "أنيميشن" },
+    { id: "dubbed_movies",    label: "مدبلج" },
+  ],
+  series: [
+    { id: "series",          label: "كل المسلسلات" },
+    { id: "foreign_series",  label: "أجنبي" },
+    { id: "arabic_series",   label: "عربي" },
+    { id: "turkish_series",  label: "تركي" },
+    { id: "asian_series",    label: "كوري" },
+    { id: "indian_series",   label: "هندي" },
+    { id: "dubbed_series",   label: "مدبلج" },
+    { id: "ramadan",         label: "رمضان" },
+  ],
+  anime: [
+    { id: "anime",        label: "كل الأنمي" },
+    { id: "anime_series", label: "مسلسلات أنمي" },
+  ],
+};
 
 const SECTION_TITLES: Record<string, string> = {
-  all: "أحدث الإضافات",
-  movies: "مكتبة الأفلام",
-  series: "مكتبة المسلسلات",
-  foreign_movies: "أفلام أجنبية",
-  arabic_movies: "أفلام عربية",
-  turkish_movies: "أفلام تركية",
-  foreign_series: "مسلسلات أجنبية",
-  arabic_series: "مسلسلات عربية",
-  turkish_series: "مسلسلات تركية",
-  ramadan: "مسلسلات رمضان",
-  anime: "أنمي وكرتون",
-  action: "أكشن ومغامرة",
-  horror: "رعب وتشويق",
-  wrestling: "عروض مصارعة",
+  all:              "أحدث الإضافات",
+  trending:         "الأكثر مشاهدة",
+  recent:           "أضيف حديثاً",
+  movies:           "مكتبة الأفلام",
+  series:           "مكتبة المسلسلات",
+  foreign_movies:   "أفلام أجنبية",
+  arabic_movies:    "أفلام عربية",
+  turkish_movies:   "أفلام تركية",
+  animation_movies: "أفلام أنيميشن",
+  dubbed_movies:    "أفلام مدبلجة",
+  foreign_series:   "مسلسلات أجنبية",
+  arabic_series:    "مسلسلات عربية",
+  turkish_series:   "مسلسلات تركية",
+  asian_series:     "مسلسلات كورية",
+  indian_series:    "مسلسلات هندية",
+  dubbed_series:    "مسلسلات مدبلجة",
+  ramadan:          "مسلسلات رمضان",
+  anime:            "أنمي وكرتون",
+  anime_series:     "مسلسلات أنمي",
 };
 
 // Adaptive title font sizing helper (matches mobile app commit 82c7af8)
@@ -188,7 +218,18 @@ export default function CinemaView({
   onToggleFavorite,
   onBrowseTab,
 }: CinemaViewProps) {
-  const [filter, setFilter] = useState("all");
+  // ── Main tab selection (Navbar-driven OR internal) ──
+  const [mainTab, setMainTab] = useState<MainTabId>(() => {
+    if (activeTab === "movies" || activeTab === "series" || activeTab === "anime") return activeTab;
+    return "home";
+  });
+
+  // Sub-category inside the active main tab
+  const [subCategory, setSubCategory] = useState<string>(() => {
+    if (selectedGenre) return selectedGenre;
+    return SUB_CATEGORIES[mainTab === "home" ? "home" : mainTab][0].id;
+  });
+
   const [items, setItems] = useState<ArabseedItem[]>([]);
   const [homeMovies, setHomeMovies] = useState<ArabseedItem[]>([]);
   const [homeSeries, setHomeSeries] = useState<ArabseedItem[]>([]);
@@ -201,11 +242,31 @@ export default function CinemaView({
   const [carouselIndex, setCarouselIndex] = useState(0);
   const carouselTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Sync mainTab when parent activeTab prop changes (from Navbar clicks)
   useEffect(() => {
-    if (selectedGenre) setFilter(selectedGenre);
-    else setFilter("all");
-    setPage(1);
-  }, [activeTab, selectedGenre]);
+    const nextMain: MainTabId =
+      activeTab === "movies" || activeTab === "series" || activeTab === "anime"
+        ? activeTab
+        : "home";
+    if (nextMain !== mainTab) {
+      setMainTab(nextMain);
+      const firstSub = SUB_CATEGORIES[nextMain][0].id;
+      setSubCategory(firstSub);
+      setPage(1);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  // Sync subCategory when parent passes selectedGenre
+  useEffect(() => {
+    if (selectedGenre) {
+      setSubCategory(selectedGenre);
+      setPage(1);
+    }
+  }, [selectedGenre]);
+
+  // Resolve the actual API slug from the active sub-category
+  const activeSlug = subCategory;
 
   useEffect(() => {
     let cancelled = false;
@@ -228,7 +289,9 @@ export default function CinemaView({
           return;
         }
 
-        if (activeTab === "home" && filter === "all") {
+        // ── Home tab: show mixed movies + series ──
+        const isHomeAll = mainTab === "home" && activeSlug === "all";
+        if (isHomeAll) {
           let movies: ArabseedItem[] = [];
           let series: ArabseedItem[] = [];
           const publishAvailableItems = () => {
@@ -252,11 +315,12 @@ export default function CinemaView({
           return;
         }
 
-        const slug = filter !== "all" ? filter : activeTab;
-        const endpoint =
-          filter === "all" && (activeTab === "movies" || activeTab === "series")
-            ? `/api/cinema/${activeTab}?page=${page}`
-            : `/api/cinema/category?slug=${encodeURIComponent(slug)}&page=${page}`;
+        // ── Category/Sub-category fetch ──
+        // For top-level movie/series tabs with no sub-filter, use dedicated endpoint
+        const useDedicated = (activeSlug === "movies" || activeSlug === "series") && !selectedGenre;
+        const endpoint = useDedicated
+          ? `/api/cinema/${activeSlug}?page=${page}`
+          : `/api/cinema/category?slug=${encodeURIComponent(activeSlug)}&page=${page}`;
         const res = await fetch(endpoint, { signal: controller.signal });
         const result = await res.json();
         if (!cancelled) {
@@ -282,7 +346,7 @@ export default function CinemaView({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [activeTab, filter, page, searchQuery]);
+  }, [mainTab, activeSlug, page, searchQuery, selectedGenre]);
 
   // Featured carousel items (top 5 items with posters)
   const featuredItems = useMemo(() => {
@@ -302,10 +366,10 @@ export default function CinemaView({
     };
   }, [featuredItems.length]);
 
-  const isHome = activeTab === "home" && filter === "all" && !searchQuery.trim();
+  const isHome = mainTab === "home" && activeSlug === "all" && !searchQuery.trim();
   const pageTitle = searchQuery.trim()
     ? `نتائج البحث عن «${searchQuery.trim()}»`
-    : SECTION_TITLES[filter === "all" ? activeTab : filter] || "أحدث الأعمال";
+    : SECTION_TITLES[activeSlug] || SECTION_TITLES[mainTab] || "أحدث الأعمال";
 
   const playQuickly = async (event: React.MouseEvent<HTMLButtonElement>, item: ArabseedItem) => {
     event.stopPropagation();
@@ -366,31 +430,63 @@ export default function CinemaView({
   }
 
   return (
-    <div className="space-y-8 sm:space-y-10">
-      {/* Filters Bar */}
+    <div className="space-y-6 sm:space-y-8">
+      {/* ── Hierarchical Category Navigation ── */}
       {!searchQuery.trim() && (
-        <div className="no-scrollbar -mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0">
-          {FILTERS.map(({ id, label, icon: Icon }) => {
-            const active = filter === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setFilter(id);
-                  setPage(1);
-                }}
-                className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-3.5 sm:px-4 py-2 sm:py-2.5 text-xs font-bold transition duration-200 ${
-                  active
-                    ? "border border-amber-500/40 bg-gradient-to-r from-amber-500/25 to-amber-500/15 text-amber-300 shadow-[0_0_15px_rgba(212,175,55,0.2)]"
-                    : "border border-white/5 bg-[#12131D] text-slate-300 hover:border-amber-500/30 hover:bg-[#161726] hover:text-white"
-                }`}
-              >
-                <Icon size={14} className={active ? "text-amber-400" : "text-slate-400"} />
-                <span>{label}</span>
-              </button>
-            );
-          })}
+        <div className="space-y-3">
+          {/* Row 1: Main Tabs */}
+          <div className="no-scrollbar -mx-4 flex items-center gap-1.5 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+            {MAIN_TABS.map(({ id, label, icon: Icon }) => {
+              const active = mainTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setMainTab(id);
+                    const firstSub = SUB_CATEGORIES[id][0].id;
+                    setSubCategory(firstSub);
+                    setPage(1);
+                    if (onBrowseTab && (id === "movies" || id === "series")) {
+                      onBrowseTab(id);
+                    }
+                  }}
+                  className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-black transition duration-200 ${
+                    active
+                      ? "bg-gradient-to-r from-amber-400 to-amber-600 text-slate-950 shadow-lg shadow-amber-500/30"
+                      : "border border-white/8 bg-[#12131D] text-slate-300 hover:border-amber-500/30 hover:bg-[#161726] hover:text-white"
+                  }`}
+                >
+                  <Icon size={15} className={active ? "text-slate-950" : "text-slate-400"} />
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Row 2: Sub-category chips */}
+          <div className="no-scrollbar -mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+            {SUB_CATEGORIES[mainTab].map(({ id, label }) => {
+              const active = subCategory === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setSubCategory(id);
+                    setPage(1);
+                  }}
+                  className={`inline-flex shrink-0 items-center rounded-xl px-3.5 py-1.5 text-xs font-bold transition duration-200 ${
+                    active
+                      ? "border border-amber-500/50 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(212,175,55,0.2)]"
+                      : "border border-white/5 bg-[#161726] text-slate-400 hover:border-amber-500/25 hover:text-white"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
