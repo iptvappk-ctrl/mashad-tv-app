@@ -5,5 +5,7 @@
   "scripts": {
     "start": "serve public"
   },
-  "dependencies": {}
+  "dependencies": {
+    "firebase-admin": "^13.4.0"
+  }
 }
