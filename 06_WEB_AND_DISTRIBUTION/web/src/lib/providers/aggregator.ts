@@ -261,9 +261,6 @@ export class MultiProviderAggregator {
       return serverUrl;
     }
     const provider = this.getProviderForUrl(serverUrl);
-    if (provider === arabseedProvider && !serverUrl.includes("govid") && !serverUrl.includes("arabseed")) {
-      return serverUrl;
-    }
     try {
       const direct = await provider.resolveStream(serverUrl);
       return direct || serverUrl;
