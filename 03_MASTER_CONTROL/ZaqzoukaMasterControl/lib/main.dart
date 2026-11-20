@@ -44,168 +44,176 @@ class MasterAuthScreen extends StatefulWidget {
 }
 
 class _MasterAuthScreenState extends State<MasterAuthScreen> {
-  String _enteredPin = '';
-  bool _hasError = false;
+  final TextEditingController _passwordController = TextEditingController();
+  bool _obscureText = true;
+  bool _isAuthenticating = false;
+  String? _errorMessage;
 
-  void _onDigit(String d) {
-    if (_enteredPin.length < 6) {
-      setState(() {
-        _enteredPin += d;
-        _hasError = false;
-      });
-      if (_enteredPin.length == 6) {
-        _verifyPin();
-      }
-    }
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
   }
 
-  void _onDelete() {
-    if (_enteredPin.isNotEmpty) {
-      setState(() {
-        _enteredPin = _enteredPin.substring(0, _enteredPin.length - 1);
-        _hasError = false;
-      });
+  Future<void> _verifyPassword() async {
+    final text = _passwordController.text.trim();
+    if (text.isEmpty) {
+      setState(() => _errorMessage = 'يرجى إدخال كلمة المرور');
+      return;
     }
-  }
 
-  Future<void> _verifyPin() async {
-    final valid = await SecurityVault.verifyPin(_enteredPin);
+    setState(() {
+      _isAuthenticating = true;
+      _errorMessage = null;
+    });
+
+    final valid = await SecurityVault.verifyPin(text);
     if (!mounted) return;
+
     if (valid) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => MasterDashboardScreen(masterPin: _enteredPin),
+          builder: (_) => MasterDashboardScreen(masterPin: text),
         ),
       );
     } else {
       setState(() {
-        _hasError = true;
-        _enteredPin = '';
+        _isAuthenticating = false;
+        _errorMessage = '❌ كلمة المرور غير صحيحة، حاول مجدداً';
+        _passwordController.clear();
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('الرمز السري غير صحيح! الرمز الافتراضي: 999888', textAlign: TextAlign.center),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Spacer(),
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFFB94E3C).withValues(alpha: 0.15),
-                  border: Border.all(color: const Color(0xFFB94E3C), width: 2),
-                ),
-                child: const Icon(Icons.shield_rounded, size: 38, color: Color(0xFFD4AF37)),
-              ),
-              const SizedBox(height: 18),
-              const Text(
-                'لوحة التحكم الإداري الأعلى',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'أدخل الرمز السري الرئيسي (Master PIN)',
-                style: TextStyle(fontSize: 13, color: Color(0xFF8E95AA)),
-              ),
-              const SizedBox(height: 28),
-              // Dots indicator
-              Row(
+      body: Directionality(
+        textDirection: TextDirection.rtl,
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 28.0, vertical: 24.0),
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(6, (i) {
-                  final filled = i < _enteredPin.length;
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    margin: const EdgeInsets.symmetric(horizontal: 7),
-                    width: filled ? 18 : 14,
-                    height: filled ? 18 : 14,
+                children: [
+                  Container(
+                    width: 76,
+                    height: 76,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: _hasError
-                          ? Colors.redAccent
-                          : filled
-                              ? const Color(0xFFD4AF37)
-                              : const Color(0xFF242A3D),
-                      boxShadow: filled
-                          ? [
-                              BoxShadow(
-                                color: const Color(0xFFD4AF37).withValues(alpha: 0.4),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              )
-                            ]
-                          : null,
+                      color: const Color(0xFFB94E3C).withValues(alpha: 0.15),
+                      border: Border.all(color: const Color(0xFFB94E3C), width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFFD4AF37).withValues(alpha: 0.2),
+                          blurRadius: 20,
+                          spreadRadius: 2,
+                        ),
+                      ],
                     ),
-                  );
-                }),
+                    child: const Icon(Icons.shield_rounded, size: 40, color: Color(0xFFD4AF37)),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'لوحة التحكم الإداري الأعلى',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'أدخل كلمة المرور الرئيسية (Master Key)',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF8E95AA)),
+                  ),
+                  const SizedBox(height: 36),
+
+                  // Password Input Box
+                  Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF141824),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: _errorMessage != null ? Colors.redAccent : const Color(0xFF242A3D),
+                        width: 1.5,
+                      ),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    child: TextField(
+                      controller: _passwordController,
+                      obscureText: _obscureText,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _verifyPassword(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
+                      ),
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        hintText: 'كلمة المرور...',
+                        hintStyle: const TextStyle(color: Color(0xFF555E75), fontSize: 14),
+                        border: InputBorder.none,
+                        prefixIcon: const Icon(Icons.key_rounded, color: Color(0xFFD4AF37), size: 22),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscureText ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                            color: const Color(0xFF8E95AA),
+                            size: 20,
+                          ),
+                          onPressed: () => setState(() => _obscureText = !_obscureText),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _errorMessage!,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+
+                  const SizedBox(height: 24),
+
+                  // Submit Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFB94E3C),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        elevation: 4,
+                      ),
+                      onPressed: _isAuthenticating ? null : _verifyPassword,
+                      child: _isAuthenticating
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                            )
+                          : const Text(
+                              'تأكيد الدخول',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+                  const Text(
+                    'المنظومة محمية بتشفير صارم وقواعد أمان ضد أي استخراج.',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF4A5568)),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
-              const Spacer(),
-              // Numpad
-              _buildNumpad(),
-              const SizedBox(height: 20),
-            ],
+            ),
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildNumpad() {
-    final rows = [
-      ['1', '2', '3'],
-      ['4', '5', '6'],
-      ['7', '8', '9'],
-      ['', '0', 'del'],
-    ];
-
-    return Column(
-      children: rows.map((r) {
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: r.map((cell) {
-            if (cell.isEmpty) return const SizedBox(width: 76, height: 76);
-            if (cell == 'del') {
-              return SizedBox(
-                width: 76,
-                height: 76,
-                child: IconButton(
-                  icon: const Icon(Icons.backspace_outlined, color: Colors.white70),
-                  onPressed: _onDelete,
-                ),
-              );
-            }
-            return Container(
-              margin: const EdgeInsets.all(7),
-              width: 74,
-              height: 74,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF141824),
-                  foregroundColor: Colors.white,
-                  shape: const CircleBorder(),
-                  elevation: 0,
-                  side: const BorderSide(color: Color(0xFF242A3D)),
-                ),
-                onPressed: () => _onDigit(cell),
-                child: Text(cell, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              ),
-            );
-          }).toList(),
-        );
-      }).toList(),
     );
   }
 }
