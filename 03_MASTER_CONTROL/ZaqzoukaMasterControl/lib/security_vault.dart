@@ -59,31 +59,25 @@ class SecurityVault {
     return utf8.decode(output);
   }
 
-  /// Save encrypted server configuration to phone
-  static Future<void> saveVault(String masterPin, Map<String, dynamic> data) async {
+  /// Completely wipe and remove any local vault from phone
+  static Future<void> wipeVault() async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonStr = jsonEncode(data);
-    final cipher = _xorCipher(jsonStr, masterPin);
-    await prefs.setString(_kVaultKey, cipher);
+    await prefs.remove(_kVaultKey);
+  }
+
+  /// Save encrypted server configuration to phone (Disabled: No backups persisted)
+  static Future<void> saveVault(String masterPin, Map<String, dynamic> data) async {
+    // Disabled per owner request: Zero backups anywhere
+    await wipeVault();
   }
 
   /// Load and decrypt server configuration from phone
   static Future<Map<String, dynamic>?> loadVault(String masterPin) async {
-    final prefs = await SharedPreferences.getInstance();
-    final cipher = prefs.getString(_kVaultKey);
-    if (cipher == null || cipher.isEmpty) return null;
-    try {
-      final decrypted = _xorDecipher(cipher, masterPin);
-      return jsonDecode(decrypted) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
-    }
+    return null;
   }
 
   /// Check if an offline backup vault exists
   static Future<bool> hasVault() async {
-    final prefs = await SharedPreferences.getInstance();
-    final cipher = prefs.getString(_kVaultKey);
-    return cipher != null && cipher.isNotEmpty;
+    return false;
   }
 }

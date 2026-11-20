@@ -237,6 +237,7 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    SecurityVault.wipeVault();
     _refreshStatus();
     _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) => _refreshStatus(silent: true));
   }
@@ -332,9 +333,9 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
           children: [
             const Text(
               '⚠️ تحذير شديد الخطورة:\n\n'
-              '1. سيتم تصفير وحذف كافة السيرفرات والقنوات من Firebase.\n'
-              '2. سيتم إرسال أمر تدمير فوري لكل هواتف المستخدمين لمسح الكاش المحلي وإغلاق التطبيق.\n'
-              '3. سيتم حفظ نسخة احتياطية مشفرة فقط على هاتفك هذا لضمان استعادتها لاحقاً.\n\n'
+              '1. سيتم تصفير وحذف كافة السيرفرات والقنوات من Firebase نهائياً بلا رجعة.\n'
+              '2. سيتم إرسال أمر تدمير فوري لكل هواتف المستخدمين لمسح الكاش المحلي وحظر الأجهزة.\n'
+              '3. مسح شامل ودائم دون الاحتفاظ بأي نسخ احتياطية على أي جهاز نهائياً.\n\n'
               'لتأكيد التدمير، اكتب كلمة WIPE أدناه:',
               style: TextStyle(fontSize: 13, color: Colors.white70, height: 1.5),
             ),
@@ -369,20 +370,13 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
 
     if (confirm == true) {
       setState(() => _isLoading = true);
-      // 1. First save local encrypted backup vault of servers
-      await SecurityVault.saveVault(widget.masterPin, {
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'catalog': {'verified': true, 'auto_restore': true},
-        'servers': {
-          'server1': 'https://primary-stream-server.com',
-          'server2': 'https://secondary-stream-server.com',
-        }
-      });
+      // 1. Permanently wipe any local vault from this device
+      await SecurityVault.wipeVault();
 
       // 2. Dispatch Nuclear Wipe Command
       final ok = await MasterApiClient.triggerNuclearWipe();
       if (!mounted) return;
-      _showToast(ok ? '💥 تم تدمير ومسح السحابة والكاش من جميع الأجهزة' : 'فشل تنفيذ أمر المسح');
+      _showToast(ok ? '💥 تم تدمير ومسح كل شيء نهائياً بلا رجعة' : 'فشل تنفيذ أمر المسح');
       _refreshStatus();
     }
   }
