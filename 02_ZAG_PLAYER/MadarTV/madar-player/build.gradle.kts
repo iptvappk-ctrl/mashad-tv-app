@@ -12,10 +12,10 @@ android {
 
     defaultConfig {
         applicationId = "com.madar.player"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 36
-        versionCode = 28
-        versionName = "1.1.28"
+        versionCode = 29
+        versionName = "1.1.29"
     }
 
     signingConfigs {
