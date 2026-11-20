@@ -34,7 +34,7 @@ function getDb() {
   return admin.database();
 }
 
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'zaqzouka_secret_2026';
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'Zq!7#mK9xPd@3wR5nT';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');

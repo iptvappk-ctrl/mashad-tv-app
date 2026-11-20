@@ -100,8 +100,8 @@ class DashboardHomeScreen extends StatefulWidget {
 
 class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     with SingleTickerProviderStateMixin {
-  String _apiBaseUrl = 'https://zaqzouka-dashboard-api.vercel.app';
-  String _adminSecret = 'zaqzouka_secret_2026';
+  final String _apiBaseUrl = 'https://zaqzouka-dashboard-api.vercel.app';
+  final String _adminSecret = 'Zq!7#mK9xPd@3wR5nT';
 
   bool _isLoading = true;
   int _autoRefreshSeconds = 15; // 0 = off, 5, 15, 30
@@ -303,12 +303,6 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             tooltip: 'تحديث فوري',
             icon: Icon(Icons.refresh_rounded, color: widget.isLightMode ? const Color(0xFF0284C7) : const Color(0xFF38BDF8)),
             onPressed: () => _fetchStats(),
-          ),
-          // Settings Dialog
-          IconButton(
-            tooltip: 'إعدادات الربط',
-            icon: Icon(Icons.tune_rounded, color: _textMuted),
-            onPressed: _showSettingsDialog,
           ),
           const SizedBox(width: 4),
         ],
@@ -3013,58 +3007,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     );
   }
 
-  void _showSettingsDialog() {
-    final urlController = TextEditingController(text: _apiBaseUrl);
-    final secretController = TextEditingController(text: _adminSecret);
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: _cardBg,
-          title: Text('إعدادات الاتصال بالسحابة', style: TextStyle(color: _textPrimary)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: urlController,
-                style: TextStyle(color: _textPrimary),
-                decoration: const InputDecoration(
-                  labelText: 'رابط السيرفر (API URL)',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: secretController,
-                style: TextStyle(color: _textPrimary),
-                decoration: const InputDecoration(
-                  labelText: 'مفتاح الأدمن السري (Admin Secret)',
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4F46E5)),
-              onPressed: () {
-                setState(() {
-                  _apiBaseUrl = urlController.text.trim();
-                  _adminSecret = secretController.text.trim();
-                });
-                Navigator.pop(ctx);
-                _fetchStats();
-              },
-              child: const Text('حفظ واتصال', style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  // Settings dialog removed — credentials are managed internally
+  void _showSettingsDialog() {}
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

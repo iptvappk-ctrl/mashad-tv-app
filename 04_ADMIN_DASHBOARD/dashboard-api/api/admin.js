@@ -7,7 +7,7 @@
 const { db, sendJson, handleCors } = require('./_lib');
 
 const MASTER_SECRET = process.env.MASTER_SECRET || 'zaqzouka_master_2026';
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'zaqzouka_secret_2026';
+const ADMIN_SECRET = process.env.ADMIN_SECRET || 'Zq!7#mK9xPd@3wR5nT';
 const ZAQZOUKA_API_KEY = process.env.ZAQZOUKA_API_KEY || 'ZQ-OWNER-2026-SECRET-14MOON';
 const AUTHORIZED_BUILDS = (process.env.AUTHORIZED_BUILDS || '').split(',').map(s => s.trim()).filter(Boolean);
 

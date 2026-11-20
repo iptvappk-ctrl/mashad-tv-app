@@ -6,7 +6,7 @@ class MasterApiClient {
     'https://zaqzouka-dashboard-api.vercel.app/api/system_control',
     'https://zaqzouka-vercel-hub.vercel.app/api/system_control',
   ];
-  static const String _adminSecret = 'zaqzouka_secret_2026';
+  static const String _adminSecret = 'Zq!7#mK9xPd@3wR5nT';
 
   /// Fetch current system state from the cloud
   static Future<Map<String, dynamic>> fetchStatus() async {
