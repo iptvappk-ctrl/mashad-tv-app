@@ -6340,13 +6340,20 @@ private fun ZakzoukaPlayerScreen(
                     contentType = if (detail.item.type == ArabseedType.SERIES) "series" else "movie",
 
                     onError = {
-
-                        // on ExoPlayer error fall back to WebView
-
-                        playerPrompt = "تعذر تشغيل الفيديو. جرّب سيرفرًا آخر."
-
+                        val currentIdx = detail.servers.indexOf(activeServer)
+                        if (currentIdx != -1 && currentIdx + 1 < detail.servers.size) {
+                            val nextServer = detail.servers[currentIdx + 1]
+                            playerPrompt = "⚡ جاري التبديل الذكي إلى: ${nextServer.name}..."
+                            activeServer = nextServer
+                        } else {
+                            if (activeServer != null && resolvedStreamUrl != activeServer?.embedUrl) {
+                                resolvedStreamUrl = activeServer?.embedUrl
+                                playerPrompt = "🛡️ تفعيل وضع المشغل البديل..."
+                            } else {
+                                playerPrompt = "تعذر تشغيل الفيديو. جرّب سيرفرًا آخر."
+                            }
+                        }
                         promptNeedsRetry = false
-
                     }
 
                 )

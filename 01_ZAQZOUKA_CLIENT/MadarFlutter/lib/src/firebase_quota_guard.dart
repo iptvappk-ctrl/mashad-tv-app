@@ -19,27 +19,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ════════════════════════════════════════
 
 class _Cfg {
-  // Vercel CDN endpoints (60-second cached, handles 1M+ users)
+  // Live Endpoints (Vercel Edge CDN cached, instant status response)
   static const vercelStatusUrls = [
+    'https://web-nu-teal-29.vercel.app/api/status',
+    'https://zaqzouka-vercel-hub.vercel.app/api/status',
     'https://zaqzouka-dashboard-api.vercel.app/api/status',
-    'https://zaqzouka-hub.vercel.app/api/status',
-    'https://zaqzouka-updates.vercel.app/api/status',
   ];
 
   // Static fallback JSON on Vercel CDN edge (ultimate fallback)
   static const staticFallbackUrls = [
-    'https://zaqzouka-hub.vercel.app/status/system.json',
-    'https://zaqzouka-updates.vercel.app/status/system.json',
+    'https://web-nu-teal-29.vercel.app/status/system.json',
+    'https://zaqzouka-vercel-hub.vercel.app/status/system.json',
   ];
 
   // Firebase RTDB direct (last resort only)
   static const firebaseUrl =
       'https://madartv-default-rtdb.firebaseio.com/system_control.json';
 
-  // Cache TTL
-  static const localCacheTtl = Duration(seconds: 60);
+  // Cache TTL: 15s for reactive freeze/wipe response without overloading servers
+  static const localCacheTtl = Duration(seconds: 15);
   static const firebaseMinInterval = Duration(minutes: 5); // max 1 direct hit per 5 min
-  static const networkTimeout = Duration(seconds: 8);
+  static const networkTimeout = Duration(seconds: 5);
 
   // SharedPreferences keys
   static const spKeyStatus = 'zaq_system_status';
@@ -282,8 +282,8 @@ class ZaqzoukaQuotaGuard {
 
   void _startPolling() {
     _pollingTimer?.cancel();
-    // Poll every 60 seconds - but all 1M users hit Vercel CDN, not Firebase
-    _pollingTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+    // Poll every 15s - hits Vercel Edge CDN memory cache, zero Firebase exhaustion
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
       final status = await getStatus();
       _statusController.add(status);
     });

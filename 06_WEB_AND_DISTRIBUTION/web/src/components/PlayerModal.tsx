@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import Hls from "hls.js";
 import { trackPlaybackError, trackPlaybackStarted } from "@/lib/analytics";
 import {
@@ -234,6 +234,95 @@ export default function PlayerModal({
       !currentStream.url.includes(".mp4")
   );
 
+  // 🛡️ Smart Failover Engine (حماية تامة من الشاشة السوداء وتبديل السيرفرات الذكي)
+  const failedServersRef = useRef<Set<number>>(new Set());
+  const failoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isFailoverInProgressRef = useRef(false);
+
+  const handleSwitchServer = useCallback(
+    async (idx: number, isAutoFailover = false) => {
+      if (idx < 0 || idx >= streamList.length) return;
+      if (!isAutoFailover) {
+        // User manually selected a server → reset failed list
+        failedServersRef.current.clear();
+      }
+
+      setCurrentIndex(idx);
+      setShowServerMenu(false);
+      onSwitchStream?.(idx);
+      const target = streamList[idx] || streams[idx];
+      const serverName = target?.name || `سيرفر ${idx + 1}`;
+
+      if (isAutoFailover) {
+        setSeekFeedback(`⚡ تبديل ذكي: جاري الانتقال إلى ${serverName}...`);
+      } else {
+        setSeekFeedback(`⚡ جاري التبديل إلى: ${serverName}`);
+      }
+
+      if (
+        target?.url &&
+        !target.url.includes(".m3u8") &&
+        !target.url.includes(".mp4") &&
+        !target.url.includes("/api/proxy/stream") &&
+        !extractYouTubeId(target.url)
+      ) {
+        try {
+          const pageParam = pageUrl ? `&pageUrl=${encodeURIComponent(pageUrl)}` : "";
+          const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(target.url)}${pageParam}`);
+          const json = await res.json();
+          const resolvedUrl = json.playUrl || json.data?.playUrl;
+          if (resolvedUrl) {
+            setStreamList((prev) => {
+              const next = [...prev];
+              next[idx] = { ...next[idx], url: resolvedUrl };
+              return next;
+            });
+          }
+        } catch {}
+      }
+
+      setTimeout(() => setSeekFeedback(null), 1800);
+    },
+    [streamList, streams, pageUrl, onSwitchStream]
+  );
+
+  const triggerSmartFailover = useCallback(
+    (reason: string) => {
+      if (isYouTube || isFailoverInProgressRef.current) return;
+      isFailoverInProgressRef.current = true;
+      setTimeout(() => {
+        isFailoverInProgressRef.current = false;
+      }, 2000);
+
+      failedServersRef.current.add(currentIndex);
+
+      // Find the next available server in streamList that hasn't failed yet
+      let nextIndex = -1;
+      for (let i = 1; i < streamList.length; i++) {
+        const candidate = (currentIndex + i) % streamList.length;
+        if (!failedServersRef.current.has(candidate)) {
+          nextIndex = candidate;
+          break;
+        }
+      }
+
+      if (nextIndex !== -1 && nextIndex !== currentIndex) {
+        handleSwitchServer(nextIndex, true);
+      } else {
+        // All direct video servers in list have failed → activate clean embed fallback automatically
+        if (!useIframeFallback) {
+          setSeekFeedback("🛡️ تفعيل المشغل المباشر الاحتياطي (Clean Embed)...");
+          setUseIframeFallback(true);
+          setIsBuffering(false);
+          setTimeout(() => setSeekFeedback(null), 2500);
+        } else {
+          setErrorMsg("تعذر تشغيل الفيديو من جميع السيرفرات المتاحة لهذا المحتوى. يرجى تجربة فيلم أو حلقة أخرى.");
+        }
+      }
+    },
+    [currentIndex, streamList, isYouTube, useIframeFallback, handleSwitchServer]
+  );
+
   // Apply Smart Bandwidth profile constraints to HLS instance
   const applyBandwidthPolicy = (hls: Hls, tier: BandwidthTier) => {
     if (!hls) return;
@@ -438,6 +527,49 @@ export default function PlayerModal({
       hlsRef.current = null;
     }
 
+    const clearWatchdog = () => {
+      if (failoverTimeoutRef.current) {
+        clearTimeout(failoverTimeoutRef.current);
+        failoverTimeoutRef.current = null;
+      }
+    };
+
+    // ⏱️ Watchdog Timer: If after 6.5s the stream is still black/stalled, auto-failover to next server
+    clearWatchdog();
+    failoverTimeoutRef.current = setTimeout(() => {
+      if (!video.played || video.played.length === 0 || video.currentTime === 0) {
+        triggerSmartFailover("السيرفر لا يستجيب (تجاوز مهلة التحميل)");
+      }
+    }, 6500);
+
+    const onVideoMetadata = () => {
+      clearWatchdog();
+      setIsBuffering(false);
+      if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
+        setDuration(video.duration);
+      }
+      video.play().catch(() => {
+        video.muted = true;
+        setIsMuted(true);
+        setIsAutoplayMuted(true);
+        video.play().catch(() => setIsPlaying(false));
+      });
+    };
+
+    const onVideoPlaying = () => {
+      clearWatchdog();
+      setIsBuffering(false);
+    };
+
+    const onVideoNativeError = () => {
+      clearWatchdog();
+      triggerSmartFailover("تعذر تشغيل الفيديو من هذا السيرفر");
+    };
+
+    video.addEventListener("loadedmetadata", onVideoMetadata);
+    video.addEventListener("playing", onVideoPlaying);
+    video.addEventListener("error", onVideoNativeError);
+
     const streamUrl = currentStream.url;
 
     if (Hls.isSupported() && (streamUrl.includes(".m3u8") || !streamUrl.includes(".mp4"))) {
@@ -461,6 +593,7 @@ export default function PlayerModal({
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+        clearWatchdog();
         setIsBuffering(false);
         if (!isMovieOrSeries) {
           setIsLive(hls.levels[0]?.details?.live ?? false);
@@ -486,6 +619,7 @@ export default function PlayerModal({
       });
 
       hls.on(Hls.Events.LEVEL_LOADED, (_, data) => {
+        clearWatchdog();
         if (data?.details) {
           if (!isMovieOrSeries) {
             setIsLive(Boolean(data.details.live));
@@ -499,6 +633,7 @@ export default function PlayerModal({
       });
 
       hls.on(Hls.Events.FRAG_LOADED, (_, data: any) => {
+        clearWatchdog();
         setIsBuffering(false);
         const stats = data?.frag?.stats || data?.stats;
         if (stats && stats.total && stats.bwQuote) {
@@ -513,45 +648,38 @@ export default function PlayerModal({
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
+          clearWatchdog();
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
+              triggerSmartFailover("خطأ شبكة في السيرفر الحالي");
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
               hls.recoverMediaError();
               break;
             default:
               hls.destroy();
-              setErrorMsg("تعذر تحميل البث من هذا السيرفر. جرب سيرفر بديل.");
+              triggerSmartFailover(data.details || "تعذر قراءة البث");
               break;
           }
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl") || streamUrl.includes(".mp4")) {
       video.src = streamUrl;
-      video.addEventListener("loadedmetadata", () => {
-        setIsBuffering(false);
-        if (video.duration && !isNaN(video.duration) && isFinite(video.duration) && video.duration > 0) {
-          setDuration(video.duration);
-        }
-        video.play().catch(() => {
-          video.muted = true;
-          setIsMuted(true);
-          setIsAutoplayMuted(true);
-          video.play().catch(() => setIsPlaying(false));
-        });
-      });
     } else {
       video.src = streamUrl;
     }
 
     return () => {
+      clearWatchdog();
+      video.removeEventListener("loadedmetadata", onVideoMetadata);
+      video.removeEventListener("playing", onVideoPlaying);
+      video.removeEventListener("error", onVideoNativeError);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [currentStream, isYouTube]);
+  }, [currentStream, isYouTube, isEmbed, useIframeFallback, triggerSmartFailover]);
 
   // Handle Controls Timeout
   const resetHideTimer = () => {
@@ -836,39 +964,6 @@ export default function PlayerModal({
     }
   };
 
-  const handleSwitchServer = async (idx: number) => {
-    setCurrentIndex(idx);
-    setShowServerMenu(false);
-    onSwitchStream?.(idx);
-    const target = streamList[idx] || streams[idx];
-    const serverName = target?.name || `سيرفر ${idx + 1}`;
-    setSeekFeedback(`⚡ جاري التبديل إلى: ${serverName}`);
-
-    if (
-      target?.url &&
-      !target.url.includes(".m3u8") &&
-      !target.url.includes(".mp4") &&
-      !target.url.includes("/api/proxy/stream") &&
-      !extractYouTubeId(target.url)
-    ) {
-      try {
-        const pageParam = pageUrl ? `&pageUrl=${encodeURIComponent(pageUrl)}` : "";
-        const res = await fetch(`/api/cinema/resolve?serverUrl=${encodeURIComponent(target.url)}${pageParam}`);
-        const json = await res.json();
-        const resolvedUrl = json.playUrl || json.data?.playUrl;
-        if (resolvedUrl) {
-          setStreamList((prev) => {
-            const next = [...prev];
-            next[idx] = { ...next[idx], url: resolvedUrl };
-            return next;
-          });
-        }
-      } catch {}
-    }
-
-    setTimeout(() => setSeekFeedback(null), 1500);
-  };
-
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1033,7 +1128,10 @@ export default function PlayerModal({
                 trackPlaybackStarted(title, isStreamLive);
               }
             }}
-            onError={() => trackPlaybackError(isStreamLive)}
+            onError={() => {
+              trackPlaybackError(isStreamLive);
+              triggerSmartFailover("خطأ في تشغيل ترميز الفيديو");
+            }}
             onTimeUpdate={handleTimeUpdate}
             onClick={handlePlayPause}
             className={`w-full h-full cursor-pointer transition-all duration-300 ${videoAspectClass}`}
