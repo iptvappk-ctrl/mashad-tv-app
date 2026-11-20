@@ -1,6 +1,7 @@
 // 🛡️ Zero-dependency high-speed Quota Guard for zaqzouka-vercel-hub
 // Uses native Node 18+ fetch() to read Firebase RTDB REST directly
 // Caches at Vercel CDN edge for 60s (s-maxage=60)
+// Updated: 2026-11-20
 
 let _cache = null;
 let _cacheTime = 0;
