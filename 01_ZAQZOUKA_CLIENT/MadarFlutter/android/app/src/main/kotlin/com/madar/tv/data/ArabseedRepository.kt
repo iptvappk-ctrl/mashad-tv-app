@@ -612,10 +612,9 @@ object ArabseedRepository {
                     .filter { it.startsWith("http") && it != url }
                     .distinct()
                 if (paginationLinks.isEmpty()) {
-                    // MySeed uses ?page=N query param — build pages manually
-                    val baseSearchUrl = url.substringBefore("&page=").substringBefore("?page=")
-                    val sep = if (baseSearchUrl.contains('?')) "&" else "?"
-                    paginationLinks = (2..maxPages).map { p -> "$baseSearchUrl${sep}page=$p" }
+                    // MySeed uses /find/page/N/?word=... for search pagination
+                    val encodedWord = url.substringAfter("word=").substringBefore('&')
+                    paginationLinks = (2..maxPages).map { p -> "$BASE_URL/find/page/$p/?word=$encodedWord" }
                 }
                 for (pageLink in paginationLinks.take(maxPages - 1)) {
                     val pageHtml = fetchHtml(pageLink)
@@ -1302,13 +1301,28 @@ object ArabseedRepository {
 
 
                 // ── Fallback discovery for series where each episode is a separate post ──
-                // Also trigger when episodes are few (< 3) or have gaps — MySeed often renders
-                // only the latest 1-2 episodes on the series page; a search pass discovers the rest.
-                val seasonsNeedSearch = seasons.isEmpty() || seasons.all { it.episodes.isEmpty() } ||
-                    (seasons.sumOf { it.episodes.size } < 3 &&
-                        seasons.all { season ->
-                            SeriesCatalogParser.needsEpisodeSequenceRepair(season.episodes.map { it.number })
-                        })
+                // Also trigger when episodes are few or have gaps, or when seasons are missing (e.g. only season 3 & 4 found, or missing season 1).
+                val detectedSeason = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                    ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+                val maxSeasonFound = seasons.maxOfOrNull { it.number } ?: 0
+                val minSeasonFound = seasons.minOfOrNull { it.number } ?: 0
+                val hasSeasonGaps = seasons.map { it.number }.sorted().zipWithNext().any { (a, b) -> b - a > 1 }
+                val hasEpisodeGaps = seasons.any { season ->
+                    SeriesCatalogParser.needsEpisodeSequenceRepair(season.episodes.map { it.number })
+                }
+                val isMissingLowerSeasons = minSeasonFound > 1
+                val isMissingDetectedSeason = detectedSeason != null && seasons.none { it.number == detectedSeason }
+                val isMissingInterveningSeasons = maxSeasonFound > seasons.size
+
+                val seasonsNeedSearch = forceRefresh ||
+                    seasons.isEmpty() ||
+                    seasons.all { it.episodes.isEmpty() } ||
+                    isMissingLowerSeasons ||
+                    isMissingDetectedSeason ||
+                    isMissingInterveningSeasons ||
+                    hasSeasonGaps ||
+                    hasEpisodeGaps ||
+                    (seasons.sumOf { it.episodes.size } < 5 && !isEpisodePage)
                 val rawTitleCandidate = item.parentSeriesTitle?.takeIf(String::isNotBlank)
                     ?: item.title.takeIf { !it.contains("الموسم") || it.length > 15 }
                     ?: run {
@@ -1338,8 +1352,8 @@ object ArabseedRepository {
                     val discoveredEpisodes = mutableListOf<Triple<String, String, Int?>>()
                     for (query in searchCandidates) {
                         try {
-                            // Fetch up to 4 pages of search results to discover all episodes across paginated search
-                            val results = search(query, forceRefresh = true, maxPages = 4)
+                            // Fetch up to 8 pages of search results to discover all episodes and seasons across paginated search
+                            val results = search(query, forceRefresh = true, maxPages = 8)
                             android.util.Log.i(TAG, "search query='$query' returned ${results.size} items: ${results.take(4).map { it.title }}")
                             for (sr in results) {
                                 val srEpNum = SeriesCatalogParser.episodeNumber(sr.title, sr.pageUrl)
@@ -1369,7 +1383,7 @@ object ArabseedRepository {
                                     }
                                 }
                             }
-                            if (discoveredEpisodes.size >= 50) break
+                            if (discoveredEpisodes.size >= 500) break
                         } catch (_: Exception) {}
                     }
                     if (discoveredEpisodes.isNotEmpty()) {
@@ -1397,17 +1411,41 @@ object ArabseedRepository {
                                         sorted.forEach { byNumber[it.number] = it }
                                         byNumber.values.sortedBy { it.number }
                                     } else sorted
+                                    val seasonPage = existingSeason?.pageUrl?.takeIf { it.isNotBlank() }
+                                        ?: sorted.firstOrNull()?.pageUrl
+                                        ?: item.pageUrl
                                     newSeasons += ArabseedSeason(
                                         number = sNum,
                                         title = SeriesCatalogParser.seasonTitle(sNum),
                                         episodes = mergedEpisodes,
-                                        pageUrl = existingSeason?.pageUrl?.takeIf { it.isNotBlank() } ?: item.pageUrl
+                                        pageUrl = seasonPage
                                     )
                                 }
                             }
                         if (newSeasons.isNotEmpty()) {
+                            val allSeasonNumbers = (seasons.map { it.number } + newSeasons.map { it.number }).distinct().sorted()
+                            val mergedAllSeasons = allSeasonNumbers.mapNotNull { num ->
+                                val fromNew = newSeasons.firstOrNull { it.number == num }
+                                val fromExisting = seasons.firstOrNull { it.number == num }
+                                when {
+                                    fromNew != null && fromExisting != null -> {
+                                        val byNumber = linkedMapOf<Int, ArabseedEpisode>()
+                                        fromExisting.episodes.forEach { byNumber[it.number] = it }
+                                        fromNew.episodes.forEach { byNumber[it.number] = it }
+                                        ArabseedSeason(
+                                            number = num,
+                                            title = fromNew.title.ifBlank { fromExisting.title },
+                                            episodes = byNumber.values.sortedBy { it.number },
+                                            pageUrl = fromExisting.pageUrl.ifBlank { fromNew.pageUrl }
+                                        )
+                                    }
+                                    fromNew != null -> fromNew
+                                    fromExisting != null -> fromExisting
+                                    else -> null
+                                }
+                            }
                             seasons.clear()
-                            seasons.addAll(newSeasons)
+                            seasons.addAll(mergedAllSeasons)
                         }
                     } else if (isEpisodePage) {
                         // Current page itself is an episode (e.g. Episode 30)

@@ -3743,7 +3743,12 @@ object MultiProviderRepository {
 
     private fun recordSeasonEnrichmentAttempt(item: ArabseedItem, bundle: ArabseedSeasonBundle) {
         val totalEpisodes = bundle.seasons.sumOf { it.episodes.size }
-        val incomplete = bundle.seasons.isEmpty() || totalEpisodes < 5 || bundle.seasons.any { season ->
+        val minSeason = bundle.seasons.minOfOrNull { it.number } ?: 0
+        val maxSeason = bundle.seasons.maxOfOrNull { it.number } ?: 0
+        val hasSeasonGaps = bundle.seasons.map { it.number }.sorted().zipWithNext().any { (a, b) -> b - a > 1 }
+        val isMissingLower = minSeason > 1
+        val isMissingIntermediate = maxSeason > bundle.seasons.size
+        val incomplete = bundle.seasons.isEmpty() || totalEpisodes < 5 || isMissingLower || isMissingIntermediate || hasSeasonGaps || bundle.seasons.any { season ->
             SeriesCatalogParser.needsEpisodeSequenceRepair(season.episodes.map { it.number })
         }
         CatalogDiskCache.saveJson(

@@ -275,7 +275,7 @@ internal object SeriesCatalogParser {
             // context or is explicitly carried in a data-season attribute.
             val explicitSeasonNumber = explicitLabelNumber ?: explicitUrlNumber
             val number = dataSeason ?: inheritedSeasonNumber
-                ?: explicitSeasonNumber?.takeIf { seasonTabContext }
+                ?: explicitSeasonNumber?.takeIf { seasonTabContext || explicitLabelNumber != null }
                 ?: numericTab
                 ?: return@mapNotNull null
             number to href

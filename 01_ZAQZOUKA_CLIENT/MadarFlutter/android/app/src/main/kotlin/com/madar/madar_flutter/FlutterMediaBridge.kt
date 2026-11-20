@@ -425,7 +425,20 @@ class FlutterMediaBridge(context: Context) {
             ?: if (seriesItem.isArabseedSource()) ArabseedRepository.loadCachedSeasonBundle(seriesItem.pageUrl)
             else MultiProviderRepository.loadCachedSeasonBundle(seriesItem.pageUrl)
         val cachedEpisodeCount = cached?.seasons?.sumOf { it.episodes.size } ?: 0
-        if (!forceRefresh && cached != null && cachedEpisodeCount >= 10) return cached
+        val minSeason = cached?.seasons?.minOfOrNull { it.number } ?: 0
+        val maxSeason = cached?.seasons?.maxOfOrNull { it.number } ?: 0
+        val detectedSeason = SeriesCatalogParser.seasonNumber(seriesItem.title, seriesItem.pageUrl)
+            ?: SeriesCatalogParser.seasonNumber(seriesItem.latestEpisodeLabel, "")
+        val hasSeasonGaps = cached?.seasons?.map { it.number }?.sorted()?.zipWithNext()?.any { (a, b) -> b - a > 1 } ?: false
+        val isMissingLower = minSeason > 1
+        val isMissingDetected = detectedSeason != null && cached?.seasons?.none { it.number == detectedSeason } == true
+        val isMissingIntermediate = maxSeason > (cached?.seasons?.size ?: 0)
+        val hasEpisodeGaps = cached?.seasons?.any { season ->
+            SeriesCatalogParser.needsEpisodeSequenceRepair(season.episodes.map { it.number })
+        } ?: false
+        val isCacheIncomplete = cached == null || isMissingLower || isMissingDetected || isMissingIntermediate || hasSeasonGaps || hasEpisodeGaps
+
+        if (!forceRefresh && !isCacheIncomplete && cached != null && cachedEpisodeCount >= 10) return cached
 
         return if (seriesItem.isArabseedSource()) {
             val primary = ArabseedRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)

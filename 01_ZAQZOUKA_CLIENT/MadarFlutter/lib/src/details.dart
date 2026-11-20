@@ -602,6 +602,10 @@ class _DetailPageState extends State<DetailPage> {
         : null;
     final episodes = _orderedEpisodes(season?['episodes']);
     final downloadEpisode = _episodeForCurrentPage(episodes);
+    // ✅ إجمالي الحلقات من كل المواسم — مش حلقات الموسم الحالي فقط
+    final totalEpisodeCount = _seasons.isEmpty
+        ? episodes.length
+        : _seasons.fold<int>(0, (sum, s) => sum + _maps(s['episodes']).length);
     return Scaffold(
       appBar: AppBar(
         title: Text(_seriesTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -618,7 +622,7 @@ class _DetailPageState extends State<DetailPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 26),
           children: [
-            _DetailHeader(item: widget.item, episodeCount: episodes.length, seasonCount: _seasons.length),
+            _DetailHeader(item: widget.item, episodeCount: totalEpisodeCount, seasonCount: _seasons.length),
             const SizedBox(height: 14),
             Row(
               children: [
