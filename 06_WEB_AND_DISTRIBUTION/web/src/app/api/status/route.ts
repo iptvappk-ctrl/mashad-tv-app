@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 let _memoryCache: { data: any; ts: number } | null = null;
-const MEMORY_TTL = 30000; // 30 seconds
+const MEMORY_TTL = 15000; // 15 seconds
 
 export async function GET() {
   const now = Date.now();
@@ -17,7 +17,7 @@ export async function GET() {
   if (_memoryCache && now - _memoryCache.ts < MEMORY_TTL) {
     return NextResponse.json(_memoryCache.data, {
       headers: {
-        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+        "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
         "X-Cache-Status": "MEMORY_HIT",
       },
     });
@@ -26,7 +26,7 @@ export async function GET() {
   try {
     const res = await fetch("https://zaqzouka-dashboard-api.vercel.app/api/status", {
       headers: { Accept: "application/json" },
-      next: { revalidate: 60 },
+      next: { revalidate: 15 },
       signal: AbortSignal.timeout(4000),
     });
 
@@ -35,7 +35,7 @@ export async function GET() {
       _memoryCache = { data, ts: now };
       return NextResponse.json(data, {
         headers: {
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+          "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
           "X-Cache-Status": "ORIGIN_FRESH",
         },
       });
@@ -45,7 +45,7 @@ export async function GET() {
     if (_memoryCache) {
       return NextResponse.json(_memoryCache.data, {
         headers: {
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+          "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
           "X-Cache-Status": "STALE_FALLBACK",
         },
       });
@@ -63,7 +63,7 @@ export async function GET() {
 
   return NextResponse.json(defaultStatus, {
     headers: {
-      "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+      "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
       "X-Cache-Status": "DEFAULT_SAFE",
     },
   });
