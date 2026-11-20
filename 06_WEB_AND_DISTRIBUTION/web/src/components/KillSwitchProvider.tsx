@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Lock, RefreshCw, AlertTriangle, ShieldAlert } from "lucide-react";
+import { Lock, RefreshCw, ShieldAlert } from "lucide-react";
 
 interface SystemState {
   status: "active" | "frozen" | "wiped";
@@ -12,17 +12,45 @@ interface SystemState {
 
 const STATUS_ENDPOINTS = [
   "/api/status",
+  "/status/system.json",
   "https://zaqzouka-dashboard-api.vercel.app/api/status",
   "https://zaqzouka-vercel-hub.vercel.app/api/status",
 ];
 
+const STORAGE_KEY = "zaq_sys_state_v2";
+const CACHE_TTL_MS = 45000; // 45 seconds client cache
+
 export default function KillSwitchProvider({ children }: { children: React.ReactNode }) {
-  const [systemState, setSystemState] = useState<SystemState>({
-    status: "active",
-    message: "المنظومة نشطة وتعمل بشكل طبيعي",
-  });
-  const [checking, setChecking] = useState(true);
+  // Read initial cache to avoid blocking UI for returning users
+  const getInitialState = (): { state: SystemState; needsCheck: boolean } => {
+    if (typeof window === "undefined") {
+      return {
+        state: { status: "active", message: "المنظومة نشطة وتعمل بكامل طاقتها." },
+        needsCheck: true,
+      };
+    }
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Date.now() - (parsed._savedAt || 0) < CACHE_TTL_MS) {
+          return { state: parsed, needsCheck: false };
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return {
+      state: { status: "active", message: "المنظومة نشطة وتعمل بكامل طاقتها." },
+      needsCheck: true,
+    };
+  };
+
+  const initial = getInitialState();
+  const [systemState, setSystemState] = useState<SystemState>(initial.state);
+  const [checking, setChecking] = useState<boolean>(initial.needsCheck);
   const wipeExecutedRef = useRef(false);
+  const lastCheckTimeRef = useRef<number>(initial.needsCheck ? 0 : Date.now());
 
   // Clear all cached local data on remote wipe
   const executeRemoteWipe = useCallback(() => {
@@ -31,7 +59,6 @@ export default function KillSwitchProvider({ children }: { children: React.React
     try {
       localStorage.clear();
       sessionStorage.clear();
-      // Remove cookies if possible
       document.cookie.split(";").forEach((c) => {
         document.cookie = c
           .replace(/^ +/, "")
@@ -43,14 +70,22 @@ export default function KillSwitchProvider({ children }: { children: React.React
     }
   }, []);
 
-  const checkStatus = useCallback(async () => {
+  const checkStatus = useCallback(async (force = false) => {
+    const now = Date.now();
+    // Throttle checks if not forced
+    if (!force && now - lastCheckTimeRef.current < 20000) {
+      setChecking(false);
+      return;
+    }
+
+    lastCheckTimeRef.current = now;
+
     for (const url of STATUS_ENDPOINTS) {
       try {
         const res = await fetch(url, {
           method: "GET",
           headers: { Accept: "application/json" },
-          cache: "no-store",
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(4000),
         });
 
         if (res.ok) {
@@ -67,6 +102,15 @@ export default function KillSwitchProvider({ children }: { children: React.React
             wipeTimestamp: data.wipeTimestamp,
           };
 
+          try {
+            sessionStorage.setItem(
+              STORAGE_KEY,
+              JSON.stringify({ ...nextState, _savedAt: Date.now() })
+            );
+          } catch {
+            // ignore
+          }
+
           if (normalizedStatus === "wiped") {
             executeRemoteWipe();
           }
@@ -80,20 +124,50 @@ export default function KillSwitchProvider({ children }: { children: React.React
       }
     }
 
-    // Fail open if offline/unreachable so legitimate users aren't locked out
+    // Fail open if offline/unreachable so users aren't locked out
     setChecking(false);
   }, [executeRemoteWipe]);
 
   useEffect(() => {
-    // Initial check
-    checkStatus();
+    // Initial check if needed
+    if (initial.needsCheck) {
+      checkStatus(true);
+    }
 
-    // Periodic lightweight check every 10s
-    const interval = setInterval(checkStatus, 10000);
-    return () => clearInterval(interval);
-  }, [checkStatus]);
+    // Smart adaptive polling: only poll when document is visible
+    let timer: NodeJS.Timeout | null = null;
 
-  // Loading Screen
+    const scheduleNextPoll = () => {
+      // Jitter between 40s and 60s to prevent 1M users syncing on the exact same second
+      const jitter = 40000 + Math.floor(Math.random() * 20000);
+      timer = setTimeout(() => {
+        if (typeof document !== "undefined" && document.visibilityState === "visible") {
+          checkStatus(false);
+        }
+        scheduleNextPoll();
+      }, jitter);
+    };
+
+    scheduleNextPoll();
+
+    // Check when user refocuses tab after being away
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        if (Date.now() - lastCheckTimeRef.current > CACHE_TTL_MS) {
+          checkStatus(false);
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [checkStatus, initial.needsCheck]);
+
+  // Loading Screen (Only on first cold visit before cache is established)
   if (checking) {
     return (
       <div dir="rtl" className="min-h-screen bg-[#090A0E] flex flex-col items-center justify-center p-6 text-center">
@@ -145,25 +219,24 @@ export default function KillSwitchProvider({ children }: { children: React.React
           </span>
           <h1 className="text-white text-2xl sm:text-3xl font-black mb-3">زقزوقة TV</h1>
           <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-line mb-8">
-            {systemState.message || "المنظومة متوقفة مؤقتاً لأعمال الصيانة والتطوير.\nسنعود للعمل بكامل طاقتنا في أقرب وقت."}
+            {systemState.message || "المنظومة متوقفة مؤقتاً لأعمال الصيانة والتطوير.\nسنعود للعمل بكامل طاقتها في أقرب وقت."}
           </p>
           <button
             type="button"
             onClick={() => {
               setChecking(true);
-              checkStatus();
+              checkStatus(true);
             }}
             className="inline-flex items-center justify-center gap-2.5 w-full rounded-2xl bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 px-6 py-3.5 text-sm font-black text-slate-950 shadow-lg shadow-amber-500/25 transition hover:scale-[1.02] active:scale-[0.98]"
           >
             <RefreshCw size={16} />
             إعادة التحقق الآن
           </button>
-          <p className="text-slate-500 text-[11px] font-medium mt-4">يتم التحقق التلقائي كل دقيقة</p>
         </div>
       </div>
     );
   }
 
-  // Active / Normal Operation
+  // Active / Normal App
   return <>{children}</>;
 }

@@ -21,6 +21,25 @@ const nextConfig = {
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
         ],
       },
+      // 🛡️ Vercel Edge CDN Caching (Zero-Quota Exhaustion for 1M+ Users)
+      {
+        source: "/api/cinema/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=300, stale-while-revalidate=1800" },
+        ],
+      },
+      {
+        source: "/api/football/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
+        ],
+      },
+      {
+        source: "/api/yacine/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=120, stale-while-revalidate=600" },
+        ],
+      },
       {
         source: "/:path*",
         headers: [
