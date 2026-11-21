@@ -269,6 +269,73 @@ async function telemetrySearch(req, res) {
   return sendJson(res, 200, { ok: true });
 }
 
+// ─── route: landing/visit ────────────────────────────────────────────────────
+async function landingVisit(req, res) {
+  const body = req.body || {};
+  const geo = resolveDetailedLocation(body, req);
+  const now = new Date();
+  const cleanRef = body.referrer || 'مباشر (Direct)';
+
+  const visitor = {
+    id: 'lv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+    location: geo.location,
+    country: geo.country,
+    countryCode: geo.countryCode,
+    city: geo.city,
+    isp: geo.isp,
+    device: body.device || 'موبايل',
+    browser: body.browser || 'Chrome',
+    referrer: cleanRef,
+    screen: body.screen || '',
+    time: formatClockTime(now),
+    timestamp: now.toISOString(),
+  };
+
+  try {
+    await db.ref('landing_analytics/totalVisits').transaction((v) => (v || 0) + 1);
+    const refKey = cleanRef.replace(/[.#$[\]/]/g, '_');
+    await db.ref(`landing_analytics/referrers/${refKey}`).transaction((v) => (v || 0) + 1);
+    const countryKey = (geo.country || 'أخرى').replace(/[.#$[\]/]/g, '_');
+    await db.ref(`landing_analytics/countries/${countryKey}`).transaction((v) => (v || 0) + 1);
+    await db.ref('landing_visitors').push(visitor);
+    await db.ref('activityLog').push({
+      type: 'landing_visit',
+      text: `زائر جديد لموقع التحميل عبر (${cleanRef}) من ${geo.location}`,
+      icon: '🌐',
+      time: formatClockTime(now),
+      timestamp: now.toISOString(),
+    });
+  } catch (_) {}
+
+  return sendJson(res, 200, { ok: true, visitor });
+}
+
+// ─── route: landing/download ─────────────────────────────────────────────────
+async function landingDownload(req, res) {
+  const body = req.body || {};
+  const target = body.target === 'player' ? 'player' : 'app';
+  const now = new Date();
+  const cleanRef = body.referrer || 'مباشر (Direct)';
+
+  try {
+    if (target === 'player') {
+      await db.ref('landing_analytics/downloads_player').transaction((v) => (v || 0) + 1);
+    } else {
+      await db.ref('landing_analytics/downloads_app').transaction((v) => (v || 0) + 1);
+    }
+    await db.ref('landing_analytics/total_downloads').transaction((v) => (v || 0) + 1);
+    await db.ref('activityLog').push({
+      type: 'download',
+      text: `تحميل ${target === 'player' ? 'مشغل زاغ ZAG Player' : 'تطبيق زقزوقة TV'} من موقع التحميل (${cleanRef})`,
+      icon: '📥',
+      time: formatClockTime(now),
+      timestamp: now.toISOString(),
+    });
+  } catch (_) {}
+
+  return sendJson(res, 200, { ok: true, target });
+}
+
 // ─── Main Router ─────────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
   handleCors(res);
@@ -280,6 +347,8 @@ module.exports = async (req, res) => {
     (url.includes('/session/start') ? 'session/start' :
      url.includes('/session/end') ? 'session/end' :
      url.includes('/session/heartbeat') ? 'session/heartbeat' :
+     url.includes('/landing/visit') ? 'landing/visit' :
+     url.includes('/landing/download') ? 'landing/download' :
      url.includes('/action') ? 'action' :
      url.includes('/playback') ? 'playback' :
      url.includes('/search') ? 'search' : '');
@@ -288,10 +357,12 @@ module.exports = async (req, res) => {
     if (route === 'session/start') return await sessionStart(req, res);
     if (route === 'session/end') return await sessionEnd(req, res);
     if (route === 'session/heartbeat') return await sessionHeartbeat(req, res);
+    if (route === 'landing/visit') return await landingVisit(req, res);
+    if (route === 'landing/download') return await landingDownload(req, res);
     if (route === 'action') return await telemetryAction(req, res);
     if (route === 'playback') return await telemetryPlayback(req, res);
     if (route === 'search') return await telemetrySearch(req, res);
-    return sendJson(res, 404, { error: 'Unknown telemetry route. Use ?route=session/start|session/end|session/heartbeat|action|playback|search' });
+    return sendJson(res, 404, { error: 'Unknown telemetry route.' });
   } catch (err) {
     console.error('telemetry error:', err);
     return sendJson(res, 500, { ok: false, error: err.message });

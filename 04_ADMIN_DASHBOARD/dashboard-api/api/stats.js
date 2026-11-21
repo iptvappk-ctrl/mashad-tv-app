@@ -14,14 +14,38 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const [statsSnap, sessionsSnap, topContentSnap, searchesSnap, errorsSnap, actLogSnap] = await Promise.all([
+    const [statsSnap, sessionsSnap, topContentSnap, searchesSnap, errorsSnap, actLogSnap, landingSnap, landingVisitorsSnap] = await Promise.all([
       db.ref('stats').once('value'),
       db.ref('sessions').orderByChild('openedAt').limitToLast(600).once('value'),
       db.ref('topContent').once('value'),
       db.ref('searches').once('value'),
       db.ref('errors').orderByChild('timestamp').limitToLast(50).once('value'),
       db.ref('activityLog').orderByChild('timestamp').limitToLast(50).once('value'),
+      db.ref('landing_analytics').once('value'),
+      db.ref('landing_visitors').limitToLast(50).once('value'),
     ]);
+
+    const landing = landingSnap.val() || {};
+    const landingVisitorsObj = landingVisitorsSnap.val() || {};
+    const landingVisitors = Object.values(landingVisitorsObj)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 30);
+
+    const landingTotalVisits = landing.totalVisits || 0;
+    const landingAppDownloads = landing.downloads_app || 0;
+    const landingPlayerDownloads = landing.downloads_player || 0;
+    const landingTotalDownloads = landingAppDownloads + landingPlayerDownloads;
+    const landingConversionRate = landingTotalVisits > 0
+      ? ((landingTotalDownloads / landingTotalVisits) * 100).toFixed(1)
+      : '0.0';
+
+    const landingTopReferrers = Object.entries(landing.referrers || {})
+      .map(([name, count]) => ({
+        name: name.replace(/_/g, '.'),
+        count,
+        percent: landingTotalVisits > 0 ? Math.round((count / landingTotalVisits) * 100) : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
 
     const stats = statsSnap.val() || {};
     const sessionsObj = sessionsSnap.val() || {};
@@ -301,6 +325,15 @@ module.exports = async (req, res) => {
         ],
       },
       monetization,
+      landingAnalytics: {
+        totalVisits: landingTotalVisits,
+        downloadsApp: landingAppDownloads,
+        downloadsPlayer: landingPlayerDownloads,
+        totalDownloads: landingTotalDownloads,
+        conversionRate: landingConversionRate,
+        topReferrers: landingTopReferrers,
+        recentVisitors: landingVisitors,
+      },
       devices,
       sessions,
       topContent,
