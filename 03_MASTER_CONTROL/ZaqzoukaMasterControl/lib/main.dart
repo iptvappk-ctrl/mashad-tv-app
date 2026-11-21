@@ -174,7 +174,7 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   final Map<String, bool> _componentLoading = {};
   Timer? _pollTimer;
 
-  // Component definitions
+  // 4 User-Facing Components to Control
   static const List<Map<String, dynamic>> _components = [
     {
       'key': 'download_site_enabled',
@@ -203,13 +203,6 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
       'subtitle': 'com.madar.player',
       'icon': Icons.play_circle_rounded,
       'color': Color(0xFFE5A958),
-    },
-    {
-      'key': 'admin_enabled',
-      'label': 'لوحة الأدمن',
-      'subtitle': 'Admin Dashboard App',
-      'icon': Icons.admin_panel_settings_rounded,
-      'color': Color(0xFF27AE60),
     },
   ];
 
@@ -242,19 +235,15 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
       return {
         'download_site_enabled': raw['download_site_enabled'] != false && raw['website_enabled'] != false,
         'web_player_enabled': raw['web_player_enabled'] != false && raw['website_enabled'] != false,
-        'website_enabled': raw['website_enabled'] != false,
         'app_enabled': raw['app_enabled'] != false,
         'player_enabled': raw['player_enabled'] != false,
-        'admin_enabled': raw['admin_enabled'] != false,
       };
     }
     return {
       'download_site_enabled': true,
       'web_player_enabled': true,
-      'website_enabled': true,
       'app_enabled': true,
       'player_enabled': true,
-      'admin_enabled': true,
     };
   }
 
@@ -263,7 +252,6 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     final ok = await MasterApiClient.setComponentStatus(key, newValue);
     if (!mounted) return;
     if (ok) {
-      // Optimistically update local state
       final comps = Map<String, dynamic>.from(_statusData['components'] ?? {});
       comps[key] = newValue;
       setState(() { _statusData = Map<String, dynamic>.from(_statusData)..['components'] = comps; });
@@ -272,12 +260,69 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
       _showToast('فشل تنفيذ الأمر، تأكد من الاتصال');
     }
     setState(() => _componentLoading.remove(key));
-    // Refresh real state after a moment
     await Future.delayed(const Duration(seconds: 2));
     if (mounted) _refreshStatus(silent: true);
   }
 
-  // ── Action 1: Emergency Freeze (all) ──
+  // ── Action 1: Nuclear Wipe (عليا وعلى أعدائي - الحذف الكامل لكل شيء) ──
+  Future<void> _confirmNuclearWipe() async {
+    final confirmCtrl = TextEditingController();
+    final confirm = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF220C0C),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: const BorderSide(color: Colors.redAccent, width: 2)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 28),
+            SizedBox(width: 8),
+            Expanded(child: Text('💥 الحذف الكامل والتدمير الشامل', style: TextStyle(color: Colors.redAccent, fontSize: 17, fontWeight: FontWeight.bold))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'تحذير شديد الخطورة (عليا وعلى أعدائي):\n'
+              '• تصفير وحذف جميع السيرفرات والقنوات والبيانات من Firebase نهائياً.\n'
+              '• قفل كلا الموقعين (التحميل والبث) فوراً وشاشات حظر.\n'
+              '• إيقاف التطبيق والمشغل ومسح الكاش من كل أجهزة المستخدمين.\n'
+              '• تدمير شامل للمنظومة دون ترك أي أثر.\n\n'
+              'لتأكيد الحذف الكامل، اكتب كلمة WIPE أدناه:',
+              style: TextStyle(fontSize: 12.5, color: Colors.white70, height: 1.5),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmCtrl,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 18),
+              decoration: InputDecoration(hintText: 'اكتب WIPE للتأكيد', filled: true, fillColor: const Color(0xFF140808), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('تراجع')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            onPressed: () { if (confirmCtrl.text.trim().toUpperCase() == 'WIPE') Navigator.pop(ctx, true); },
+            child: const Text('تدمير ومسح كل شيء فوراً'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      setState(() => _isLoading = true);
+      await SecurityVault.wipeVault();
+      final ok = await MasterApiClient.triggerNuclearWipe();
+      if (!mounted) return;
+      _showToast(ok ? '💥 تم تدمير ومسح كل شيء نهائياً بلا رجعة' : 'فشل تنفيذ أمر المسح');
+      _refreshStatus();
+    }
+  }
+
+  // ── Action 2: Emergency Freeze (all) ──
   Future<void> _confirmFreeze() async {
     final msgCtrl = TextEditingController(text: 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.');
     final confirm = await showDialog<bool>(
@@ -289,7 +334,7 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('سيتم إيقاف الموقع والتطبيق والمشغل فوراً عند جميع المستخدمين وعرض الرسالة التالية:', style: TextStyle(fontSize: 13, color: Color(0xFF8E95AA))),
+            const Text('سيتم إيقاف الموقعين والتطبيق والمشغل فوراً عند جميع المستخدمين وعرض الرسالة:', style: TextStyle(fontSize: 13, color: Color(0xFF8E95AA))),
             const SizedBox(height: 12),
             TextField(controller: msgCtrl, maxLines: 2, decoration: InputDecoration(filled: true, fillColor: const Color(0xFF10131E), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)))),
           ],
@@ -313,63 +358,6 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     }
   }
 
-  // ── Action 2: Nuclear Wipe ──
-  Future<void> _confirmNuclearWipe() async {
-    final confirmCtrl = TextEditingController();
-    final confirm = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF220C0C),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: const BorderSide(color: Colors.redAccent, width: 2)),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 28),
-            SizedBox(width: 8),
-            Expanded(child: Text('عملية التدمير الشامل', style: TextStyle(color: Colors.redAccent, fontSize: 18, fontWeight: FontWeight.bold))),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'تحذير شديد الخطورة:\n\n'
-              '1. سيتم تصفير وحذف كافة السيرفرات والقنوات من Firebase نهائياً.\n'
-              '2. سيتم إيقاف الموقع الرسمي والتطبيق والمشغل ولوحة الأدمن فوراً.\n'
-              '3. سيتم إرسال أمر تدمير لكل هواتف المستخدمين لمسح الكاش المحلي.\n\n'
-              'لتأكيد التدمير، اكتب كلمة WIPE أدناه:',
-              style: TextStyle(fontSize: 13, color: Colors.white70, height: 1.5),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: confirmCtrl,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 18),
-              decoration: InputDecoration(hintText: 'اكتب WIPE للتأكيد', filled: true, fillColor: const Color(0xFF140808), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('تراجع')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
-            onPressed: () { if (confirmCtrl.text.trim().toUpperCase() == 'WIPE') Navigator.pop(ctx, true); },
-            child: const Text('تدمير كل شيء فوراً'),
-          ),
-        ],
-      ),
-    );
-    if (confirm == true) {
-      setState(() => _isLoading = true);
-      await SecurityVault.wipeVault();
-      final ok = await MasterApiClient.triggerNuclearWipe();
-      if (!mounted) return;
-      _showToast(ok ? 'تم تدمير ومسح كل شيء نهائياً بلا رجعة' : 'فشل تنفيذ أمر المسح');
-      _refreshStatus();
-    }
-  }
-
   // ── Action 3: Full Restore ──
   Future<void> _confirmRestore() async {
     final confirm = await showDialog<bool>(
@@ -385,7 +373,7 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
           ],
         ),
         content: const Text(
-          'سيتم تفعيل الموقع الرسمي والتطبيق والمشغل ولوحة الأدمن بالكامل، وإعادة رفع السيرفرات المشفرة وتشغيل المنظومة بكامل طاقتها.',
+          'سيتم تفعيل كافة المواقع والتطبيقات والمشغل وإعادة تشغيل المنظومة بكامل طاقتها فوراً.',
           style: TextStyle(fontSize: 13.5, color: Colors.white70, height: 1.5),
         ),
         actions: [
@@ -419,16 +407,16 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     final status = _currentStatus;
     Color statusColor = const Color(0xFF27AE60);
     String statusTitle = 'المنظومة نشطة وشغالة';
-    String statusSubtitle = 'جميع السيرفرات والمشغلات تعمل بشكل طبيعي';
+    String statusSubtitle = 'جميع السيرفرات والمواقع والمشغلات تعمل بشكل طبيعي';
 
     if (status == 'frozen') {
       statusColor = const Color(0xFFD4AF37);
       statusTitle = 'المنظومة مجمدة مؤقتاً';
-      statusSubtitle = _statusData['message']?.toString() ?? 'التطبيق متوقف للصيانة';
+      statusSubtitle = _statusData['message']?.toString() ?? 'الخدمة متوقفة للصيانة';
     } else if (status == 'wiped') {
       statusColor = Colors.redAccent;
-      statusTitle = 'تم المسح والتدمير بالكامل';
-      statusSubtitle = 'البيانات صفرية وجميع أجهزة المستخدمين محظورة';
+      statusTitle = 'تم الحذف والتدمير بالكامل';
+      statusSubtitle = 'البيانات صفرية وجميع أجهزة ومواقع المستخدمين مغلقة';
     } else if (status == 'unknown') {
       statusColor = const Color(0xFFE67E22);
       statusTitle = 'تعذر الاتصال بالسحابة';
@@ -452,40 +440,85 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
           : Directionality(
               textDirection: TextDirection.rtl,
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20.0),
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 14.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // ── Live Status Card ──
+                    // ── 1. Live Status Card ──
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       decoration: BoxDecoration(
                         color: const Color(0xFF141824),
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: statusColor, width: 2),
-                        boxShadow: [BoxShadow(color: statusColor.withValues(alpha: 0.2), blurRadius: 15, spreadRadius: 1)],
+                        boxShadow: [BoxShadow(color: statusColor.withValues(alpha: 0.2), blurRadius: 12, spreadRadius: 1)],
                       ),
                       child: Column(
                         children: [
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Container(width: 12, height: 12, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
-                              const SizedBox(width: 10),
-                              Flexible(child: Text(statusTitle, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: statusColor))),
+                              Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: statusColor)),
+                              const SizedBox(width: 8),
+                              Flexible(child: Text(statusTitle, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: statusColor))),
                             ],
                           ),
-                          const SizedBox(height: 8),
-                          Text(statusSubtitle, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: Color(0xFF8E95AA))),
+                          const SizedBox(height: 4),
+                          Text(statusSubtitle, textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Color(0xFF8E95AA))),
                         ],
                       ),
                     ),
 
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 16),
 
-                    // ── Per-Component Toggles Section ──
+                    // ── 2. PROMINENT NUCLEAR WIPE BUTTON (الحذف الكامل والتدمير الشامل) ──
                     Container(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF220C0C),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.8), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(color: Colors.redAccent.withValues(alpha: 0.2), blurRadius: 14, spreadRadius: 1),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 22),
+                              SizedBox(width: 8),
+                              Text('الحذف الكامل لكل شيء (عليا وعلى أعدائي)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'تصفير وحذف كافة السيرفرات والقنوات من Firebase، وقفل كلا الموقعين وتدمير الكاش بكل أجهزة المستخدمين.',
+                            style: TextStyle(fontSize: 11.5, color: Colors.white70, height: 1.3),
+                          ),
+                          const SizedBox(height: 10),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.redAccent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              elevation: 3,
+                            ),
+                            icon: const Icon(Icons.delete_forever_rounded, size: 20),
+                            label: const Text('تدمير ومسح المنظومة بالكامل فوراً', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
+                            onPressed: _confirmNuclearWipe,
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 18),
+
+                    // ── 3. Granular Component Toggles (4 Essential Parts) ──
+                    Container(
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
                         color: const Color(0xFF141824),
                         borderRadius: BorderRadius.circular(16),
@@ -496,46 +529,46 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
                         children: [
                           const Row(
                             children: [
-                              Icon(Icons.toggle_on_rounded, color: Color(0xFFD4AF37), size: 22),
+                              Icon(Icons.toggle_on_rounded, color: Color(0xFFD4AF37), size: 20),
                               SizedBox(width: 8),
-                              Text('التحكم في مكونات المنظومة', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
+                              Text('التحكم في أجزاء المشروع منفصلة', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          const Text('تفعيل أو إيقاف كل جزء من المشروع بشكل منفصل فوراً', style: TextStyle(fontSize: 12, color: Color(0xFF8E95AA))),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 2),
+                          const Text('إيقاف أو تشغيل أي مكوّن بشكل فوري ومنفصل', style: TextStyle(fontSize: 11.5, color: Color(0xFF8E95AA))),
+                          const SizedBox(height: 12),
                           ...(_components.map((comp) {
                             final key = comp['key'] as String;
                             final isEnabled = compState[key] ?? true;
                             final isLoading = _componentLoading[key] == true;
                             final color = comp['color'] as Color;
                             return Container(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
                                 color: const Color(0xFF0F131E),
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: isEnabled ? color.withValues(alpha: 0.4) : const Color(0xFF2A2A3D)),
+                                border: Border.all(color: isEnabled ? color.withValues(alpha: 0.35) : const Color(0xFF2A2A3D)),
                               ),
                               child: Row(
                                 children: [
                                   Container(
-                                    width: 38, height: 38,
+                                    width: 34, height: 34,
                                     decoration: BoxDecoration(shape: BoxShape.circle, color: (isEnabled ? color : const Color(0xFF555E75)).withValues(alpha: 0.15)),
-                                    child: Icon(comp['icon'] as IconData, color: isEnabled ? color : const Color(0xFF555E75), size: 20),
+                                    child: Icon(comp['icon'] as IconData, color: isEnabled ? color : const Color(0xFF555E75), size: 18),
                                   ),
-                                  const SizedBox(width: 12),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(comp['label'] as String, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isEnabled ? Colors.white : const Color(0xFF8E95AA))),
-                                        Text(comp['subtitle'] as String, style: const TextStyle(fontSize: 11, color: Color(0xFF555E75))),
+                                        Text(comp['label'] as String, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isEnabled ? Colors.white : const Color(0xFF8E95AA))),
+                                        Text(comp['subtitle'] as String, style: const TextStyle(fontSize: 10.5, color: Color(0xFF555E75))),
                                       ],
                                     ),
                                   ),
                                   if (isLoading)
-                                    const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD4AF37)))
+                                    const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD4AF37)))
                                   else
                                     Switch(
                                       value: isEnabled,
@@ -552,44 +585,79 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 24),
-                    const Text('أزرار التحكم الكاملة في المنظومة:', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
-                    const SizedBox(height: 14),
-
-                    // ── Freeze All Button ──
-                    _buildControlCard(
-                      title: 'إيقاف وتجميد مؤقت (Freeze All)',
-                      subtitle: 'إيقاف الموقع والتطبيق والمشغل ولوحة الأدمن فوراً عند جميع المستخدمين مع رسالة صيانة.',
-                      color: const Color(0xFFD4AF37),
-                      btnText: 'تجميد كل المنظومة',
-                      onTap: _confirmFreeze,
-                    ),
                     const SizedBox(height: 16),
 
-                    // ── Nuclear Wipe ──
-                    _buildControlCard(
-                      title: 'تدمير ومسح شامل (Nuclear Wipe)',
-                      subtitle: 'مسح كل شيء من فايربيس وإيقاف الموقع والمشغل والتطبيق نهائياً وإرسال أمر مسح لكل هواتف المستخدمين.',
-                      color: Colors.redAccent,
-                      btnText: 'مسح وتدمير كل شيء (عليا وعلى أعدائي)',
-                      isDanger: true,
-                      onTap: _confirmNuclearWipe,
+                    // ── 4. Freeze All & Full Restore Row ──
+                    Row(
+                      children: [
+                        // Freeze All
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF141824),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.4)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const Text('تجميد مؤقت', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFD4AF37))),
+                                const SizedBox(height: 4),
+                                const Text('إيقاف كل شيء للصيانة', textAlign: TextAlign.center, style: TextStyle(fontSize: 10.5, color: Color(0xFF8E95AA))),
+                                const SizedBox(height: 8),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFD4AF37),
+                                    foregroundColor: Colors.black,
+                                    padding: const EdgeInsets.symmetric(vertical: 8),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  onPressed: _confirmFreeze,
+                                  child: const Text('تجميد الكل', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Full Restore
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF141824),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: const Color(0xFF27AE60).withValues(alpha: 0.4)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                const Text('استعادة كاملة', textAlign: TextAlign.center, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF27AE60))),
+                                const SizedBox(height: 4),
+                                const Text('تشغيل المنظومة كاملة', textAlign: TextAlign.center, style: TextStyle(fontSize: 10.5, color: Color(0xFF8E95AA))),
+                                const SizedBox(height: 8),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF27AE60),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 8),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  onPressed: _confirmRestore,
+                                  child: const Text('تشغيل الكل', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
 
-                    // ── Full Restore ──
-                    _buildControlCard(
-                      title: 'استعادة وتشغيل كامل (Full Restore)',
-                      subtitle: 'تفعيل الموقع والتطبيق والمشغل ولوحة الأدمن بالكامل وإعادة رفع السيرفرات المشفرة.',
-                      color: const Color(0xFF27AE60),
-                      btnText: 'إعادة التشغيل الآن',
-                      onTap: _confirmRestore,
-                    ),
-
-                    const SizedBox(height: 30),
-                    // Footer
+                    const SizedBox(height: 20),
+                    // Security Footer
                     Container(
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
                         color: const Color(0xFF0F131E),
                         borderRadius: BorderRadius.circular(12),
@@ -597,12 +665,12 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
                       ),
                       child: const Row(
                         children: [
-                          Icon(Icons.lock_rounded, size: 20, color: Color(0xFFD4AF37)),
+                          Icon(Icons.lock_rounded, size: 18, color: Color(0xFFD4AF37)),
                           SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              'المنظومة محمية بتشفير AES-256 وقواعد أمان Firebase الصارمة ضد أي استخراج.',
-                              style: TextStyle(fontSize: 12, color: Color(0xFF8E95AA)),
+                              'المنظومة محمية بتشفير AES-256 وقواعد أمان Firebase الصارمة.',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF8E95AA)),
                             ),
                           ),
                         ],
@@ -612,43 +680,6 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
                 ),
               ),
             ),
-    );
-  }
-
-  Widget _buildControlCard({
-    required String title,
-    required String subtitle,
-    required Color color,
-    required String btnText,
-    required VoidCallback onTap,
-    bool isDanger = false,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF141824),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
-          const SizedBox(height: 6),
-          Text(subtitle, style: const TextStyle(fontSize: 12.5, color: Color(0xFF8E95AA), height: 1.4)),
-          const SizedBox(height: 14),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: color,
-              foregroundColor: isDanger || color == const Color(0xFFD4AF37) ? Colors.black : Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: onTap,
-            child: Text(btnText, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
     );
   }
 }
