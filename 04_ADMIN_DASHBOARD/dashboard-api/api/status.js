@@ -78,7 +78,22 @@ export default async function handler(req, res) {
     const snap = await db.ref('system_control').once('value');
     const val = snap.val();
 
-    const result = val || FALLBACK;
+    let result = val || FALLBACK;
+
+    // 🔑 KEY FIX: If app_enabled=false in components → override status to "frozen"
+    // This makes the Flutter app kill switch actually work!
+    if (result && result.components) {
+      const c = result.components;
+      // If main status is "active" but app_enabled toggled OFF → force frozen
+      if (result.status === 'active' && c.app_enabled === false) {
+        result = {
+          ...result,
+          status: 'frozen',
+          message: result.message || 'عفواً، التطبيق متوقف حالياً للصيانة.',
+        };
+      }
+    }
+
     _cache = result;
     _cacheTime = now;
 
