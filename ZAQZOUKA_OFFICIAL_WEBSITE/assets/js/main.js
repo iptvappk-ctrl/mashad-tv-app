@@ -1,3 +1,77 @@
+// ── Zaqzouka Kill Switch: Cloud System Control ──
+(function checkSystemStatus() {
+  const ENDPOINTS = [
+    'https://zaqzouka-dashboard-api.vercel.app/api/system_control',
+    'https://zaqzouka-vercel-hub.vercel.app/api/system_control'
+  ];
+
+  function showMaintenance(msg) {
+    if (document.getElementById('zq-maintenance-overlay')) return;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'zq-maintenance-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0E0B0E;z-index:9999999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Cairo,system-ui,sans-serif;direction:rtl;padding:20px;box-sizing:border-box;';
+
+    overlay.innerHTML = `
+      <div style="text-align:center;max-width:520px;background:#141014;border:1px solid rgba(185,78,60,0.3);border-radius:24px;padding:48px 32px;box-shadow:0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(185,78,60,0.15);">
+        <div style="width:84px;height:84px;border-radius:50%;background:rgba(185,78,60,0.12);border:2px solid #B94E3C;display:flex;align-items:center;justify-content:center;margin:0 auto 24px;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#E5A958" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:rgba(185,78,60,0.15);border:1px solid rgba(185,78,60,0.4);border-radius:100px;margin-bottom:20px;">
+          <span style="width:8px;height:8px;border-radius:50%;background:#B94E3C;"></span>
+          <span style="color:#E5A958;font-size:13px;font-weight:700;">توقف مؤقت للصيانة</span>
+        </div>
+        <h1 style="color:#FFFFFF;font-size:24px;font-weight:800;margin:0 0 14px;letter-spacing:-0.5px;">الخدمة متوقفة مؤقتاً</h1>
+        <p style="color:#9E9A9E;font-size:15px;line-height:1.7;margin:0 0 28px;">${msg || 'نعمل حالياً على تحديثات شاملة وتطوير خوادم البث لضمان أفضل تجربة مشاهدة. سنعود للعمل قريباً جداً.'}</p>
+        <div style="color:#6E6A6E;font-size:12px;border-top:1px solid rgba(255,255,255,0.06);padding-top:20px;">
+          منظومة زقزوقة TV - الإدارة العليا
+        </div>
+      </div>
+    `;
+
+    if (document.body) {
+      document.body.appendChild(overlay);
+    } else {
+      document.addEventListener('DOMContentLoaded', () => document.body.appendChild(overlay));
+    }
+  }
+
+  async function verifyStatus() {
+    for (const url of ENDPOINTS) {
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (!data) continue;
+          const status = (data.status || 'active').toLowerCase();
+          const comps = data.components || {};
+          const websiteEnabled = comps.website_enabled !== false;
+
+          if (status === 'frozen' || status === 'wiped' || !websiteEnabled) {
+            showMaintenance(data.message);
+          } else {
+            const el = document.getElementById('zq-maintenance-overlay');
+            if (el) el.remove();
+            document.documentElement.style.overflow = '';
+            document.body.style.overflow = '';
+          }
+          return;
+        }
+      } catch (_) {}
+    }
+  }
+
+  verifyStatus();
+  setInterval(verifyStatus, 15000);
+})();
+
+
 /**
  * ZAQZOUKA TV & ZAG PLAYER - OFFICIAL SCRIPT
  * High-performance vanilla JavaScript, zero external dependencies

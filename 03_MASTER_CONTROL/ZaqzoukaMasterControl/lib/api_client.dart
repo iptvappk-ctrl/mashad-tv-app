@@ -14,20 +14,39 @@ class MasterApiClient {
       try {
         final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 7));
         if (res.statusCode == 200) {
-          return jsonDecode(res.body) as Map<String, dynamic>;
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          // Ensure components map exists
+          if (!data.containsKey('components') || data['components'] == null) {
+            data['components'] = {
+              'website_enabled': true,
+              'app_enabled': true,
+              'player_enabled': true,
+              'admin_enabled': true,
+            };
+          }
+          return data;
         }
       } catch (e) {
         // ignore: avoid_print
         print('Error fetching status from $url: $e');
       }
     }
-    // Fallback direct check if RTDB is publicly readable
+    // Fallback: direct Firebase RTDB check
     try {
       final res = await http.get(
         Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control.json'),
       ).timeout(const Duration(seconds: 5));
       if (res.statusCode == 200 && res.body.isNotEmpty && res.body != 'null') {
-        return jsonDecode(res.body) as Map<String, dynamic>;
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        if (!data.containsKey('components') || data['components'] == null) {
+          data['components'] = {
+            'website_enabled': true,
+            'app_enabled': true,
+            'player_enabled': true,
+            'admin_enabled': true,
+          };
+        }
+        return data;
       }
     } catch (_) {}
 
@@ -36,7 +55,52 @@ class MasterApiClient {
       'message': 'تعذر الاتصال بالسحابة، يرجى فحص الإنترنت',
       'updatedAt': 0,
       'wipeTimestamp': 0,
+      'components': {
+        'website_enabled': true,
+        'app_enabled': true,
+        'player_enabled': true,
+        'admin_enabled': true,
+      },
     };
+  }
+
+  /// Toggle a single component on or off
+  static Future<bool> setComponentStatus(String component, bool enabled) async {
+    final body = jsonEncode({
+      'action': 'set_component',
+      'component': component,
+      'enabled': enabled,
+      'secret': _adminSecret,
+    });
+
+    for (final url in _endpoints) {
+      try {
+        final res = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-secret': _adminSecret,
+          },
+          body: body,
+        ).timeout(const Duration(seconds: 10));
+        if (res.statusCode == 200) return true;
+      } catch (e) {
+        // ignore: avoid_print
+        print('Error setting component status on $url: $e');
+      }
+    }
+
+    // Fallback: direct Firebase RTDB REST API patch
+    try {
+      final res = await http.patch(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/components.json'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({component: enabled}),
+      ).timeout(const Duration(seconds: 8));
+      return res.statusCode == 200;
+    } catch (_) {}
+
+    return false;
   }
 
   /// Trigger Emergency Freeze (تجميد فوري)
@@ -66,7 +130,7 @@ class MasterApiClient {
     return false;
   }
 
-  /// Trigger Nuclear Wipe (تدمير ومسح شامل السحابة والهواتف)
+  /// Trigger Nuclear Wipe
   static Future<bool> triggerNuclearWipe() async {
     final body = jsonEncode({
       'action': 'wipe',
@@ -93,7 +157,7 @@ class MasterApiClient {
     return false;
   }
 
-  /// Trigger Full Restore (استعادة وإعادة تشغيل كامل للمنظومة)
+  /// Trigger Full Restore
   static Future<bool> triggerRestore({required Map<String, dynamic> serversData}) async {
     final body = jsonEncode({
       'action': 'restore',

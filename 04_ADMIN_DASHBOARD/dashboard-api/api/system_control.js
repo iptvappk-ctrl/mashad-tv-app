@@ -23,10 +23,7 @@ function getDb() {
     const saPath = path.resolve(__dirname, '../service-account.json');
     if (fs.existsSync(saPath)) {
       const sa = JSON.parse(fs.readFileSync(saPath, 'utf8'));
-      admin.initializeApp({
-        credential: admin.credential.cert(sa),
-        databaseURL,
-      });
+      admin.initializeApp({ credential: admin.credential.cert(sa), databaseURL });
     } else {
       admin.initializeApp({ databaseURL, projectId });
     }
@@ -42,14 +39,12 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-secret, Authorization');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   const db = getDb();
   const ref = db.ref('system_control');
 
-  // GET: Public status check (Every user phone calls this)
+  // GET: Public status check
   if (req.method === 'GET') {
     try {
       const snapshot = await ref.once('value');
@@ -59,8 +54,23 @@ export default async function handler(req, res) {
           status: 'active',
           message: 'المنظومة نشطة وتعمل بشكل طبيعي',
           updatedAt: Date.now(),
-          wipeTimestamp: 0
+          wipeTimestamp: 0,
+          components: {
+            website_enabled: true,
+            app_enabled: true,
+            player_enabled: true,
+            admin_enabled: true,
+          }
         });
+      }
+      // Ensure components exist in response
+      if (!val.components) {
+        val.components = {
+          website_enabled: true,
+          app_enabled: true,
+          player_enabled: true,
+          admin_enabled: true,
+        };
       }
       return res.status(200).json(val);
     } catch (err) {
@@ -75,65 +85,80 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Unauthorized: Invalid Admin Secret' });
     }
 
-    const { action, message, servers, catalog } = req.body || {};
+    const { action, message, servers, catalog, component, enabled } = req.body || {};
     const now = Date.now();
 
     try {
+      // NEW: Toggle individual component
+      if (action === 'set_component') {
+        if (!component) return res.status(400).json({ error: 'Missing component name' });
+        const validComponents = ['website_enabled', 'app_enabled', 'player_enabled', 'admin_enabled'];
+        if (!validComponents.includes(component)) {
+          return res.status(400).json({ error: 'Invalid component name' });
+        }
+        await db.ref(`system_control/components/${component}`).set(enabled !== false);
+        await ref.update({ updatedAt: now, updatedBy: 'master_control' });
+        return res.status(200).json({ success: true, action: 'set_component', component, enabled: enabled !== false });
+      }
+
       if (action === 'freeze') {
         const payload = {
           status: 'frozen',
-          message: message || 'عفواً، الخدمة متوقفة حالياً للصيانة والتحديث.',
+          message: message || 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.',
           updatedAt: now,
-          wipeTimestamp: 0
+          wipeTimestamp: 0,
+          components: {
+            website_enabled: false,
+            app_enabled: false,
+            player_enabled: false,
+            admin_enabled: false,
+          }
         };
         await ref.set(payload);
         return res.status(200).json({ success: true, action: 'freeze', state: payload });
       }
 
       if (action === 'wipe') {
-        // 1. Set status to wiped with timestamp
         const payload = {
           status: 'wiped',
           message: 'تم تصفير وإغلاق الخدمة نهائياً.',
           updatedAt: now,
-          wipeTimestamp: now
+          wipeTimestamp: now,
+          components: {
+            website_enabled: false,
+            app_enabled: false,
+            player_enabled: false,
+            admin_enabled: false,
+          }
         };
         await ref.set(payload);
-
-        // 2. Clear any servers / channels in database
         try {
           await db.ref('servers_catalog').remove();
           await db.ref('cached_feeds').remove();
         } catch (e) {}
-
-        return res.status(200).json({
-          success: true,
-          action: 'wipe',
-          state: payload,
-          note: 'Cloud data zeroed and wipe command dispatched to all devices.'
-        });
+        return res.status(200).json({ success: true, action: 'wipe', state: payload });
       }
 
       if (action === 'restore') {
-        // Restore servers if provided
-        if (servers && typeof servers === 'object') {
-          await db.ref('servers_catalog').set(servers);
-        }
-        if (catalog && typeof catalog === 'object') {
-          await db.ref('cached_feeds').set(catalog);
-        }
-
+        if (servers && typeof servers === 'object') await db.ref('servers_catalog').set(servers);
+        if (catalog && typeof catalog === 'object') await db.ref('cached_feeds').set(catalog);
         const payload = {
           status: 'active',
           message: message || 'المنظومة نشطة وتعمل بكامل طاقتها.',
           updatedAt: now,
-          wipeTimestamp: 0
+          wipeTimestamp: 0,
+          components: {
+            website_enabled: true,
+            app_enabled: true,
+            player_enabled: true,
+            admin_enabled: true,
+          }
         };
         await ref.set(payload);
         return res.status(200).json({ success: true, action: 'restore', state: payload });
       }
 
-      return res.status(400).json({ error: 'Invalid action. Choose freeze, wipe, or restore.' });
+      return res.status(400).json({ error: 'Invalid action.' });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
