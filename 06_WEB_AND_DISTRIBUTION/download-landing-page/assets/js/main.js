@@ -4,37 +4,11 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-  initPhoneSwitcher();
   initFaqAccordion();
   initScrollEffects();
   initLanguageSwitcher();
   initQrModal();
 });
-
-/* -------------------------------------------------------------
-   1. Interactive Phone Screen Switcher
-   ------------------------------------------------------------- */
-function initPhoneSwitcher() {
-  const displayImg = document.getElementById('phone-display-img');
-  const buttons = document.querySelectorAll('.switcher-btn');
-  if (!displayImg || !buttons.length) return;
-
-  buttons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const targetSrc = btn.getAttribute('data-screen');
-      if (!targetSrc || btn.classList.contains('active')) return;
-
-      buttons.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-
-      displayImg.style.opacity = '0';
-      setTimeout(() => {
-        displayImg.src = targetSrc;
-        displayImg.style.opacity = '1';
-      }, 200);
-    });
-  });
-}
 
 /* -------------------------------------------------------------
    2. FAQ Accordion
