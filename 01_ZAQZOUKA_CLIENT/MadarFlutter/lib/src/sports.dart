@@ -987,10 +987,14 @@ class _SportsPageState extends State<SportsPage> {
         _message(context, 'لا توجد روابط بث متاحة الآن.');
         return;
       }
+
       await showModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
         backgroundColor: _card,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
         builder: (sheet) => SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
@@ -1028,60 +1032,90 @@ class _SportsPageState extends State<SportsPage> {
               ),
               const SizedBox(height: 6),
               const Text(
-                'اختر سيرفر أو قناة المشاهدة المباشرة',
+                'اختر سيرفر أو قناة المشاهدة المباشرة (سيرفرات فائقة السرعة)',
                 style: TextStyle(color: _muted, fontSize: 13),
               ),
               const SizedBox(height: 12),
               ...streams.map(
-                (stream) => _ServerTile(
-                  server: {
-                    'name': _text(stream['name']),
-                    'embedUrl': _text(stream['url']),
-                  },
-                  onTap: () async {
-                    Navigator.pop(sheet);
-                    final headers = stream['headers'] is Map
-                        ? Map<String, String>.from(
-                            (stream['headers'] as Map).map(
-                              (k, v) => MapEntry('$k', '$v'),
-                            ),
-                          )
-                        : <String, String>{};
-                    final backupSources = streams
-                        .where(
-                          (candidate) =>
-                              _text(candidate['url']).trim().isNotEmpty &&
-                              _text(candidate['url']).trim() !=
-                                  _text(stream['url']).trim(),
-                        )
-                        .map((candidate) {
-                          final candidateHeaders = candidate['headers'] is Map
+                (stream) {
+                  final streamName = _text(stream['name']).ifEmpty('سيرفر بث مباشر');
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(13),
+                        onTap: () async {
+                          Navigator.pop(sheet);
+                          final headers = stream['headers'] is Map
                               ? Map<String, String>.from(
-                                  (candidate['headers'] as Map).map(
-                                    (key, value) => MapEntry('$key', '$value'),
+                                  (stream['headers'] as Map).map(
+                                    (k, v) => MapEntry('$k', '$v'),
                                   ),
                                 )
                               : <String, String>{};
-                          return <String, dynamic>{
-                            'url': _text(candidate['url']).trim(),
-                            'userAgent': _text(candidate['userAgent']),
-                            'referer': _text(candidate['referer']),
-                            'headers': candidateHeaders,
-                          };
-                        })
-                        .toList(growable: false);
-                    await _launchPlayer(
-                      context,
-                      _text(stream['url']),
-                      title,
-                      userAgent: _text(stream['userAgent']),
-                      referer: _text(stream['referer']),
-                      headers: headers,
-                      backupSources: backupSources,
-                      isLive: true,
-                    );
-                  },
-                ),
+                          final backupSources = streams
+                              .where(
+                                (candidate) =>
+                                    _text(candidate['url']).trim().isNotEmpty &&
+                                    _text(candidate['url']).trim() !=
+                                        _text(stream['url']).trim(),
+                              )
+                              .map((candidate) {
+                                final candidateHeaders = candidate['headers'] is Map
+                                    ? Map<String, String>.from(
+                                        (candidate['headers'] as Map).map(
+                                          (key, value) => MapEntry('$key', '$value'),
+                                        ),
+                                      )
+                                    : <String, String>{};
+                                return <String, dynamic>{
+                                  'url': _text(candidate['url']).trim(),
+                                  'userAgent': _text(candidate['userAgent']),
+                                  'referer': _text(candidate['referer']),
+                                  'headers': candidateHeaders,
+                                };
+                              })
+                              .toList(growable: false);
+                          await _launchPlayer(
+                            context,
+                            _text(stream['url']),
+                            title,
+                            userAgent: _text(stream['userAgent']),
+                            referer: _text(stream['referer']),
+                            headers: headers,
+                            backupSources: backupSources,
+                            isLive: true,
+                          );
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(13),
+                            border: Border.all(color: _line),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.play_circle_fill_rounded, color: _brick, size: 22),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  streamName,
+                                  style: const TextStyle(
+                                    color: _ink,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: _muted),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -1826,7 +1860,111 @@ Future<void> _launchPlayer(
     event: 'error',
     errorMessage: 'تعذر فتح مشغل الفيديو',
   );
-  await NativeBridge.promptPlayerUpdate(context);
+  await _showPlayerNotFoundDialog(context, url: url, title: title);
+}
+
+Future<void> _showPlayerNotFoundDialog(
+  BuildContext context, {
+  required String url,
+  required String title,
+}) async {
+  if (!context.mounted) return;
+  await showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (ctx) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1F1B24),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 4,
+            margin: const EdgeInsets.only(bottom: 20),
+            decoration: BoxDecoration(
+              color: Colors.white24,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const Icon(Icons.play_circle_fill_rounded, color: Color(0xFFE50914), size: 58),
+          const SizedBox(height: 14),
+          const Text(
+            'يلزم مشغل زقزوقة (زاغ بلاير)',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'لتشغيل الأفلام والمسلسلات بدون إعلانات وبأعلى دقة، يرجى تثبيت مشغل زاغ الرسمي (خفيف وسريع 4MB فقط).',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 13.5, height: 1.5),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE50914),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                elevation: 4,
+              ),
+              icon: const Icon(Icons.download_rounded, size: 22),
+              label: const Text(
+                'تثبيت مشغل زاغ الآن (4MB)',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                _message(context, 'جاري فحص وتنزيل مشغل زاغ…');
+                final downloaded = await NativeBridge.installDownloaded(target: 'player');
+                if (downloaded?['status'] == 'install_started') return;
+                final res = await NativeBridge.installPlayer();
+                if (res?['status'] == 'permission_required') {
+                  _message(context, 'يرجى السماح بتثبيت التطبيقات لتثبيت المشغل.');
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white24),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.open_in_new_rounded, size: 20),
+              label: const Text(
+                'تشغيل عبر تطبيق خارجي (VLC / MX)',
+                style: TextStyle(fontSize: 13.5),
+              ),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final extOpened = await NativeBridge.openExternalPlayer(url: url, title: title);
+                if (!extOpened && context.mounted) {
+                  _message(context, 'تعذر فتح مشغل خارجي، يرجى تثبيت مشغل زاغ.');
+                }
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
 }
 
 String _absolute(String value, String base) {

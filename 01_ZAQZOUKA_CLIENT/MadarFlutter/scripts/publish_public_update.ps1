@@ -101,12 +101,12 @@ if ($hasPlayer) {
     Copy-Item -LiteralPath $playerApk -Destination $playerTempPath -Force
     gh release upload $tag $playerTempPath --repo $Repository --clobber
     $playerObj = [ordered]@{
-        packageName = "com.madar.player"
+        packageName = "com.mader.player"
         versionCode = $playerVersionCode
         versionName = $playerVersionName
         apkUrl = "https://github.com/$Repository/releases/download/$tag/$playerAssetName"
         sha256 = $playerSha
-        releaseNotes = "مشغل ZAG Player ${playerVersionName}: زر تشغيل وإخفاء الترجمة والنصوص التوضيحية CC، تشغيل تلقائي بأعلى جودة، ودعم كامل لمشاهدة ملخصات beIN Sports."
+        releaseNotes = "ZAG Player companion player update"
     }
 }
 

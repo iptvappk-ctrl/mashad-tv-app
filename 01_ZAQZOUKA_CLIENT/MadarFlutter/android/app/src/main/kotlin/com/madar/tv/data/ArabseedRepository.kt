@@ -1322,7 +1322,7 @@ object ArabseedRepository {
                     isMissingInterveningSeasons ||
                     hasSeasonGaps ||
                     hasEpisodeGaps ||
-                    (seasons.sumOf { it.episodes.size } < 5 && !isEpisodePage)
+                    seasons.sumOf { it.episodes.size } < 5
                 val rawTitleCandidate = item.parentSeriesTitle?.takeIf(String::isNotBlank)
                     ?: item.title.takeIf { !it.contains("الموسم") || it.length > 15 }
                     ?: run {
@@ -1447,25 +1447,28 @@ object ArabseedRepository {
                             seasons.clear()
                             seasons.addAll(mergedAllSeasons)
                         }
-                    } else if (isEpisodePage) {
-                        // Current page itself is an episode (e.g. Episode 30)
+                    } else if (isEpisodePage && seasons.sumOf { it.episodes.size } < 3) {
+                        // Current page itself is an episode but no search results found.
+                        // Only overwrite if we have almost nothing — keep any existing seasons.
                         val epNum = SeriesCatalogParser.episodeNumber(item.title, item.pageUrl) ?: 1
                         val sNum = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) ?: 1
-                        seasons.clear()
-                        seasons += ArabseedSeason(
-                            number = sNum,
-                            title = SeriesCatalogParser.seasonTitle(sNum),
-                            episodes = listOf(
-                                ArabseedEpisode(
-                                    number = epNum,
-                                    title = "الحلقة $epNum",
-                                    pageUrl = item.pageUrl,
-                                    seasonNumber = sNum,
-                                    providerName = item.providerName
-                                )
-                            ),
-                            pageUrl = item.pageUrl
-                        )
+                        val existingSeason = seasons.firstOrNull { it.number == sNum }
+                        if (existingSeason == null) {
+                            seasons += ArabseedSeason(
+                                number = sNum,
+                                title = SeriesCatalogParser.seasonTitle(sNum),
+                                episodes = listOf(
+                                    ArabseedEpisode(
+                                        number = epNum,
+                                        title = "الحلقة $epNum",
+                                        pageUrl = item.pageUrl,
+                                        seasonNumber = sNum,
+                                        providerName = item.providerName
+                                    )
+                                ),
+                                pageUrl = item.pageUrl
+                            )
+                        }
                     }
                 }
 

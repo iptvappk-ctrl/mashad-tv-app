@@ -2,10 +2,12 @@
 **/build/
 local.properties
 *.jks
-*.keystore
+*.key
+keystore.propertiesstore
 *.p12
 *.pfx
 *.key
+keystore.properties
 *.iml
 .idea/
 captures/

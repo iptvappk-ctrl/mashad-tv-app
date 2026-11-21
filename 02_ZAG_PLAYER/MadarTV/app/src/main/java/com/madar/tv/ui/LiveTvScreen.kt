@@ -1,4 +1,4 @@
-﻿package com.madar.tv.ui
+package com.madar.tv.ui
 
 import androidx.activity.compose.BackHandler
 import com.madar.tv.util.PlayerLauncher
@@ -94,13 +94,13 @@ fun LiveTvScreen(
                     playerInstallPrompt = false
                     val market = android.content.Intent(
                         android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse("market://details?id=com.madar.player"),
+                        android.net.Uri.parse("market://details?id=com.mader.player"),
                     )
                     runCatching { context.startActivity(market) }.onFailure {
                         runCatching {
                             context.startActivity(android.content.Intent(
                                 android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse("https://play.google.com/store/apps/details?id=com.madar.player"),
+                                android.net.Uri.parse("https://play.google.com/store/apps/details?id=com.mader.player"),
                             ))
                         }
                     }

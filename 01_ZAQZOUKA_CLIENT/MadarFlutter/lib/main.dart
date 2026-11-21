@@ -160,21 +160,19 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
       );
       if (!mounted || update == null) return;
       final appUpdateAvailable = update['available'] == true;
-      final playerUpdateAvailable = update['playerUpdateAvailable'] == true;
       final appDownloaded = update['appDownloaded'] == true;
-      final playerDownloaded = update['playerDownloaded'] == true;
 
       appUpdateNotifier.value = AppUpdateInfo(
         hasAppUpdate: appUpdateAvailable,
-        hasPlayerUpdate: playerUpdateAvailable,
+        hasPlayerUpdate: false,
         isAppDownloaded: appDownloaded,
-        isPlayerDownloaded: playerDownloaded,
+        isPlayerDownloaded: false,
         appVersion: (update['versionName'] as String? ?? '').trim(),
-        playerVersion: (update['playerVersionName'] as String? ?? '1.1.3').trim(),
+        playerVersion: '',
         appNotes: (update['releaseNotes'] as String? ?? '').trim(),
-        playerNotes: (update['playerReleaseNotes'] as String? ?? '').trim(),
-        playerApkUrl: update['playerApkUrl'] as String?,
-        playerSha256: update['playerSha256'] as String?,
+        playerNotes: '',
+        playerApkUrl: null,
+        playerSha256: null,
       );
 
       if (appUpdateAvailable) {

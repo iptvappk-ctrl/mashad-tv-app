@@ -313,20 +313,32 @@ async function landingVisit(req, res) {
 // ─── route: landing/download ─────────────────────────────────────────────────
 async function landingDownload(req, res) {
   const body = req.body || {};
-  const target = body.target === 'player' ? 'player' : 'app';
+  const target = body.target || 'bundle';
   const now = new Date();
   const cleanRef = body.referrer || 'مباشر (Direct)';
 
   try {
     if (target === 'player') {
       await db.ref('landing_analytics/downloads_player').transaction((v) => (v || 0) + 1);
-    } else {
+      await db.ref('landing_analytics/total_downloads').transaction((v) => (v || 0) + 1);
+    } else if (target === 'app') {
       await db.ref('landing_analytics/downloads_app').transaction((v) => (v || 0) + 1);
+      await db.ref('landing_analytics/total_downloads').transaction((v) => (v || 0) + 1);
+    } else {
+      // 'bundle': both app and player
+      await db.ref('landing_analytics/downloads_app').transaction((v) => (v || 0) + 1);
+      await db.ref('landing_analytics/downloads_player').transaction((v) => (v || 0) + 1);
+      await db.ref('landing_analytics/total_downloads').transaction((v) => (v || 0) + 1);
+      await db.ref('landing_analytics/downloads_bundle').transaction((v) => (v || 0) + 1);
     }
-    await db.ref('landing_analytics/total_downloads').transaction((v) => (v || 0) + 1);
+
+    const label = target === 'player'
+      ? 'مشغل زاغ ZAG Player'
+      : (target === 'app' ? 'تطبيق زقزوقة TV' : 'المنظومة كاملة (التطبيق + المشغل)');
+
     await db.ref('activityLog').push({
       type: 'download',
-      text: `تحميل ${target === 'player' ? 'مشغل زاغ ZAG Player' : 'تطبيق زقزوقة TV'} من موقع التحميل (${cleanRef})`,
+      text: `تحميل ${label} من موقع التحميل (${cleanRef})`,
       icon: '📥',
       time: formatClockTime(now),
       timestamp: now.toISOString(),

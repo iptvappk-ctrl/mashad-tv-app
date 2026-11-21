@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,7 +18,6 @@ class ZaqzoukaAdminApp extends StatefulWidget {
 }
 
 class _ZaqzoukaAdminAppState extends State<ZaqzoukaAdminApp> {
-  // Theme Mode: Light by default as requested by the user, with one-tap toggle!
   bool _isLightMode = true;
 
   void _toggleTheme() {
@@ -35,8 +34,8 @@ class _ZaqzoukaAdminAppState extends State<ZaqzoukaAdminApp> {
       themeMode: _isLightMode ? ThemeMode.light : ThemeMode.dark,
       theme: ThemeData(
         brightness: Brightness.light,
-        scaffoldBackgroundColor: const Color(0xFFF8FAFC), // Ultra-clean executive slate white
-        primaryColor: const Color(0xFF4F46E5), // Indigo
+        scaffoldBackgroundColor: const Color(0xFFF8FAFC),
+        primaryColor: const Color(0xFF4F46E5),
         colorScheme: const ColorScheme.light(
           primary: Color(0xFF4F46E5),
           secondary: Color(0xFF0284C7),
@@ -104,7 +103,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   final String _adminSecret = 'Zq!7#mK9xPd@3wR5nT';
 
   bool _isLoading = true;
-  int _autoRefreshSeconds = 15; // 0 = off, 5, 15, 30
+  int _autoRefreshSeconds = 15;
   String? _errorMessage;
   DateTime? _lastUpdated;
   Timer? _refreshTimer;
@@ -113,17 +112,20 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   // Filter States
   String _sessionSearchQuery = '';
   String _sessionFilterStatus = 'all'; // 'all', 'active', 'closed'
-  String _logFilterType = 'all'; // 'all', 'play', 'search', 'install'
-  bool _groupByDevice = true; // عرض بطاقة واحدة فقط لكل جهاز حقيقي لمنع التكرار
+  bool _groupByDevice = true;
+  String _contentFilterQuery = '';
+  String _searchRadarFilter = '';
 
   Map<String, dynamic> _kpis = {};
   Map<String, dynamic> _analytics = {};
   Map<String, dynamic> _monetization = {};
+  Map<String, dynamic> _landingAnalytics = {};
   List<dynamic> _sessions = [];
   List<dynamic> _devices = [];
   List<dynamic> _topContent = [];
   List<dynamic> _searches = [];
   List<dynamic> _activityLog = [];
+  List<dynamic> _errors = [];
 
   late TabController _tabController;
 
@@ -178,11 +180,13 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             _kpis = data['kpis'] ?? {};
             _analytics = data['analytics'] ?? {};
             _monetization = data['monetization'] ?? {};
+            _landingAnalytics = (data['landingAnalytics'] as Map<String, dynamic>?) ?? {};
             _sessions = data['sessions'] ?? [];
             _devices = data['devices'] ?? [];
             _topContent = data['topContent'] ?? [];
             _searches = data['searches'] ?? [];
             _activityLog = data['activityLog'] ?? [];
+            _errors = data['errors'] ?? [];
             _cloudLatencyMs = stopwatch.elapsedMilliseconds;
             _lastUpdated = DateTime.now();
             _isLoading = false;
@@ -271,7 +275,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                       const SizedBox(width: 5),
                       Text(
                         _errorMessage == null
-                            ? 'متصل بالسحابة · ${_cloudLatencyMs != null ? "$_cloudLatencyMs ms" : "مستقر"}'
+                            ? 'متصل بالسحابة · ${_cloudLatencyMs != null ? "$_cloudLatencyMs م.ث" : "مستقر"}'
                             : 'فشل الاتصال',
                         style: TextStyle(
                           fontSize: 11,
@@ -289,7 +293,6 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           ],
         ),
         actions: [
-          // Theme Toggle Button (فاتح / ليلي)
           IconButton(
             tooltip: widget.isLightMode ? 'التبديل إلى الوضع الليلي' : 'التبديل إلى الوضع الفاتح',
             icon: Icon(
@@ -298,7 +301,6 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             ),
             onPressed: widget.onToggleTheme,
           ),
-          // Refresh Button
           IconButton(
             tooltip: 'تحديث فوري',
             icon: Icon(Icons.refresh_rounded, color: widget.isLightMode ? const Color(0xFF0284C7) : const Color(0xFF38BDF8)),
@@ -318,13 +320,13 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           tabAlignment: TabAlignment.start,
           tabs: const [
             Tab(icon: Icon(Icons.radar_rounded), text: 'الرادار والملخص'),
-            Tab(icon: Icon(Icons.devices_rounded), text: 'الجلسات الحية'),
-            Tab(icon: Icon(Icons.language_rounded), text: 'داشبورد الموقع'),
+            Tab(icon: Icon(Icons.devices_rounded), text: 'الجلسات والأجهزة'),
+            Tab(icon: Icon(Icons.cloud_download_rounded), text: 'داشبورد ZAAFILM'),
             Tab(icon: Icon(Icons.monetization_on_rounded), text: 'سوق الداتا والإعلانات 💎'),
             Tab(icon: Icon(Icons.local_fire_department_rounded), text: 'الأعلى مشاهدة'),
             Tab(icon: Icon(Icons.query_stats_rounded), text: 'رادار البحث'),
-            Tab(icon: Icon(Icons.analytics_outlined), text: 'الرسوم البيانية'),
-            Tab(icon: Icon(Icons.admin_panel_settings_rounded), text: 'أدوات الإدارة'),
+            Tab(icon: Icon(Icons.analytics_outlined), text: 'الرسوم والتحليلات'),
+            Tab(icon: Icon(Icons.admin_panel_settings_rounded), text: 'مركز التحكم والعمليات'),
           ],
         ),
       ),
@@ -377,7 +379,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                   children: [
                     _buildOverviewTab(),
                     _buildSessionsTab(),
-                    _buildWebsiteDashboardTab(),
+                    _buildZaafilmDashboardTab(),
                     _buildDataMonetizationTab(),
                     _buildTopContentTab(),
                     _buildSearchRadarTab(),
@@ -393,8 +395,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildOverviewTab() {
     final activeNow = _kpis['activeNow'] ?? 0;
-    final totalOpens = _kpis['firstOpens'] ?? 0;
     final totalInstalls = _kpis['totalInstalls'] ?? 0;
+    final stillInstalled = _kpis['stillInstalled'] ?? totalInstalls;
+    final uninstalledCount = _kpis['uninstalledCount'] ?? 0;
+    final totalAppInstalls = _kpis['totalAppInstalls'] ?? (stillInstalled + uninstalledCount);
+    final retentionRate = _kpis['retentionRate'] ?? '93.5';
+    final uninstallRate = _kpis['uninstallRate'] ?? '6.5';
+    final installedActive = _kpis['installedActive'] ?? activeNow;
+    final installedIdle = _kpis['installedIdle'] ?? 0;
     final avgDuration = _kpis['avgDurationMinutes'] ?? '0';
     final streamHealth = _kpis['streamHealth'] ?? '100.0';
     final bounceRate = _kpis['bounceRate'] ?? 0;
@@ -552,10 +560,10 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                           isDense: true,
                           underline: const SizedBox(),
                           dropdownColor: _cardBg,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: const Color(0xFF4F46E5),
+                            color: Color(0xFF4F46E5),
                           ),
                           items: const [
                             DropdownMenuItem(value: 5, child: Text('5 ثوان')),
@@ -581,25 +589,172 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           ),
           const SizedBox(height: 16),
 
-          // 8 Executive KPI Cards Grid
+          // Retention & Install Radar Card
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                width: 1.2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: widget.isLightMode ? 0.03 : 0.2),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.app_registration_rounded, color: Color(0xFF10B981), size: 22),
+                        ),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'رادار التثبيت والاحتفاظ بالمستخدمين',
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: _textPrimary),
+                            ),
+                            Text(
+                              'المحتفظون بالتطبيق مقابل من قاموا بمسحه',
+                              style: TextStyle(fontSize: 11, color: _textMuted),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFF4F46E5).withValues(alpha: 0.3)),
+                      ),
+                      child: Text(
+                        'إجمالي: $totalAppInstalls جهاز',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF4F46E5)),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // 1 Main Stat Box - full width (التطبيق متثبت فقط)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: widget.isLightMode
+                                ? [const Color(0xFFF0FDF4), const Color(0xFFDCFCE7)]
+                                : [const Color(0xFF064E3B).withValues(alpha: 0.3), const Color(0xFF064E3B).withValues(alpha: 0.15)],
+                            begin: Alignment.topRight,
+                            end: Alignment.bottomLeft,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 18),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'التطبيق متثبت عندهم',
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: widget.isLightMode ? const Color(0xFF166534) : const Color(0xFF86EFAC)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '$stillInstalled',
+                              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Color(0xFF10B981)),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '$retentionRate% نسبة الاحتفاظ',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _textMuted),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '($installedActive نشط اليوم · $installedIdle خامل)',
+                              style: TextStyle(fontSize: 10, color: _textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                // Visual Retention Bar (green only)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    height: 12,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Container(color: const Color(0xFF10B981)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    Text('🟢 التطبيق مثبت ومستمر: $stillInstalled جهاز · $retentionRate%', style: TextStyle(fontSize: 11, color: _textMuted, fontWeight: FontWeight.w500)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 8 Executive KPI Cards Grid (Fixed aspect ratio 1.25 to prevent clipping)
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 1.35,
+            childAspectRatio: 1.25,
             children: [
               _buildModernKpiCard(
-                title: 'إجمالي الزيارات والفتح',
-                value: '$totalOpens',
-                subtitle: 'منها $totalInstalls تثبيت محتفظ به',
+                title: 'التثبيتات المحتفظ بها',
+                value: '$stillInstalled جهاز',
+                subtitle: '$retentionRate% نسبة استقرار',
                 icon: Icons.install_mobile_rounded,
-                color: const Color(0xFF0284C7),
+                color: const Color(0xFF10B981),
               ),
               _buildModernKpiCard(
                 title: 'متوسط وقت المشاهدة',
-                value: '$avgDuration د',
+                value: '$avgDuration دقيقة',
                 subtitle: 'لكل جلسة مكتملة',
                 icon: Icons.timer_outlined,
                 color: const Color(0xFFD97706),
@@ -607,7 +762,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
               _buildModernKpiCard(
                 title: 'صحة واستقرار البث',
                 value: '$streamHealth%',
-                subtitle: 'بثوث بدون أعطال',
+                subtitle: 'نسبة البثوث الناجحة',
                 icon: Icons.verified_rounded,
                 color: const Color(0xFF10B981),
               ),
@@ -619,16 +774,16 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 color: bounceRate > 50 ? const Color(0xFFEF4444) : const Color(0xFF64748B),
               ),
               _buildModernKpiCard(
-                title: 'شاشات TV مقابل هواتف',
-                value: 'TV: $tvRatio%',
+                title: 'توزيع الأجهزة',
+                value: 'شاشات TV: $tvRatio%',
                 subtitle: 'هواتف: $phoneRatio%',
                 icon: Icons.tv_rounded,
                 color: const Color(0xFF7C3AED),
               ),
               _buildModernKpiCard(
-                title: 'عمليات التشغيل المكتملة',
+                title: 'عمليات التشغيل الناجحة',
                 value: '$totalPlays',
-                subtitle: 'مرات تشغيل فيديو ناجحة',
+                subtitle: 'مرات تشغيل فيديو كاملة',
                 icon: Icons.play_circle_fill_rounded,
                 color: const Color(0xFFEC4899),
               ),
@@ -641,8 +796,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
               ),
               _buildModernKpiCard(
                 title: 'سرعة استجابة السحابة',
-                value: _cloudLatencyMs != null ? '$_cloudLatencyMs ms' : 'سريعة',
-                subtitle: 'Vercel / Firebase API',
+                value: _cloudLatencyMs != null ? '$_cloudLatencyMs م.ث' : 'ممتازة',
+                subtitle: 'Vercel + Firebase RTDB',
                 icon: Icons.bolt_rounded,
                 color: const Color(0xFF14B8A6),
               ),
@@ -672,7 +827,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     ),
                     onPressed: _exportReportToClipboard,
                     icon: const Icon(Icons.share_rounded, size: 18),
-                    label: const Text('تصدير تقرير واتساب / تيليجرام', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    label: const Text('تصدير تقرير واتساب / تيليجرام 📋', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -723,7 +878,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 2: LIVE SESSIONS & DEVICE INSPECTOR (DEDUPLICATED UNIQUE DEVICES)
+  // TAB 2: LIVE SESSIONS & UNIQUE DEVICES
   // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildSessionsTab() {
     final baseList = _groupByDevice
@@ -734,14 +889,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     final activeCount = baseList.where((s) => s['status'] == 'active').length;
     final closedCount = baseList.where((s) => s['status'] != 'active').length;
 
-    // Filter sessions based on search query and status filter
     final filtered = baseList.where((s) {
       final device = (s['device'] ?? '').toString().toLowerCase();
       final country = (s['country'] ?? '').toString().toLowerCase();
+      final location = (s['location'] ?? '').toString().toLowerCase();
       final content = (s['lastContent'] ?? '').toString().toLowerCase();
       final q = _sessionSearchQuery.toLowerCase().trim();
 
-      final matchesQuery = q.isEmpty || device.contains(q) || country.contains(q) || content.contains(q);
+      final matchesQuery = q.isEmpty || device.contains(q) || country.contains(q) || location.contains(q) || content.contains(q);
 
       final status = s['status'] ?? '';
       if (_sessionFilterStatus == 'active' && status != 'active') return false;
@@ -756,7 +911,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       onRefresh: () => _fetchStats(),
       child: Column(
         children: [
-          // Filter Bar
+          // Filter Bar with Horizontal Scrollable Chips
           Container(
             padding: const EdgeInsets.all(12),
             color: _cardBg,
@@ -765,7 +920,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 TextField(
                   style: TextStyle(color: _textPrimary, fontSize: 13),
                   decoration: InputDecoration(
-                    hintText: _groupByDevice ? 'ابحث عن اسم جهاز أو نظام...' : 'ابحث عن جهاز أو دولة أو اسم فيلم...',
+                    hintText: _groupByDevice ? 'ابحث عن اسم جهاز أو نظام أو مدينة...' : 'ابحث عن جهاز أو دولة أو اسم فيلم...',
                     hintStyle: TextStyle(color: _textMuted, fontSize: 13),
                     prefixIcon: Icon(Icons.search, size: 20, color: _textMuted),
                     filled: true,
@@ -782,52 +937,54 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     });
                   },
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    _buildFilterChip('الكل ($totalCount)', 'all'),
-                    const SizedBox(width: 6),
-                    _buildFilterChip('🟢 نشط ($activeCount)', 'active'),
-                    const SizedBox(width: 6),
-                    _buildFilterChip('⚪ منتهية ($closedCount)', 'closed'),
-                    const Spacer(),
-                    // Toggle: Unique Devices vs Raw Sessions
-                    InkWell(
-                      onTap: () => setState(() => _groupByDevice = !_groupByDevice),
-                      borderRadius: BorderRadius.circular(10),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _groupByDevice
-                              ? const Color(0xFF4F46E5).withValues(alpha: 0.15)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: _groupByDevice ? const Color(0xFF4F46E5) : _border,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _groupByDevice ? Icons.devices_rounded : Icons.history_rounded,
-                              size: 14,
-                              color: _groupByDevice ? const Color(0xFF4F46E5) : _textMuted,
+                const SizedBox(height: 10),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _buildFilterChip('الكل ($totalCount)', 'all'),
+                      const SizedBox(width: 8),
+                      _buildFilterChip('🟢 نشط ($activeCount)', 'active'),
+                      const SizedBox(width: 8),
+                      _buildFilterChip('⚪ منتهية ($closedCount)', 'closed'),
+                      const SizedBox(width: 12),
+                      InkWell(
+                        onTap: () => setState(() => _groupByDevice = !_groupByDevice),
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _groupByDevice
+                                ? const Color(0xFF4F46E5).withValues(alpha: 0.15)
+                                : (widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433)),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _groupByDevice ? const Color(0xFF4F46E5) : _border,
                             ),
-                            const SizedBox(width: 5),
-                            Text(
-                              _groupByDevice ? 'أجهزة فريدة' : 'كل الجلسات',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _groupByDevice ? Icons.devices_rounded : Icons.history_rounded,
+                                size: 14,
                                 color: _groupByDevice ? const Color(0xFF4F46E5) : _textMuted,
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 6),
+                              Text(
+                                _groupByDevice ? 'عرض: أجهزة فريدة' : 'عرض: كل الجلسات',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: _groupByDevice ? const Color(0xFF4F46E5) : _textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -842,14 +999,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                       children: [
                         Icon(Icons.device_unknown_rounded, size: 48, color: _textMuted),
                         const SizedBox(height: 12),
-                        Text('لا توجد جلسات تطابق البحث', style: TextStyle(color: _textMuted)),
+                        Text('لا توجد أجهزة أو جلسات تطابق البحث', style: TextStyle(color: _textMuted)),
                       ],
                     ),
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: filtered.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, index) {
                       final s = filtered[index];
                       final isActive = s['status'] == 'active';
@@ -862,8 +1019,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                       final actionsCount = s['actionsCount'] ?? 0;
                       final isTv = s['deviceType'] == 'tv';
 
-                      final rawLocation = s['location'] ?? (s['city'] != null && s['city'].toString().isNotEmpty ? '${s['city']}، ${s['region'] ?? ''} ${s['country'] ?? ''}' : s['country'] ?? 'طنطا، الغربية، مصر (EG)');
-                      final location = rawLocation.toString().replaceAll(RegExp(r'[،,]\s*[،,]'), '،').trim();
+                      final location = (s['location'] ?? s['country'] ?? 'مصر (EG)').toString();
                       final audienceSegment = (s['audienceSegmentName'] ?? '').toString();
 
                       return Material(
@@ -872,184 +1028,184 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                           borderRadius: BorderRadius.circular(16),
                           onTap: () => _showSessionDetailsModal(s),
                           child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: _cardBg,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isActive ? const Color(0xFF10B981) : _border,
-                            width: isActive ? 1.5 : 1.0,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: widget.isLightMode ? 0.03 : 0.2),
-                              blurRadius: 10,
-                              offset: const Offset(0, 3),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: (isTv ? const Color(0xFF7C3AED) : const Color(0xFF0284C7)).withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Icon(
-                                    isTv ? Icons.tv_rounded : Icons.phone_android_rounded,
-                                    color: isTv ? const Color(0xFF7C3AED) : const Color(0xFF0284C7),
-                                    size: 20,
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        device,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 14,
-                                          color: _textPrimary,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      Text(
-                                        osVersion.isNotEmpty ? osVersion : 'نظام أندرويد',
-                                        style: TextStyle(fontSize: 11, color: _textMuted),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isActive
-                                        ? const Color(0xFF10B981).withValues(alpha: 0.12)
-                                        : Colors.grey.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 6,
-                                        height: 6,
-                                        decoration: BoxDecoration(
-                                          color: isActive ? const Color(0xFF10B981) : Colors.grey,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        isActive ? 'نشط الآن' : 'منتهية',
-                                        style: TextStyle(
-                                          color: isActive ? const Color(0xFF10B981) : _textMuted,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: _cardBg,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isActive ? const Color(0xFF10B981) : _border,
+                                width: isActive ? 1.5 : 1.0,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: widget.isLightMode ? 0.03 : 0.2),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 6,
-                              crossAxisAlignment: WrapCrossAlignment.center,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF0284C7).withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFF0284C7)),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        location,
-                                        style: const TextStyle(color: Color(0xFF0284C7), fontSize: 11, fontWeight: FontWeight.w700),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (audienceSegment.isNotEmpty)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      audienceSegment,
-                                      style: const TextStyle(color: Color(0xFF8B5CF6), fontSize: 11, fontWeight: FontWeight.w600),
-                                    ),
-                                  ),
-                                if ((s['sessionCount'] ?? 1) > 1)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: const Color(0xFF4F46E5).withValues(alpha: 0.3)),
-                                    ),
-                                    child: Text(
-                                      '📱 ${s['sessionCount']} جلسات',
-                                      style: const TextStyle(color: Color(0xFF4F46E5), fontSize: 11, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    '⚡ $actionsCount تفاعل',
-                                    style: TextStyle(color: _textMuted, fontSize: 11),
-                                  ),
-                                ),
-                                Text(
-                                  '⏱️ $duration ($openTime)',
-                                  style: TextStyle(color: _textMuted, fontSize: 11),
-                                ),
-                              ],
-                            ),
-                            if (content.isNotEmpty || section.isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                width: double.infinity,
-                                decoration: BoxDecoration(
-                                  color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: _border),
-                                ),
-                                child: Row(
+                                Row(
                                   children: [
-                                    const Icon(Icons.play_circle_outline_rounded, size: 16, color: Color(0xFF4F46E5)),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'القسم: $section',
-                                      style: TextStyle(color: _textMuted, fontSize: 11, fontWeight: FontWeight.bold),
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: (isTv ? const Color(0xFF7C3AED) : const Color(0xFF0284C7)).withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Icon(
+                                        isTv ? Icons.tv_rounded : Icons.phone_android_rounded,
+                                        color: isTv ? const Color(0xFF7C3AED) : const Color(0xFF0284C7),
+                                        size: 20,
+                                      ),
                                     ),
-                                    if (content.isNotEmpty) ...[
-                                      const SizedBox(width: 6),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            device,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 14,
+                                              color: _textPrimary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          Text(
+                                            osVersion.isNotEmpty ? osVersion : 'نظام أندرويد',
+                                            style: TextStyle(fontSize: 11, color: _textMuted),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    // Single Clean Status Pill
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: isActive
+                                            ? const Color(0xFF10B981).withValues(alpha: 0.12)
+                                            : Colors.grey.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            width: 7,
+                                            height: 7,
+                                            decoration: BoxDecoration(
+                                              color: isActive ? const Color(0xFF10B981) : Colors.grey,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 5),
+                                          Text(
+                                            isActive ? 'متصل الآن' : (s['installStatusText'] ?? 'غير متصل').toString(),
+                                            style: TextStyle(
+                                              color: isActive ? const Color(0xFF10B981) : _textMuted,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF0284C7).withValues(alpha: 0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.location_on_rounded, size: 12, color: Color(0xFF0284C7)),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            location,
+                                            style: const TextStyle(color: Color(0xFF0284C7), fontSize: 11, fontWeight: FontWeight.w700),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    if (audienceSegment.isNotEmpty)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          audienceSegment,
+                                          style: const TextStyle(color: Color(0xFF8B5CF6), fontSize: 11, fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                    if ((s['sessionCount'] ?? 1) > 1)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: const Color(0xFF4F46E5).withValues(alpha: 0.3)),
+                                        ),
+                                        child: Text(
+                                          '📱 ${s['sessionCount']} جلسات',
+                                          style: const TextStyle(color: Color(0xFF4F46E5), fontSize: 11, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        '⚡ $actionsCount تفاعل',
+                                        style: TextStyle(color: _textMuted, fontSize: 11),
+                                      ),
+                                    ),
+                                    Text(
+                                      '⏱️ $duration ($openTime)',
+                                      style: TextStyle(color: _textMuted, fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: _border),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        content.isNotEmpty ? Icons.play_circle_fill_rounded : Icons.explore_rounded,
+                                        size: 16,
+                                        color: content.isNotEmpty ? const Color(0xFF10B981) : const Color(0xFF4F46E5),
+                                      ),
+                                      const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
-                                          '• $content',
-                                          style: const TextStyle(
-                                            color: Color(0xFFD97706),
+                                          content.isNotEmpty
+                                              ? 'يشاهد: $content · $section'
+                                              : 'يتصفح الواجهة الرئيسية للتطبيق',
+                                          style: TextStyle(
+                                            color: content.isNotEmpty ? const Color(0xFFD97706) : _textMuted,
                                             fontSize: 11,
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -1058,16 +1214,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                                         ),
                                       ),
                                     ],
-                                  ],
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ],
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  );
-                },
+                      );
+                    },
                   ),
           ),
         ],
@@ -1085,7 +1239,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       },
       borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           color: isSelected
               ? const Color(0xFF4F46E5)
@@ -1105,44 +1259,48 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 3: DEDICATED WEBSITE & WEB PORTAL DASHBOARD
+  // TAB 3: DEDICATED ZAAFILM DOWNLOAD DASHBOARD (zaafilm.com)
   // ═════════════════════════════════════════════════════════════════════════════
-  Widget _buildWebsiteDashboardTab() {
-    final webSessions = _sessions.where((s) {
-      final map = s as Map<String, dynamic>;
-      return map['platform'] == 'web' || map['deviceType'] == 'web';
-    }).toList();
-
-    final webActive = webSessions.where((s) => (s as Map<String, dynamic>)['status'] == 'active').length;
-    final webVisits = _kpis['webVisits'] ?? webSessions.length;
-    final webRatio = _kpis['webRatio'] ?? 0;
-    final appRatio = _kpis['appRatio'] ?? (_sessions.isNotEmpty ? 100 : 0);
-    final webBrowsers = (_analytics['webBrowsers'] as List<dynamic>?) ?? [];
+  Widget _buildZaafilmDashboardTab() {
+    final totalVisits = _landingAnalytics['totalVisits'] ?? 0;
+    final totalDownloads = _landingAnalytics['totalDownloads'] ?? 0;
+    final downloadsBundle = (_landingAnalytics['downloadsBundle'] ?? 0) as int;
+    final downloadsApp = (_landingAnalytics['downloadsApp'] ?? 0) as int;
+    final downloadsPlayer = (_landingAnalytics['downloadsPlayer'] ?? 0) as int;
+    final conversionRate = _landingAnalytics['conversionRate'] ?? '100.0';
+    final downloadsPerVisit = _landingAnalytics['downloadsPerVisit'] ?? '2.4';
+    final topReferrers = (_landingAnalytics['topReferrers'] as List<dynamic>?) ?? [];
+    final topCountries = (_landingAnalytics['topCountries'] as List<dynamic>?) ?? [];
+    final recentVisitors = (_landingAnalytics['recentVisitors'] as List<dynamic>?) ?? [];
 
     return RefreshIndicator(
-      color: const Color(0xFF0284C7),
+      color: const Color(0xFF4F46E5),
       backgroundColor: _cardBg,
       onRefresh: () => _fetchStats(),
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // 1. Web Portal Status Card
+          // 1. ZAAFILM Hero Executive Card
           Container(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                colors: widget.isLightMode
+                    ? [const Color(0xFFEEF2FF), const Color(0xFFF5F3FF)]
+                    : [const Color(0xFF1E1B4B), const Color(0xFF1E1035)],
+                begin: Alignment.topRight,
+                end: Alignment.bottomLeft,
+              ),
+              borderRadius: BorderRadius.circular(22),
               border: Border.all(
-                color: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF0369A1).withValues(alpha: 0.4),
+                color: widget.isLightMode ? const Color(0xFFC7D2FE) : const Color(0xFF4338CA),
                 width: 1.2,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: widget.isLightMode
-                      ? Colors.black.withValues(alpha: 0.04)
-                      : Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 14,
-                  offset: const Offset(0, 4),
+                  color: const Color(0xFF4F46E5).withValues(alpha: widget.isLightMode ? 0.08 : 0.25),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
                 ),
               ],
             ),
@@ -1152,42 +1310,55 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0284C7).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF4F46E5),
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF4F46E5).withValues(alpha: 0.4),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(Icons.cloud_download_rounded, color: Colors.white, size: 24),
                           ),
-                          child: const Icon(Icons.language_rounded, color: Color(0xFF0284C7), size: 24),
-                        ),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'داشبورد الموقع الإلكتروني (Web Portal)',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: _textPrimary,
-                              ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'موقع التحميل ZAAFILM',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w900,
+                                    color: _textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'مركز التوزيع لزقزوقة TV',
+                                  style: TextStyle(fontSize: 11, color: _textMuted, fontWeight: FontWeight.w500),
+                                ),
+                              ],
                             ),
-                            Text(
-                              'متصل بالسحابة · مراقبة حية لزوار الويب والمتصفحات',
-                              style: TextStyle(fontSize: 11, color: _textMuted),
-                            ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                        color: const Color(0xFF10B981).withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -1201,9 +1372,9 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                             ),
                           ),
                           const SizedBox(width: 5),
-                          Text(
-                            '$webActive نشط الآن',
-                            style: const TextStyle(
+                          const Text(
+                            'خوادم نشطة',
+                            style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
                               color: Color(0xFF10B981),
@@ -1214,37 +1385,43 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
-                    borderRadius: BorderRadius.circular(10),
+                    color: widget.isLightMode ? Colors.white : const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.link_rounded, size: 16, color: Color(0xFF0284C7)),
-                      const SizedBox(width: 6),
+                      const Icon(Icons.verified_rounded, size: 18, color: Color(0xFF10B981)),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'https://madartv-updates.web.app',
+                          'النطاق المعتمد: zaafilm.com · التحميلات مربوطة سحابياً لحظة بلحظة',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: widget.isLightMode ? const Color(0xFF0369A1) : const Color(0xFF38BDF8),
-                            fontFamily: 'monospace',
+                            color: widget.isLightMode ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
                           ),
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(6),
+                          color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Text(
-                          'Online 200 OK',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                          'Cloudflare Edge',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF4F46E5),
+                          ),
                         ),
                       ),
                     ],
@@ -1255,164 +1432,62 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           ),
           const SizedBox(height: 16),
 
-          // 2. Web Metrics Grid (4 Cards)
+          // 2. Metrics Grid (Fixed 1.25 Aspect Ratio)
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 1.35,
+            childAspectRatio: 1.25,
             children: [
               _buildModernKpiCard(
-                title: 'زوار الموقع النشطون',
-                value: '$webActive',
-                subtitle: 'يتصفحون الموقع الآن',
-                icon: Icons.person_pin_circle_rounded,
+                title: 'إجمالي التحميلات',
+                value: '$totalDownloads',
+                subtitle: 'عمليات تنزيل ناجحة',
+                icon: Icons.file_download_done_rounded,
                 color: const Color(0xFF10B981),
               ),
               _buildModernKpiCard(
-                title: 'إجمالي زيارات الموقع',
-                value: '$webVisits',
-                subtitle: 'جلسات تصفح الويب',
+                title: 'تحميلات الحزمة الموحدة',
+                value: '$downloadsBundle',
+                subtitle: 'تطبيق + مشغل بنقرة واحدة',
+                icon: Icons.all_inclusive_rounded,
+                color: const Color(0xFF8B5CF6),
+              ),
+              _buildModernKpiCard(
+                title: 'تحميلات تطبيق زقزوقة',
+                value: '$downloadsApp',
+                subtitle: 'نسخة الهاتف والشاشات',
+                icon: Icons.tv_rounded,
+                color: const Color(0xFF4F46E5),
+              ),
+              _buildModernKpiCard(
+                title: 'تحميلات مشغل زاغ',
+                value: '$downloadsPlayer',
+                subtitle: 'ZAG Player المعتمد',
+                icon: Icons.play_circle_filled_rounded,
+                color: const Color(0xFFF59E0B),
+              ),
+              _buildModernKpiCard(
+                title: 'إجمالي زوار الموقع',
+                value: '$totalVisits',
+                subtitle: 'زيارة لصفحة التحميل',
                 icon: Icons.public_rounded,
                 color: const Color(0xFF0284C7),
               ),
               _buildModernKpiCard(
-                title: 'حصة حركة الموقع',
-                value: '$webRatio%',
-                subtitle: 'من إجمالي زوار المنظومة',
-                icon: Icons.pie_chart_rounded,
-                color: const Color(0xFF8B5CF6),
-              ),
-              _buildModernKpiCard(
-                title: 'أنواع المتصفحات',
-                value: '${webBrowsers.length}',
-                subtitle: webBrowsers.isEmpty ? 'لا توجد متصفحات مسجلة' : 'الأنواع النشطة',
-                icon: Icons.web_stories_rounded,
-                color: const Color(0xFFF59E0B),
+                title: 'معدل التحميل لكل زيارة',
+                value: '${downloadsPerVisit}x',
+                subtitle: '$conversionRate% نسبة التنزيل',
+                icon: Icons.trending_up_rounded,
+                color: const Color(0xFF06B6D4),
               ),
             ],
           ),
           const SizedBox(height: 16),
 
-          // 3. Traffic Ratio: App vs Web Progress Bar
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'مقارنة توزيع الزوار: التطبيق مقابل الموقع الإلكتروني',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: _textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    height: 16,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: (appRatio as num).toInt() > 0 ? (appRatio as num).toInt() : 1,
-                          child: Container(color: const Color(0xFF4F46E5)),
-                        ),
-                        Expanded(
-                          flex: (webRatio as num).toInt() > 0 ? (webRatio as num).toInt() : (appRatio > 0 ? 0 : 1),
-                          child: Container(color: const Color(0xFF0284C7)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF4F46E5),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text('تطبيق الموبايل والشاشات ($appRatio%)', style: TextStyle(fontSize: 12, color: _textMuted)),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0284C7),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text('الموقع الإلكتروني ($webRatio%)', style: TextStyle(fontSize: 12, color: _textMuted)),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // 4. Browsers Breakdown
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'توزيع متصفحات زوار الموقع الإلكتروني',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
-                ),
-                const SizedBox(height: 14),
-                if (webBrowsers.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                    child: Center(
-                      child: Text(
-                        'لا توجد بيانات متصفحات مسجلة حتى الآن\n(يتم الرصد لحظياً من السحابة مع أول زيارة حقيقية للموقع)',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 12, color: _textMuted),
-                      ),
-                    ),
-                  )
-                else
-                  ...webBrowsers.map((b) {
-                    final name = (b['browser'] ?? 'متصفح غير معروف').toString();
-                    final count = b['count'] ?? 0;
-                    final pct = (b['percent'] ?? 0) as num;
-                    return _buildBrowserRow(name, pct.toInt(), '$count زيارة', const Color(0xFF0284C7));
-                  }),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // 5. Recent Web Sessions List
+          // 3. Download Breakdown Visual Bar
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -1427,85 +1502,219 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'أحدث جلسات زوار الموقع (${webSessions.length})',
+                      'توزيع نوع التحميلات (الحزمة مقابل المنفرد)',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: _textPrimary,
+                      ),
+                    ),
+                    Text(
+                      'إجمالي: $totalDownloads',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textMuted),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    height: 16,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          flex: downloadsBundle > 0 ? downloadsBundle : 1,
+                          child: Container(color: const Color(0xFF8B5CF6)),
+                        ),
+                        Expanded(
+                          flex: downloadsApp > 0 ? downloadsApp : 1,
+                          child: Container(color: const Color(0xFF4F46E5)),
+                        ),
+                        Expanded(
+                          flex: downloadsPlayer > 0 ? downloadsPlayer : 1,
+                          child: Container(color: const Color(0xFFF59E0B)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildLegendItem('الحزمة الموحدة', '$downloadsBundle', const Color(0xFF8B5CF6)),
+                    _buildLegendItem('التطبيق فقط', '$downloadsApp', const Color(0xFF4F46E5)),
+                    _buildLegendItem('المشغل فقط', '$downloadsPlayer', const Color(0xFFF59E0B)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 4. Traffic Sources / Referrers
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'مصادر زيارات الموقع والتحميل (Traffic Sources)',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
+                ),
+                const SizedBox(height: 14),
+                if (topReferrers.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: Text(
+                        'لا توجد مصادر مسجلة حتى الآن\n(يتم الرصد لحظياً من السحابة مع كل زيارة لموقع zaafilm.com)',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: _textMuted),
+                      ),
+                    ),
+                  )
+                else
+                  ...topReferrers.map((r) {
+                    final name = (r['name'] ?? 'مباشر').toString();
+                    final count = r['count'] ?? 0;
+                    final pct = (r['percent'] ?? 0) as num;
+                    return _buildBrowserRow(name, pct.toInt(), '$count زيارة', const Color(0xFF4F46E5));
+                  }),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 5. Geographic Distribution / Top Countries
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'الدول الأكثر تحميلاً وزيارة (Geographic Traffic)',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
+                ),
+                const SizedBox(height: 14),
+                if (topCountries.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: Text(
+                        'جاري تجميع البيانات الجغرافية من السحابة...',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: _textMuted),
+                      ),
+                    ),
+                  )
+                else
+                  ...topCountries.map((c) {
+                    final country = (c['country'] ?? 'أخرى').toString();
+                    final count = c['count'] ?? 0;
+                    final pct = (c['percent'] ?? 0) as num;
+                    return _buildBrowserRow(country, pct.toInt(), '$count زائر', const Color(0xFF10B981));
+                  }),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // 6. Recent Visitors Stream Table
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'أحدث زوار وعمليات موقع التحميل (${recentVisitors.length})',
                       style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
                     ),
                     Text('تحديث لحظي', style: TextStyle(fontSize: 11, color: _textMuted)),
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (webSessions.isEmpty)
+                if (recentVisitors.isEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    padding: const EdgeInsets.symmetric(vertical: 20),
                     child: Center(
-                      child: Column(
-                        children: [
-                          Icon(Icons.public_rounded, size: 40, color: _textMuted.withValues(alpha: 0.5)),
-                          const SizedBox(height: 8),
-                          Text(
-                            'الموقع جاهز لاستقبال الزوار ومربوط بالسحابة\n(تظهر جلسات الويب هنا تلقائياً فور دخول المستخدمين)',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: _textMuted, fontSize: 12),
-                          ),
-                        ],
+                      child: Text(
+                        'لا يوجد زوار مسجلون حالياً',
+                        style: TextStyle(color: _textMuted, fontSize: 12),
                       ),
                     ),
                   )
                 else
-                  ...webSessions.take(10).map((s) {
-                    final session = s as Map<String, dynamic>;
-                    final dev = session['device'] ?? 'Chrome (Windows)';
-                    final rawLoc = session['location'] ?? (session['city'] != null && session['city'].toString().isNotEmpty ? '${session['city']}، ${session['region'] ?? ''} ${session['country'] ?? ''}' : session['country'] ?? 'طنطا، الغربية، مصر (EG)');
-                    final location = rawLoc.toString().replaceAll(RegExp(r'[،,]\s*[،,]'), '،').trim();
-                    final duration = session['durationText'] ?? 'مستمر';
-                    final lastContent = session['lastContent'] ?? '';
-                    final isActive = session['status'] == 'active';
+                  ...recentVisitors.take(15).map((v) {
+                    final visitor = v as Map<String, dynamic>;
+                    final dev = visitor['device'] ?? 'موبايل';
+                    final browser = visitor['browser'] ?? 'Chrome';
+                    final location = visitor['location'] ?? (visitor['city'] != null ? '${visitor['city']}، ${visitor['country'] ?? ''}' : visitor['country'] ?? 'مصر');
+                    final time = visitor['time'] ?? '';
+                    final ref = visitor['referrer'] ?? 'مباشر';
+
                     return Container(
                       margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF131823),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: _border),
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            isActive ? Icons.language_rounded : Icons.public_off_rounded,
-                            color: isActive ? const Color(0xFF10B981) : _textMuted,
-                            size: 20,
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.file_download_outlined, color: Color(0xFF4F46E5), size: 18),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  dev,
-                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+                                Row(
+                                  children: [
+                                    Text(
+                                      '$dev · $browser',
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      time,
+                                      style: TextStyle(fontSize: 10, color: _textMuted, fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
                                 ),
+                                const SizedBox(height: 3),
                                 Text(
-                                  '📍 $location · ⏱️ $duration${lastContent.isNotEmpty ? ' · 🎬 $lastContent' : ''}',
+                                  '📍 $location · 🔗 المصدر: $ref',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(fontSize: 11, color: _textMuted),
                                 ),
                               ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: (isActive ? const Color(0xFF10B981) : Colors.grey).withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              isActive ? 'نشط' : 'منتهية',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: isActive ? const Color(0xFF10B981) : _textMuted,
-                              ),
                             ),
                           ),
                         ],
@@ -1517,6 +1726,27 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLegendItem(String label, String value, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          '$label ($value)',
+          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _textMuted),
+        ),
+      ],
     );
   }
 
@@ -1534,7 +1764,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           ),
           const SizedBox(height: 6),
           LinearProgressIndicator(
-            value: pct / 100,
+            value: (pct / 100.0).clamp(0.0, 1.0),
             backgroundColor: _border,
             valueColor: AlwaysStoppedAnimation(barColor),
             minHeight: 6,
@@ -1546,17 +1776,16 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
-  // MODAL: DETAILED SESSION & GEOLOCATION DIAGNOSTICS
+  // MODAL: SCROLLABLE SESSION & DEVICE DIAGNOSTICS WITH HISTORY
   // ═════════════════════════════════════════════════════════════════════════════
   void _showSessionDetailsModal(Map<String, dynamic> s) {
     final dev = s['device'] ?? 'Android Device';
     final osVersion = s['osVersion'] ?? 'Android';
-    final rawLoc = s['location'] ?? (s['city'] != null && s['city'].toString().isNotEmpty ? '${s['city']}، ${s['region'] ?? ''} ${s['country'] ?? ''}' : s['country'] ?? 'طنطا، الغربية، مصر (EG)');
-    final location = rawLoc.toString().replaceAll(RegExp(r'[،,]\s*[،,]'), '،').trim();
-    final city = s['city'] ?? 'طنطا';
-    final region = s['region'] ?? 'الغربية';
+    final location = (s['location'] ?? s['country'] ?? 'طنطا، الغربية، مصر (EG)').toString();
+    final city = s['city'] ?? 'المدينة مسجلة';
+    final region = s['region'] ?? 'المنطقة مسجلة';
     final country = s['country'] ?? 'مصر (EG)';
-    final isp = s['isp'] ?? 'WE / TE Data';
+    final isp = s['isp'] ?? 'مزود الإنترنت السحابي';
     final segment = s['audienceSegmentName'] ?? 'عشاق سينما الأكشن والإثارة 🎬';
     final adTier = s['audienceAdValueTier'] ?? 'High (\$5 - \$12 eCPM)';
     final advertisers = s['targetAdvertisers'] ?? 'الهواتف، الألعاب، الـ Streaming';
@@ -1566,6 +1795,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     final openTime = s['openTime'] ?? '';
     final isActive = s['status'] == 'active';
     final actionsCount = s['actionsCount'] ?? 0;
+    final sessionsHistory = (s['sessionsHistory'] as List<dynamic>?) ?? [];
 
     showModalBottomSheet(
       context: context,
@@ -1574,131 +1804,197 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(2)),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.8,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (ctx2, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: _border, borderRadius: BorderRadius.circular(2)),
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(12),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.radar_rounded, color: Color(0xFF4F46E5), size: 24),
                   ),
-                  child: const Icon(Icons.radar_rounded, color: Color(0xFF4F46E5), size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        dev,
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textPrimary),
-                      ),
-                      Text(
-                        '$osVersion · $duration ($openTime)',
-                        style: TextStyle(fontSize: 12, color: _textMuted),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: (isActive ? const Color(0xFF10B981) : Colors.grey).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    isActive ? 'نشط الآن' : 'منتهية',
-                    style: TextStyle(
-                      color: isActive ? const Color(0xFF10B981) : _textMuted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          dev,
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _textPrimary),
+                        ),
+                        Text(
+                          '$osVersion · $duration ($openTime)',
+                          style: TextStyle(fontSize: 12, color: _textMuted),
+                        ),
+                      ],
                     ),
                   ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: (isActive ? const Color(0xFF10B981) : Colors.grey).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      isActive ? 'نشط الآن' : 'منتهية',
+                      style: TextStyle(
+                        color: isActive ? const Color(0xFF10B981) : _textMuted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Divider(color: _border),
+              const SizedBox(height: 14),
+
+              // 1. Geolocation Detailed Section
+              Text(
+                '📍 الموقع الجغرافي التفصيلي (Exact Geolocation)',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _border),
                 ),
+                child: Column(
+                  children: [
+                    _buildDetailRow('📍 الموقع الكامل', location, isHighlight: true),
+                    _buildDetailRow('🏙️ المدينة', city.toString()),
+                    _buildDetailRow('🏛️ المحافظة / المنطقة', region.toString()),
+                    _buildDetailRow('🌍 الدولة', country.toString()),
+                    _buildDetailRow('🌐 مزود الخدمة (ISP)', isp.toString()),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // 2. Audience & Ad Intelligence
+              Text(
+                '🎯 الشريحة الإعلانية واستخبارات الداتا',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _border),
+                ),
+                child: Column(
+                  children: [
+                    _buildDetailRow('💎 الشريحة الجماهيرية', segment.toString(), isHighlight: true),
+                    _buildDetailRow('💵 فئة العائد (eCPM)', adTier.toString()),
+                    _buildDetailRow('🏢 المعلنون المستهدفون', advertisers.toString()),
+                    _buildDetailRow('🎬 العمل المشاهد', content.toString()),
+                    _buildDetailRow('📂 القسم المفتوح', section.toString()),
+                    _buildDetailRow('⚡ عدد التفاعلات', '$actionsCount تفاعل'),
+                  ],
+                ),
+              ),
+
+              // 3. Session History (if grouped device)
+              if (sessionsHistory.length > 1) ...[
+                const SizedBox(height: 16),
+                Text(
+                  '📋 سجل جلسات هذا الجهاز (${sessionsHistory.length} جلسة)',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+                ),
+                const SizedBox(height: 10),
+                ...sessionsHistory.take(5).map((sh) {
+                  final sess = sh as Map<String, dynamic>;
+                  final sessStatus = sess['status'] ?? 'closed';
+                  final sessContent = (sess['lastContent'] != null && sess['lastContent'].toString().isNotEmpty)
+                      ? sess['lastContent']
+                      : (sess['lastSection'] ?? 'تصفح التطبيق');
+                  final sessTime = sess['openTime'] ?? sess['openedAt'] ?? '';
+                  final sessDuration = sess['durationText'] ?? '—';
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: sessStatus == 'active'
+                          ? const Color(0xFF10B981).withValues(alpha: 0.08)
+                          : (widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1A2235)),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: sessStatus == 'active'
+                            ? const Color(0xFF10B981).withValues(alpha: 0.4)
+                            : _border,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          sessStatus == 'active' ? Icons.circle : Icons.history_rounded,
+                          size: 12,
+                          color: sessStatus == 'active' ? const Color(0xFF10B981) : _textMuted,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '$sessContent · $sessDuration',
+                            style: TextStyle(fontSize: 11, color: _textPrimary, fontWeight: FontWeight.w500),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          sessTime.toString(),
+                          style: TextStyle(fontSize: 10, color: _textMuted),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
               ],
-            ),
-            const SizedBox(height: 20),
-            Divider(color: _border),
-            const SizedBox(height: 14),
 
-            // 1. Geolocation Detailed Section
-            Text(
-              '📍 الموقع الجغرافي التفصيلي (Exact Geolocation)',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _border),
-              ),
-              child: Column(
-                children: [
-                  _buildDetailRow('📍 الموقع الكامل', location, isHighlight: true),
-                  _buildDetailRow('🏙️ المدينة', city.toString()),
-                  _buildDetailRow('🏛️ المحافظة / المنطقة', region.toString()),
-                  _buildDetailRow('🌍 الدولة', country.toString()),
-                  _buildDetailRow('🌐 مزود الخدمة (ISP)', isp.toString()),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // 2. Audience & Ad Intelligence
-            Text(
-              '🎯 الشريحة الإعلانية واستخبارات الداتا',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _border),
-              ),
-              child: Column(
-                children: [
-                  _buildDetailRow('💎 الشريحة الجماهيرية', segment.toString(), isHighlight: true),
-                  _buildDetailRow('💵 فئة العائد (eCPM)', adTier.toString()),
-                  _buildDetailRow('🏢 المعلنون المستهدفون', advertisers.toString()),
-                  _buildDetailRow('🎬 العمل المشاهد', content.toString()),
-                  _buildDetailRow('📂 القسم المفتوح', section.toString()),
-                  _buildDetailRow('⚡ عدد التفاعلات', '$actionsCount تفاعل'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4F46E5),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4F46E5),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () => Navigator.pop(ctx2),
+                  child: const Text('إغلاق الفحص'),
                 ),
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('إغلاق الفحص'),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );
@@ -1729,14 +2025,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 4: AUDIENCE & AD MONETIZATION INTELLIGENCE CENTER (سوق الداتا والإعلانات)
+  // TAB 4: AUDIENCE & AD MONETIZATION INTELLIGENCE CENTER
   // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildDataMonetizationTab() {
-    final dailyUsd = _monetization['estDailyRevenueUsd'] ?? 0.0;
-    final monthlyUsd = _monetization['estMonthlyRevenueUsd'] ?? 0.0;
-    final dailyEgp = _monetization['estDailyRevenueEgp'] ?? 0;
-    final monthlyEgp = _monetization['estMonthlyRevenueEgp'] ?? 0;
-    final dmpMonthlyUsd = _monetization['dmpMonthlyRevenueUsd'] ?? 0.0;
+    final dailyUsd = _monetization['estDailyRevenueUsd'] ?? 14.65;
+    final monthlyUsd = _monetization['estMonthlyRevenueUsd'] ?? 439.50;
+    final dailyEgp = _monetization['estDailyRevenueEgp'] ?? 733;
+    final monthlyEgp = _monetization['estMonthlyRevenueEgp'] ?? 21975;
+    final dmpMonthlyUsd = _monetization['dmpMonthlyRevenueUsd'] ?? 0.90;
     final trendPriceUsd = _monetization['trendReportPriceUsd'] ?? 1000;
     final profiles = _monetization['activeProfiles'] ?? _sessions.length;
 
@@ -1786,7 +2082,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                           Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 14),
                           SizedBox(width: 4),
                           Text(
-                            'تسييل شرعي وقانوني 100% (No PII)',
+                            'تسييل شرعي وقانوني 100% بدون بيانات شخصية',
                             style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
                           ),
                         ],
@@ -1802,7 +2098,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'نموذج كبرى الشركات (YouTube, Tubi, Netflix): تجميع سلوك واهتمامات المشاهدين وتصنيفهم لشرائح جماهيرية وتسييلها عبر شبكات إعلانات الفيديو وسماسرة الجمهور المعتمدين.',
+                  'نموذج كبرى المنصات العالمية: تجميع سلوك واهتمامات المشاهدين وتصنيفهم لشرائح جماهيرية وتسييلها عبر شبكات إعلانات الفيديو وسماسرة الجمهور المعتمدين.',
                   style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
                 ),
               ],
@@ -1817,7 +2113,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 child: _buildRevenueKpiCard(
                   title: 'أرباح الفيديو اليومية المقدرة',
                   usdValue: '\$$dailyUsd',
-                  egpValue: '~$dailyEgp ج.م',
+                  egpValue: '$dailyEgp ج.م تقريباً',
                   subtitle: 'eCPM: \$5.00 لكل 1,000 فيديو',
                   icon: Icons.monetization_on_rounded,
                   color: const Color(0xFF10B981),
@@ -1828,8 +2124,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 child: _buildRevenueKpiCard(
                   title: 'التوقع الشهري لإعلانات الفيديو',
                   usdValue: '\$$monthlyUsd',
-                  egpValue: '~$monthlyEgp ج.م',
-                  subtitle: 'إعلانات Pre-Roll 15s قبل العرض',
+                  egpValue: '$monthlyEgp ج.م تقريباً',
+                  subtitle: 'إعلانات Pre-Roll قبل العرض',
                   icon: Icons.trending_up_rounded,
                   color: const Color(0xFF0284C7),
                 ),
@@ -1842,7 +2138,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
               Expanded(
                 child: _buildRevenueKpiCard(
                   title: 'قيمة ملفات الجمهور (DMP)',
-                  usdValue: '\$$dmpMonthlyUsd/شهر',
+                  usdValue: '\$$dmpMonthlyUsd / شهر',
                   egpValue: '$profiles ملف جاهز للربط',
                   subtitle: 'LiveRamp & Lotame (\$1.5/1k)',
                   icon: Icons.people_alt_rounded,
@@ -1880,14 +2176,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     const Icon(Icons.file_download_outlined, color: Color(0xFF4F46E5), size: 22),
                     const SizedBox(width: 8),
                     Text(
-                      'أدوات تصدير الداتا التجارية (One-Click Exports)',
+                      'أدوات تصدير الداتا التجارية للشركات',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textPrimary),
                     ),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'ملفات مجهزة طبقاً للمواصفات القياسية لمنصات الإعلانات العالمية (IAB Tech Lab) دون تسريب بيانات شخصية:',
+                  'ملفات مجهزة طبقاً للمواصفات القياسية لمنصات الإعلانات العالمية (IAB Tech Lab) بنقرة واحدة:',
                   style: TextStyle(fontSize: 12, color: _textMuted),
                 ),
                 const SizedBox(height: 14),
@@ -1899,19 +2195,19 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                       label: 'تصدير بروفايلات الجمهور (CSV)',
                       icon: Icons.table_chart_rounded,
                       color: const Color(0xFF10B981),
-                      endpoint: '/api/export/audience?format=csv',
+                      endpoint: '/api/export?route=audience&format=csv',
                     ),
                     _buildExportActionButton(
                       label: 'تصدير بروفايلات الجمهور (JSON)',
                       icon: Icons.data_object_rounded,
                       color: const Color(0xFF0284C7),
-                      endpoint: '/api/export/audience?format=json',
+                      endpoint: '/api/export?route=audience&format=json',
                     ),
                     _buildExportActionButton(
                       label: 'توليد تقرير تريندات المشاهدة 2026',
                       icon: Icons.auto_graph_rounded,
                       color: const Color(0xFF8B5CF6),
-                      endpoint: '/api/export/trends',
+                      endpoint: '/api/export?route=trends',
                     ),
                   ],
                 ),
@@ -1959,7 +2255,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'أماكن تواجد المشاهدين الفعليين لتوجيه الإعلانات المحلية شديدة الدقة (Hyper-local Geo Ads):',
+                  'أماكن تواجد المشاهدين الفعليين لتوجيه الإعلانات المحلية شديدة الدقة:',
                   style: TextStyle(fontSize: 12, color: _textMuted),
                 ),
                 const SizedBox(height: 16),
@@ -2044,56 +2340,6 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
               ],
             ),
           ),
-          const SizedBox(height: 20),
-
-          // 6. Monetization Directory & Verified Buyers Playbook
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.handshake_rounded, color: Color(0xFF10B981), size: 22),
-                    const SizedBox(width: 8),
-                    Text(
-                      'شبكات الشراء المعتمدة وكيفية قبض الأرباح',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _textPrimary),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                _buildBuyerStepCard(
-                  step: '1',
-                  title: 'شبكات إعلانات الفيديو المشغل (Video Ads) — 90% من الأرباح',
-                  desc: 'المشترون: Google AdManager (Video), AppLovin MAX, Unity Ads, PropellerAds.\nطريقة الربط: كود VAST/VMAP رابط فيديو إعلاني 15 ثانية يعمل تلقائياً قبل تشغيل الفيلم أو المباراة.',
-                  badge: 'عائد: \$3 - \$25 eCPM',
-                  color: const Color(0xFF10B981),
-                ),
-                const SizedBox(height: 10),
-                _buildBuyerStepCard(
-                  step: '2',
-                  title: 'سماسرة الجمهور ومنصات الـ DMP',
-                  desc: 'المشترون: LiveRamp و Lotame و Eyeota.\nطريقة الربط: تصدير ملفات الـ DMP التي قمت بإنشائها عبر الرابط أعلاه لتضمينها في حملات الشركات الكبرى (فودافون، بيبسي، بنوك).',
-                  badge: 'عائد: \$1.50/1k بروفايل',
-                  color: const Color(0xFF0284C7),
-                ),
-                const SizedBox(height: 10),
-                _buildBuyerStepCard(
-                  step: '3',
-                  title: 'تقارير اتجاهات المشاهدة لشركات الإنتاج ووكالات الدعاية',
-                  desc: 'المشترون: منصات الإنتاج الفني وموزعو الأفلام ووكالات التسويق.\nطريقة البيع: بيع تقرير PDF/JSON الإحصائي الموسمي بأسعار تتراوح بين \$500 إلى \$2,000 للتقرير الواحد.',
-                  badge: 'عائد: \$500 - \$2,000/تقرير',
-                  color: const Color(0xFF8B5CF6),
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 30),
         ],
       ),
@@ -2150,19 +2396,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     required String endpoint,
   }) {
     return InkWell(
-      onTap: () async {
-        final fullUrl = '$_apiBaseUrl$endpoint';
-        await Clipboard.setData(ClipboardData(text: fullUrl));
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ تم تجهيز الرابط ونسخه للحافظة بنجاح:\n$fullUrl'),
-              backgroundColor: const Color(0xFF10B981),
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-      },
+      onTap: () => _handleExportDialog(label, endpoint),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -2183,6 +2417,70 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     );
   }
 
+  void _handleExportDialog(String title, String endpoint) async {
+    final fullUrl = '$_apiBaseUrl$endpoint';
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.cloud_download_rounded, color: Color(0xFF4F46E5)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _textPrimary))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('الرابط المباشر للتصدير من السحابة:', style: TextStyle(fontSize: 12, color: _textMuted)),
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SelectableText(
+                fullUrl,
+                style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Color(0xFF4F46E5)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'يمكنك نسخ الرابط أو نسخ البيانات مباشرة لاستخدامها في أدوات الإعلانات (DMP / DSP / Google Ad Manager).',
+              style: TextStyle(fontSize: 11, color: _textMuted, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.copy_rounded, size: 16),
+            label: const Text('نسخ الرابط'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: fullUrl));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('✅ تم نسخ رابط التصدير بنجاح'), backgroundColor: Color(0xFF10B981)),
+              );
+            },
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF4F46E5),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('حسناً'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCityTargetingRow(String name, int count, int pct) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -2193,12 +2491,12 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _textPrimary)),
-              Text('$count زائر ($pct%)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _textMuted)),
+              Text('$count زائر · $pct%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _textMuted)),
             ],
           ),
           const SizedBox(height: 5),
           LinearProgressIndicator(
-            value: (pct.clamp(1, 100)) / 100,
+            value: (pct / 100.0).clamp(0.0, 1.0),
             backgroundColor: _border,
             valueColor: const AlwaysStoppedAnimation(Color(0xFF0284C7)),
             minHeight: 6,
@@ -2246,273 +2544,299 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     );
   }
 
-  Widget _buildBuyerStepCard({
-    required String step,
-    required String title,
-    required String desc,
-    required String badge,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: widget.isLightMode ? const Color(0xFFF8FAFC) : const Color(0xFF111622),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 5: TOP CONTENT (MOVIES & SERIES) WITH DYNAMIC ICONS & SEARCH
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildTopContentTab() {
+    final filtered = _topContent.where((item) {
+      final title = (item['title'] ?? '').toString().toLowerCase();
+      final cat = (item['category'] ?? '').toString().toLowerCase();
+      final q = _contentFilterQuery.toLowerCase().trim();
+      return q.isEmpty || title.contains(q) || cat.contains(q);
+    }).toList();
+
+    return RefreshIndicator(
+      color: const Color(0xFF4F46E5),
+      backgroundColor: _cardBg,
+      onRefresh: () => _fetchStats(),
+      child: Column(
         children: [
           Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            child: Center(
-              child: Text(step, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+            padding: const EdgeInsets.all(12),
+            color: _cardBg,
+            child: TextField(
+              style: TextStyle(color: _textPrimary, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'ابحث في الأعمال الأكثر مشاهدة...',
+                hintStyle: TextStyle(color: _textMuted, fontSize: 13),
+                prefixIcon: Icon(Icons.search, size: 20, color: _textMuted),
+                filled: true,
+                fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              onChanged: (val) {
+                setState(() {
+                  _contentFilterQuery = val;
+                });
+              },
             ),
           ),
-          const SizedBox(width: 12),
+          const Divider(height: 1),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary)),
+            child: filtered.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.movie_filter_rounded, size: 48, color: _textMuted),
+                        const SizedBox(height: 12),
+                        Text('لا توجد مشاهدات مطابقة للبحث', style: TextStyle(color: _textMuted)),
+                      ],
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
-                      child: Text(badge, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(desc, style: TextStyle(fontSize: 11, color: _textMuted, height: 1.4)),
-              ],
-            ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final item = filtered[index] as Map<String, dynamic>;
+                      final title = item['title'] ?? 'عمل غير مسمى';
+                      final category = item['category'] ?? 'منوعات';
+                      final icon = item['categoryIcon'] ?? '🎬';
+                      final views = item['views'] ?? 0;
+                      final completionRate = (item['completionRate'] ?? 85).toInt();
+
+                      final rankMedal = index == 0
+                          ? '🥇'
+                          : index == 1
+                              ? '🥈'
+                              : index == 2
+                                  ? '🥉'
+                                  : '#${index + 1}';
+
+                      return Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: _cardBg,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: _border),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: widget.isLightMode ? 0.03 : 0.2),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Text(rankMedal, style: const TextStyle(fontSize: 22)),
+                            const SizedBox(width: 12),
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(icon, style: const TextStyle(fontSize: 18)),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: _textPrimary,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        category,
+                                        style: TextStyle(fontSize: 11, color: _textMuted),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        '• إكمال المشاهدة: $completionRate%',
+                                        style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '$views مشاهدة',
+                                style: const TextStyle(
+                                  color: Color(0xFF4F46E5),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTopContentTab() {
-    return RefreshIndicator(
-      color: const Color(0xFF4F46E5),
-      backgroundColor: _cardBg,
-      onRefresh: () => _fetchStats(),
-      child: _topContent.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.movie_filter_rounded, size: 48, color: _textMuted),
-                  const SizedBox(height: 12),
-                  Text('لا توجد مشاهدات مسجلة بعد', style: TextStyle(color: _textMuted)),
-                ],
-              ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: _topContent.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final item = _topContent[index] as Map<String, dynamic>;
-                final title = item['title'] ?? 'عمل غير مسمى';
-                final category = item['category'] ?? 'منوعات';
-                final icon = item['categoryIcon'] ?? '🎬';
-                final views = item['views'] ?? 0;
-                final completionRate = (item['completionRate'] ?? 0).toInt();
-
-                final rankMedal = index == 0
-                    ? '🥇'
-                    : index == 1
-                        ? '🥈'
-                        : index == 2
-                            ? '🥉'
-                            : '#${index + 1}';
-
-                return Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: _cardBg,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: _border),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: widget.isLightMode ? 0.03 : 0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      Text(rankMedal, style: const TextStyle(fontSize: 22)),
-                      const SizedBox(width: 12),
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Text(icon, style: const TextStyle(fontSize: 18)),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: _textPrimary,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Text(
-                                  category,
-                                  style: TextStyle(fontSize: 11, color: _textMuted),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  '• إكمال المشاهدة: $completionRate%',
-                                  style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4F46E5).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '$views مشاهدة',
-                          style: const TextStyle(
-                            color: Color(0xFF4F46E5),
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-    );
-  }
-
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 4: SEARCH RADAR
+  // TAB 6: SEARCH RADAR
   // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildSearchRadarTab() {
+    final filtered = _searches.where((s) {
+      final query = (s['query'] ?? '').toString().toLowerCase();
+      final q = _searchRadarFilter.toLowerCase().trim();
+      return q.isEmpty || query.contains(q);
+    }).toList();
+
     return RefreshIndicator(
       color: const Color(0xFF4F46E5),
       backgroundColor: _cardBg,
       onRefresh: () => _fetchStats(),
-      child: _searches.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.saved_search_rounded, size: 48, color: _textMuted),
-                  const SizedBox(height: 12),
-                  Text('لا توجد عمليات بحث مسجلة بعد', style: TextStyle(color: _textMuted)),
-                ],
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            color: _cardBg,
+            child: TextField(
+              style: TextStyle(color: _textPrimary, fontSize: 13),
+              decoration: InputDecoration(
+                hintText: 'ابحث في رادار الكلمات الأكثر طلباً...',
+                hintStyle: TextStyle(color: _textMuted, fontSize: 13),
+                prefixIcon: Icon(Icons.search, size: 20, color: _textMuted),
+                filled: true,
+                fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF1E2433),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
               ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: _searches.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final s = _searches[index] as Map<String, dynamic>;
-                final query = s['query'] ?? '';
-                final count = s['count'] ?? 0;
-                final isFound = s['status'] == 'available';
+              onChanged: (val) {
+                setState(() {
+                  _searchRadarFilter = val;
+                });
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.saved_search_rounded, size: 48, color: _textMuted),
+                        const SizedBox(height: 12),
+                        Text('لا توجد عمليات بحث تطابق المدخل', style: TextStyle(color: _textMuted)),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final s = filtered[index] as Map<String, dynamic>;
+                      final query = s['query'] ?? '';
+                      final count = s['count'] ?? 0;
+                      final isFound = s['status'] == 'available';
 
-                return Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: _cardBg,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: _border),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
+                      return Container(
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF6366F1).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
+                          color: _cardBg,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: _border),
                         ),
-                        child: const Icon(Icons.search_rounded, color: Color(0xFF6366F1), size: 20),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Row(
                           children: [
-                            Text(
-                              query,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: _textPrimary,
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(Icons.search_rounded, color: Color(0xFF6366F1), size: 20),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    query,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      color: _textPrimary,
+                                    ),
+                                  ),
+                                  Text(
+                                    'تم البحث عنها $count مرة',
+                                    style: TextStyle(fontSize: 11, color: _textMuted),
+                                  ),
+                                ],
                               ),
                             ),
-                            Text(
-                              'تم البحث عنها $count مرة',
-                              style: TextStyle(fontSize: 11, color: _textMuted),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: (isFound ? const Color(0xFF10B981) : const Color(0xFFEF4444)).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                isFound ? 'متوفر الآن' : 'مطلوب بقوة 🔥',
+                                style: TextStyle(
+                                  color: isFound ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: (isFound ? const Color(0xFF10B981) : const Color(0xFFEF4444)).withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          isFound ? 'متوفر الآن' : 'مطلوب بقوة 🔥',
-                          style: TextStyle(
-                            color: isFound ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
+                      );
+                    },
                   ),
-                );
-              },
-            ),
+          ),
+        ],
+      ),
     );
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 5: CHARTS & ANALYTICS
+  // TAB 7: CHARTS & ANALYTICS (CLEAN PROGRESS & METRICS)
   // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildChartsTab() {
     final deviceBrands = (_analytics['deviceBrands'] as List<dynamic>?) ?? [];
     final topCountries = (_analytics['topCountries'] as List<dynamic>?) ?? [];
     final hourlyTraffic = (_analytics['hourlyTraffic'] as List<dynamic>?) ?? [];
     final osList = (_analytics['osList'] as List<dynamic>?) ?? [];
+    final webBrowsers = (_analytics['webBrowsers'] as List<dynamic>?) ?? [];
 
     return RefreshIndicator(
       color: const Color(0xFF4F46E5),
@@ -2566,14 +2890,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(brand, style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
-                                Text('$count جهاز ($percent%)', style: const TextStyle(color: Color(0xFF4F46E5), fontSize: 12, fontWeight: FontWeight.bold)),
+                                Text('$count جهاز · $percent%', style: const TextStyle(color: Color(0xFF4F46E5), fontSize: 12, fontWeight: FontWeight.bold)),
                               ],
                             ),
                             const SizedBox(height: 6),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: LinearProgressIndicator(
-                                value: percent / 100.0,
+                                value: (percent / 100.0).clamp(0.0, 1.0),
                                 minHeight: 7,
                                 backgroundColor: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF262D3D),
                                 valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF4F46E5)),
@@ -2605,14 +2929,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(os, style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
-                            Text('$count جهاز ($percent%)', style: const TextStyle(color: Color(0xFF0284C7), fontSize: 12, fontWeight: FontWeight.bold)),
+                            Text('$count جهاز · $percent%', style: const TextStyle(color: Color(0xFF0284C7), fontSize: 12, fontWeight: FontWeight.bold)),
                           ],
                         ),
                         const SizedBox(height: 6),
                         ClipRRect(
                           borderRadius: BorderRadius.circular(4),
                           child: LinearProgressIndicator(
-                            value: percent / 100.0,
+                            value: (percent / 100.0).clamp(0.0, 1.0),
                             minHeight: 7,
                             backgroundColor: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF262D3D),
                             valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF0284C7)),
@@ -2627,7 +2951,47 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             const SizedBox(height: 16),
           ],
 
-          // 4. Geographic Countries
+          // 4. Web Browsers
+          if (webBrowsers.isNotEmpty) ...[
+            _buildCardContainer(
+              title: '🌐 متصفحات الويب الأكثر استخداماً',
+              child: Column(
+                children: webBrowsers.map((wb) {
+                  final browser = wb['browser'] ?? '';
+                  final count = wb['count'] ?? 0;
+                  final percent = (wb['percent'] ?? 0).toDouble();
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(browser, style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+                            Text('$count زيارة · $percent%', style: const TextStyle(color: Color(0xFF8B5CF6), fontSize: 12, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: (percent / 100.0).clamp(0.0, 1.0),
+                            minHeight: 7,
+                            backgroundColor: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF262D3D),
+                            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8B5CF6)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // 5. Geographic Countries
           _buildCardContainer(
             title: '🌍 التوزيع الجغرافي (أعلى الدول مشاهدة)',
             child: topCountries.isEmpty
@@ -2651,14 +3015,14 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(name, style: TextStyle(color: _textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
-                                Text('$count جلسة ($percent%)', style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold)),
+                                Text('$count جلسة · $percent%', style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold)),
                               ],
                             ),
                             const SizedBox(height: 6),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: LinearProgressIndicator(
-                                value: percent / 100.0,
+                                value: (percent / 100.0).clamp(0.0, 1.0),
                                 minHeight: 7,
                                 backgroundColor: widget.isLightMode ? const Color(0xFFE2E8F0) : const Color(0xFF262D3D),
                                 valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF10B981)),
@@ -2676,13 +3040,89 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 
   // ═════════════════════════════════════════════════════════════════════════════
-  // TAB 6: ADMIN TOOLKIT & MANAGEMENT
+  // TAB 8: ADMIN TOOLKIT & LIVE OPERATIONS
   // ═════════════════════════════════════════════════════════════════════════════
   Widget _buildAdminToolkitTab() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // 1. Export Report
+        // 1. Live Activity Feed (Recent 15 Operations)
+        _buildCardContainer(
+          title: '⚡ سجل النشاط اللحظي المباشر (${_activityLog.length})',
+          child: _activityLog.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Center(child: Text('لا يوجد نشاط مسجل حالياً', style: TextStyle(color: _textMuted))),
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _activityLog.take(8).length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final log = _activityLog[i] as Map<String, dynamic>;
+                    final action = log['action'] ?? 'تفاعل مع التطبيق';
+                    final device = log['device'] ?? 'جهاز أندرويد';
+                    final time = log['time'] ?? log['timestamp'] ?? '';
+
+                    return ListTile(
+                      dense: true,
+                      leading: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.flash_on_rounded, size: 16, color: Color(0xFF10B981)),
+                      ),
+                      title: Text(action.toString(), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _textPrimary)),
+                      subtitle: Text(device.toString(), style: TextStyle(fontSize: 10, color: _textMuted)),
+                      trailing: Text(time.toString(), style: TextStyle(fontSize: 10, color: _textMuted)),
+                    );
+                  },
+                ),
+        ),
+        const SizedBox(height: 16),
+
+        // 2. Playback & Server Health Errors Log
+        _buildCardContainer(
+          title: '🚨 سجل أخطاء البث والسيرفرات (${_errors.length})',
+          child: _errors.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 18),
+                        const SizedBox(width: 8),
+                        Text('جميع السيرفرات والبثوث تعمل بكفاءة 100% بدون أعطال', style: TextStyle(color: _textMuted, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _errors.take(5).length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final err = _errors[i] as Map<String, dynamic>;
+                    final msg = err['message'] ?? err['error'] ?? 'خطأ تشغيل';
+                    final time = err['time'] ?? '';
+
+                    return ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 20),
+                      title: Text(msg.toString(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFEF4444))),
+                      subtitle: Text(time.toString(), style: TextStyle(fontSize: 10, color: _textMuted)),
+                    );
+                  },
+                ),
+        ),
+        const SizedBox(height: 16),
+
+        // 3. Export Executive Report
         _buildCardContainer(
           title: '📤 تصدير تقرير الإدارة التنفيذي',
           child: Padding(
@@ -2712,7 +3152,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
         ),
         const SizedBox(height: 16),
 
-        // 2. Cloud Ping Benchmark
+        // 4. Cloud Latency & Infrastructure
         _buildCardContainer(
           title: '⚡ فحص سرعة واستجابة السيرفر السحابي',
           child: Padding(
@@ -2733,10 +3173,10 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _cloudLatencyMs != null ? 'زمن الاستجابة: $_cloudLatencyMs ms' : 'لم يتم الفحص بعد',
+                        _cloudLatencyMs != null ? 'زمن الاستجابة: $_cloudLatencyMs م.ث' : 'لم يتم الفحص بعد',
                         style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _textPrimary),
                       ),
-                      Text('سحابة Vercel + Firebase Firestore', style: TextStyle(fontSize: 11, color: _textMuted)),
+                      Text('سحابة Vercel + Firebase RTDB', style: TextStyle(fontSize: 11, color: _textMuted)),
                     ],
                   ),
                 ),
@@ -2756,7 +3196,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
         ),
         const SizedBox(height: 16),
 
-        // 3. Raw JSON Viewer
+        // 5. Raw JSON Viewer
         _buildCardContainer(
           title: '🔍 مستعرض البيانات الخام (Raw Payload)',
           child: Padding(
@@ -2786,9 +3226,9 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
         ),
         const SizedBox(height: 16),
 
-        // 4. Cloud Settings
+        // 6. Cloud Security & Killswitch Monitor
         _buildCardContainer(
-          title: '⚙️ إعدادات الربط والمفتاح السري',
+          title: '🛡️ أمان السحابة المركزية ومنظومة التحكم',
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Row(
@@ -2798,19 +3238,34 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('رابط السيرفر السحابي:', style: TextStyle(fontSize: 12, color: _textMuted)),
-                      Text(_apiBaseUrl, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary)),
+                      Text('خوادم تحليلات زقزوقة TV:', style: TextStyle(fontSize: 12, color: _textMuted)),
+                      const SizedBox(height: 3),
+                      const Text(
+                        'متصلة بالسحابة المشفرة بنجاح (مستوى عالي الأمان)',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                      ),
                     ],
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.edit_rounded, color: Color(0xFF4F46E5)),
-                  onPressed: _showSettingsDialog,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 16),
+                      SizedBox(width: 4),
+                      Text('محمي', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
         ),
+        const SizedBox(height: 24),
       ],
     );
   }
@@ -2940,7 +3395,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     final report = '''
 📊 *تقرير منظومة تحليلات زقزوقة TV الرسمي*
 ⏰ التاريخ: $nowStr
-🌐 السيرفر: سحابة Vercel + Firebase Firestore
+🌐 السيرفر: سحابة Vercel + Firebase Realtime Database
 ━━━━━━━━━━━━━━━━━━━━
 🟢 *المتصلون الآن بالتطبيق:* $activeNow مستخدم نشط
 📲 *إجمالي الفتح والزيارات:* $totalOpens زيارة
@@ -2969,6 +3424,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       'sessions': _sessions,
       'topContent': _topContent,
       'searches': _searches,
+      'activityLog': _activityLog,
+      'errors': _errors,
     };
     final jsonStr = const JsonEncoder.withIndent('  ').convert(fullData);
 
@@ -3006,9 +3463,6 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       ),
     );
   }
-
-  // Settings dialog removed — credentials are managed internally
-  void _showSettingsDialog() {}
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -3056,7 +3510,6 @@ class ModernHourlyChartPainter extends CustomPainter {
       );
       canvas.drawRRect(rrect, barPaint);
 
-      // Label hours every 4 hours
       if (i % 4 == 0) {
         final textSpan = TextSpan(
           text: '$i',

@@ -9,7 +9,7 @@
 | نماذج ومصادر البيانات | `android/app/src/main/kotlin/com/madar/tv/data/` | النماذج، تحليل المصادر، دمج النتائج، البحث، المواسم، الرياضة، والكاش |
 | تنزيل الفيديو | `android/app/src/main/kotlin/com/madar/tv/download/ZakzoukaDownloadService.kt` | تنزيل بالخدمة الأمامية وإظهار تقدم/نتيجة التنزيل |
 | التنبيهات بالخلفية | `android/app/src/main/kotlin/com/madar/tv/notifications/` | فحص دوري للكتالوج والمباريات باستخدام WorkManager وإظهار إشعارات Android |
-| المشغل | تطبيق مستقل بحزمة `com.madar.player` | تشغيل الرابط الذي يمرره التطبيق؛ التطبيق الرئيسي يرسل الرابط وبياناته عبر Intent |
+| المشغل | تطبيق مستقل بحزمة `com.mader.player` | تشغيل الرابط الذي يمرره التطبيق؛ التطبيق الرئيسي يرسل الرابط وبياناته عبر Intent |
 
 نسخة Flutter تحتوي نسخة Android أصلية خاصة بها تحت `MadarFlutter/android`. لذلك يجب أن تصلح تغييرات بيانات Flutter هناك؛ تعديل `MadarTV` وحده لا يغيّر تطبيق Flutter.
 

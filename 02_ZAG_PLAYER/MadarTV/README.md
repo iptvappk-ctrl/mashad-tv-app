@@ -33,7 +33,7 @@ MadarTV/
 │       ├── core/                  # التحليلات والإشعارات
 │       ├── data/                  # مصادر الأفلام والمسلسلات والقنوات
 │       └── ui/                    # Compose، التنقل، وصفحات العرض
-└── madar-player/                  # المشغل المصاحب: com.madar.player
+└── madar-player/                  # المشغل المصاحب: com.mader.player
     └── src/main/java/com/madar/player/
         ├── PlayerActivity.kt      # Media3، اختيار الجودة، وزر Google Cast
         └── CastOptionsProvider.kt # إعداد Google Cast
@@ -55,22 +55,25 @@ MadarTV/
 
 ---
 
-## 🛠️ دليل البناء (Build Instructions)
+## 🛠️ دليل البناء
 
-لإنتاج حزمة Release:
+لبناء حزمة Google Play للبلاير من مجلد `02_ZAG_PLAYER/MadarTV`:
+
 ```powershell
-Set-Location "c:\Users\hassa\Desktop\all project\iptv app\MadarTV"
-./gradlew.bat assembleRelease
+.\gradlew.bat :madar-player:clean :madar-player:bundleRelease
 ```
 
-لبناء APK تجريبي للتطبيق والمشغل معًا:
-```powershell
-./gradlew.bat :app:assembleDebug :madar-player:assembleDebug
-```
+- حزمة Play Console: `madar-player/build/outputs/bundle/release/madar-player-release.aab`.
+- نسخة الرفع الحالية: `08_RELEASE_BINARIES/RELEASE_BINARIES/zag-player-v1.1.29-code29.aab`.
+- معرّف البلاير: `com.mader.player`، الإصدار `1.1.29` (رقم البناء 29)، ويدعم Android 7.0 فما بعد (`minSdk 24`).
+- ملف APK المحلي: `madar-player/build/outputs/apk/release/madar-player-release.apk`.
+- توقيع Release يحتاج `madar-player/release-key.jks` و`madar-player/keystore.properties` محليًا. الملفان مستثنيان من Git، والبناء يتوقف إذا لم يتوفر إعداد التوقيع بدل استخدام مفتاح Debug.
+- تطبيق `:app` منفصل عن البلاير، وله إعدادات وحزمة إصدار خاصة به.
 
-- ملف الـ APK النهائي يتولد في:
-  `app/build/outputs/apk/release/app-release-unsigned.apk`
-- APK المشغل يتولد في `madar-player/build/outputs/apk/{debug,release}/`.
-- لا يوجد نسخ تلقائي إلى سطح المكتب. يتطلب توزيع Release إعداد مفاتيح توقيع مالك التطبيق بشكل مستقل وآمن.
-- المشغل الحالي لم يُنشر بعد؛ صفحة Play Store المهيأة داخل مشهد ستعمل بعد نشر `com.madar.player` فقط.
-- التحديث الداخلي لمشهد مؤجل حاليًا؛ يحتاج قناة تنزيل عامة ومفتاح توقيع ثابت. Play In-App Updates لا ينطبق على تطبيق التثبيت الجانبي.
+## الاختبار المغلق في Google Play
+
+لحسابات المطور الشخصية الجديدة، يتطلب طلب الوصول إلى الإنتاج اختبارًا مغلقًا يضم 12 مختبرًا على الأقل اشتركوا في الاختبار باستمرار مدة 14 يومًا. إضافة بريد المختبر للقائمة وحدها لا تحتسب اشتراكه. راجع [متطلبات الاختبار الرسمية](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en).
+
+المشغل جاهز كحزمة رفع للاختبار المغلق؛ يتبقى استكمال إعداد المسار في Play Console، اختيار المختبرين ونشر رابط الانضمام. لا يعني نجاح البناء أو تجهيز الحزمة أن التطبيق رُفع أو نُشر.
+
+التحديث الداخلي لتطبيق `:app` منفصل عن إصدار البلاير؛ يحتاج قناة تنزيل عامة ومفتاح توقيع ثابت. Play In-App Updates لا ينطبق على تطبيق التثبيت الجانبي.

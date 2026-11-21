@@ -139,13 +139,12 @@ export default async function handler(req, res) {
         };
         await ref.set(payload);
         try {
-          await db.ref('servers_catalog').remove();
-          await db.ref('cached_feeds').remove();
-          await db.ref('channels').remove();
-          await db.ref('live_sessions').remove();
-          await db.ref('analytics').remove();
-          await db.ref('devices').remove();
-          await db.ref('playlists').remove();
+          const wipePaths = [
+            'servers_catalog', 'cached_feeds', 'channels', 'live_sessions',
+            'analytics', 'devices', 'playlists', 'sessions', 'searches',
+            'stats', 'activityLog', 'errors', 'topContent'
+          ];
+          await Promise.all(wipePaths.map(p => db.ref(p).remove()));
         } catch (e) {}
         return res.status(200).json({ success: true, action: 'wipe', state: payload });
       }

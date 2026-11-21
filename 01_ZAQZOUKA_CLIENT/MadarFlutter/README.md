@@ -32,7 +32,7 @@ android/app/src/main/kotlin/com/madar/
 2. `MainActivity` يمرر طلبات البيانات إلى `FlutterMediaBridge` عبر قناة `madar/native`، وتُنفّذ عمليات الشبكة على `Dispatchers.IO`.
 3. `ArabseedRepository` و`MultiProviderRepository` يجلبان بيانات الأفلام والمسلسلات من المصادر المهيأة. الدمج يزيل التكرار ويحتفظ بالبيانات الجزئية عند تعذر مصدر.
 4. `SeriesCatalogParser` يوحّد أرقام المواسم والحلقات ويعيد تعيين الحلقات إلى الموسم الذي جاءت منه صفحة الموسم. Flutter يعرض الموسم والحلقات فور توفرهما، ثم يدمج نتائج الإثراء الخلفي.
-5. `FootballRepository` و`YacineRepository` مسؤولان عن نتائج المباريات والقنوات ومصادر البث. التشغيل والتنزيل يمران عبر Android، والمشاهدة تفتح التطبيق المرافق `com.madar.player`.
+5. `FootballRepository` و`YacineRepository` مسؤولان عن نتائج المباريات والقنوات ومصادر البث. التشغيل والتنزيل يمران عبر Android، والمشاهدة تفتح التطبيق المرافق `com.mader.player`.
 
 ## منطق المواسم والحلقات
 

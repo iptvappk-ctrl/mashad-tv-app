@@ -315,15 +315,17 @@ object YacineRepository {
         leagueHint: String,
     ): List<YacineStream> = withContext(Dispatchers.IO) {
         val eventStreams = runCatching { getEventStreams(eventId) }.getOrDefault(emptyList())
-        val channels = runCatching { getSportsChannels() }.getOrDefault(BEIN_FALLBACK_CHANNELS)
+        val allChannels = (BEIN_FALLBACK_CHANNELS + ARAB_SPORTS_CHANNELS).distinctBy { it.id }
         val hint = channelHint.trim()
         val normalizedHint = normalizeChannelName(hint)
-        val target = channels.firstOrNull { channel ->
+        val league = leagueHint.lowercase()
+
+        // مطابقة قنوات beIN Sports والبطولات
+        val target = allChannels.firstOrNull { channel ->
             val name = normalizeChannelName(channel.name)
             normalizedHint.isNotBlank() && name.isNotBlank() &&
                 (name.contains(normalizedHint) || normalizedHint.contains(name))
         } ?: run {
-            val league = leagueHint.lowercase()
             val preferredNumber = when {
                 league.contains("فرنسي") || league.contains("ligue 1") -> "4"
                 league.contains("ألماني") || league.contains("bundesliga") -> "5"
@@ -331,11 +333,11 @@ object YacineRepository {
                 league.contains("إنجليزي") || league.contains("premier") -> "1"
                 else -> ""
             }
-            channels.firstOrNull { channel ->
+            allChannels.firstOrNull { channel ->
                 preferredNumber.isNotBlank() && channel.name.contains("beIN", true) &&
                     channel.name.contains(preferredNumber)
-            } ?: channels.firstOrNull { it.name.contains("beIN", true) }
-                ?: channels.firstOrNull()
+            } ?: allChannels.firstOrNull { it.name.contains("beIN", true) }
+                ?: allChannels.firstOrNull()
         }
         val channelStreams = target?.let { channel ->
             runCatching { getChannelStreams(channel.id) }.getOrDefault(emptyList())
@@ -344,52 +346,51 @@ object YacineRepository {
         val combined = (eventStreams + channelStreams)
             .filter { it.url.isNotBlank() }
             .distinctBy { it.url.trim() }
-        // If no streams found at all, return the reliable live beIN streams as guaranteed fallback
         if (combined.isEmpty()) {
             BEIN_LIVE_STREAMS
         } else {
-            combined
+            (combined + BEIN_LIVE_STREAMS).distinctBy { it.url.trim() }
         }
     }
 
     val BEIN_LIVE_STREAMS = listOf(
         YacineStream(
-            name = "beIN SPORTS XTRA HD (بث مباشر)",
-            url = "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
+            name = "beIN SPORTS HD (سيرفر رئيسي 1 فائق السرعة CDN)",
+            url = "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8",
             userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             referer = "https://yacinelive.com/",
             urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         ),
         YacineStream(
-            name = "beIN SPORTS Live (سيرفر 2)",
-            url = "https://tvsen6.aynaott.com/beinsports/index.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            referer = "https://yacinelive.com/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        ),
-        YacineStream(
-            name = "beIN SPORTS XTRA 2 (بث بديل)",
+            name = "beIN SPORTS XTRA HD (سيرفر مباشر 2 CDN)",
             url = "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8",
             userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             referer = "https://yacinelive.com/",
             urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         ),
         YacineStream(
-            name = "beIN SPORTS HD (سيرفر مباشر 4)",
-            url = "https://5c7b683162943.streamlock.net/live/ngrp:sportsone_all/playlist.m3u8",
+            name = "beIN SPORTS XTRA (سيرفر بديل 3)",
+            url = "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
             userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             referer = "https://yacinelive.com/",
             urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        ),
+        YacineStream(
+            name = "beIN SPORTS Live (سيرفر احتياطي 4)",
+            url = "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8",
+            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            referer = "https://yacinelive.com/",
+            urlType = 3,
+            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         )
     )
 
     val DEFAULT_SPORTS_STREAMS = listOf(
         YacineStream(
-            name = "الكويت الرياضية HD (بث مباشر)",
+            name = "الكويت الرياضية HD (بث مباشر CDN)",
             url = "https://kwtspta.cdn.mangomolo.com/sp/smil:sp.stream.smil/chunklist.m3u8",
             userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             referer = "https://media.gov.kw/",
@@ -397,26 +398,18 @@ object YacineRepository {
             headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         ),
         YacineStream(
-            name = "البحرين الرياضية 1 HD (بث مباشر)",
-            url = "https://5c7b683162943.streamlock.net/live/ngrp:sportsone_all/playlist.m3u8",
+            name = "الكويت بلس الرياضية HD (بث مباشر CDN)",
+            url = "https://kwtsplta.cdn.mangomolo.com/spl/smil:spl.stream.smil/chunklist.m3u8",
             userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://yacinelive.com/",
+            referer = "https://media.gov.kw/",
             urlType = 3,
             headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         ),
         YacineStream(
-            name = "عمان الرياضية HD (بث مباشر)",
+            name = "عمان الرياضية HD (بث مباشر CDN)",
             url = "https://partneta.cdn.mgmlcdn.com/omsport/smil:omsport.stream.smil/chunklist.m3u8",
             userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             referer = "https://partneta.cdn.mgmlcdn.com/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "الأردن الرياضية HD (بث مباشر)",
-            url = "https://jrtv-live.ercdn.net/jordansporthd/jordansporthd.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://jrtv.gov.jo/",
             urlType = 3,
             headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         ),
@@ -429,21 +422,13 @@ object YacineRepository {
             headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         ),
         YacineStream(
-            name = "الكويت بلس الرياضية HD (بث مباشر)",
-            url = "https://kwtsplta.cdn.mangomolo.com/spl/smil:spl.stream.smil/chunklist.m3u8",
+            name = "الأردن الرياضية HD (بث مباشر)",
+            url = "https://jrtv-live.ercdn.net/jordansporthd/jordansporthd.m3u8",
             userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://media.gov.kw/",
+            referer = "https://jrtv.gov.jo/",
             urlType = 3,
             headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "البحرين الرياضية 2 HD (بث مباشر)",
-            url = "https://5c7b683162943.streamlock.net/live/ngrp:bahrainsportstwo_all/playlist.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://yacinelive.com/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
+        )
     )
 
     // ─── Channel Streams ──────────────────────────────────────────────────────────
@@ -458,19 +443,17 @@ object YacineRepository {
         // القنوات الرياضية العربية المحلية
         val localStreams: List<YacineStream>? = when {
             id.contains("kuwait_plus") || id.contains("plus") ->
-                listOf(DEFAULT_SPORTS_STREAMS[5], DEFAULT_SPORTS_STREAMS[0])
+                listOf(DEFAULT_SPORTS_STREAMS[1], DEFAULT_SPORTS_STREAMS[0])
             id.startsWith("arab_kuwait") || id.contains("kuwait") ->
-                listOf(DEFAULT_SPORTS_STREAMS[0], DEFAULT_SPORTS_STREAMS[5])
-            id.contains("bahrain_2") ->
-                listOf(DEFAULT_SPORTS_STREAMS[6], DEFAULT_SPORTS_STREAMS[1])
-            id.startsWith("arab_bahrain") || id.contains("bahrain") || id.contains("1425") ->
-                listOf(DEFAULT_SPORTS_STREAMS[1], DEFAULT_SPORTS_STREAMS[6])
+                listOf(DEFAULT_SPORTS_STREAMS[0], DEFAULT_SPORTS_STREAMS[1])
             id.startsWith("arab_oman") || id.contains("oman") ->
                 listOf(DEFAULT_SPORTS_STREAMS[2])
             id.startsWith("arab_jordan") || id.contains("jordan") ->
-                listOf(DEFAULT_SPORTS_STREAMS[3])
-            id.startsWith("arab_iraq") || id.contains("iraq") ->
                 listOf(DEFAULT_SPORTS_STREAMS[4])
+            id.startsWith("arab_iraq") || id.contains("iraq") ->
+                listOf(DEFAULT_SPORTS_STREAMS[3])
+            id.contains("ad_sport") || id.contains("abu_dhabi") || id.contains("أبوظبي") ->
+                listOf(DEFAULT_SPORTS_STREAMS[0], DEFAULT_SPORTS_STREAMS[2])
             else -> null
         }
         if (localStreams != null) return@withContext localStreams

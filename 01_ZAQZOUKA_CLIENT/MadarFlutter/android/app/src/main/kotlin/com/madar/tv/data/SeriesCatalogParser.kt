@@ -21,7 +21,7 @@ internal object SeriesCatalogParser {
         """(?i)(?:^|[^a-z])s[\s._#=/:-]*([0-9]{1,2})[\s._#=/:-]*e(?:p(?:isode)?|ps)?[\s._#=/:-]*[0-9]{1,4}(?![0-9])""",
     )
     private val standaloneSeasonTokenPattern = Regex(
-        """(?i)(?:^|/)s([0-9]{1,2})(?:/?(?:[?#].*)?)$""",
+        """(?i)(?:^|[/\-_])s([0-9]{1,2})(?:[/\-_]|(?:[?#].*)?)$""",
     )
     private val partNumberPattern = Regex(
         """(?i)(?:الجزء|جزء|(?<![a-z])part)[\s._#=/:-]*([0-9]{1,3})(?![0-9])""",
@@ -121,9 +121,20 @@ internal object SeriesCatalogParser {
         }
         // Accept a stand-alone S2 path/title token, but never treat an arbitrary "s5"
         // fragment inside a longer slug as a season label.
+        val detectedEp = episodeNumber(title, url)
+        val hasExplicitSeasonInTitle = seasonNumberPattern.containsMatchIn(title) || seasonOrdinalPattern.containsMatchIn(title)
         sequenceOf(normalizedTitle, normalizedUrl).forEach { value ->
-            standaloneSeasonTokenPattern.find(value)?.groupValues?.getOrNull(1)
-                ?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+            val candidateSeason = standaloneSeasonTokenPattern.find(value)?.groupValues?.getOrNull(1)
+                ?.toIntOrNull()?.takeIf { it > 0 }
+            if (candidateSeason != null) {
+                // If the standalone -sN token in the URL matches the episode number and the title has no
+                // season marker, it is an episode slug (e.g. Akwam /akdrama-...-s8/ for "الحلقة 8"), not a season.
+                if (detectedEp != null && candidateSeason == detectedEp && !hasExplicitSeasonInTitle) {
+                    // Skip: this is an episode slug token, not a season number
+                } else {
+                    return candidateSeason
+                }
+            }
         }
         return null
     }

@@ -53,7 +53,7 @@
             <span class="lang-label">EN</span>
           </button>
           
-          <a href="downloads/zaqzouka-app.apk" download class="btn-nav-download" data-i18n="btnFastDownload">
+          <a href="javascript:void(0)" class="btn-nav-download" id="navBundleBtn" data-i18n="btnFastDownload">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
@@ -88,33 +88,33 @@
             منظومة متكاملة لمشاهدة آلاف الأفلام والمسلسلات الحصرية والقنوات التلفزيونية والرياضية الحية بأعلى جودة وسيرفرات فائقة السرعة بدون أي تقطيع أو اشتراكات.
           </p>
 
-          <!-- Action Buttons -->
+          <!-- Action Buttons (Single Unified Master Button) -->
           <div class="hero-cta-group">
-            <a href="downloads/zaqzouka-app.apk" class="btn-primary-action" download>
+            <a href="javascript:void(0)" class="btn-primary-action btn-bundle-action" id="heroBundleBtn">
               <div class="btn-icon">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                   <polyline points="7 10 12 15 17 10"></polyline>
                   <line x1="12" y1="15" x2="12" y2="3"></line>
                 </svg>
               </div>
               <div class="btn-text">
-                <span class="btn-main-label" data-i18n="heroBtnApp">تحميل تطبيق زقزوقة TV</span>
-                <span class="btn-sub-label" data-i18n="heroBtnAppSub">v1.0.74 · حزمة APK مباشرة (53.4 MB)</span>
+                <span class="btn-main-label" data-i18n="heroBtnBundle">تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل)</span>
+                <span class="btn-sub-label" data-i18n="heroBtnBundleSub">نقرة واحدة لتحميل تطبيق زقزوقة + مشغل زاغ معاً (58 MB)</span>
               </div>
             </a>
 
-            <a href="downloads/zag-player.apk" class="btn-secondary-action" download>
-              <div class="btn-icon">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                </svg>
-              </div>
-              <div class="btn-text">
-                <span class="btn-main-label" data-i18n="heroBtnPlayer">تحميل مشغل زاغ ZAG Player</span>
-                <span class="btn-sub-label" data-i18n="heroBtnPlayerSub">v1.1.28 · المحرك الأساسي (4.6 MB)</span>
-              </div>
-            </a>
+            <div class="bundle-status-msg" id="bundleStatusMsg" style="display: none;">
+              <span class="pulse-dot"></span>
+              <span data-i18n="bundleDownloading">جاري تنزيل التطبيق والمشغل معاً... بعد اكتمال التنزيل قم بتثبيت كلا الملفين ⚡</span>
+            </div>
+
+            <div class="hero-sub-links">
+              <span data-i18n="separateDownload">أو تحميل منفصل:</span>
+              <a href="downloads/zaqzouka-app.apk" download data-i18n="appOnly">تطبيق زقزوقة فقط</a>
+              <span>·</span>
+              <a href="downloads/zag-player.apk" download data-i18n="playerOnly">مشغل زاغ فقط</a>
+            </div>
           </div>
 
           <!-- Trust Badges -->
@@ -268,20 +268,13 @@
 
   <!-- Sticky Mobile Bar -->
   <div class="mobile-bottom-bar">
-    <a href="downloads/zaqzouka-app.apk" class="btn-mobile-download" download>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+    <a href="javascript:void(0)" class="btn-mobile-download btn-mobile-bundle" id="mobileBundleBtn">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
         <polyline points="7 10 12 15 17 10"></polyline>
         <line x1="12" y1="15" x2="12" y2="3"></line>
       </svg>
-      <span data-i18n="mobileBtnApp">تحميل زقزوقة TV</span>
-    </a>
-
-    <a href="downloads/zag-player.apk" class="btn-mobile-player" download>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <polygon points="5 3 19 12 5 21 5 3"></polygon>
-      </svg>
-      <span data-i18n="mobileBtnPlayer">مشغل زاغ</span>
+      <span data-i18n="mobileBtnBundle">تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل) ⚡</span>
     </a>
   </div>
 

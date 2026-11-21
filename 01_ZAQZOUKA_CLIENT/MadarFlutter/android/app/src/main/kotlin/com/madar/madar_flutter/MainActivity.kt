@@ -1,4 +1,4 @@
-﻿package com.madar.madar_flutter
+package com.madar.madar_flutter
 
 import android.Manifest
 import android.content.Intent
@@ -56,6 +56,7 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
                     "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), call.argument("backupSourcesJson"), call.argument<Boolean>("live") ?: false, result)
+                    "player.openExternal" -> openExternalPlayer(call.argument("url"), call.argument("title"), result)
                     "player.store" -> openPlayerStore(result)
                     "player.status" -> {
                         val code = inAppUpdateManager.getInstalledPlayerVersionCode()
@@ -273,6 +274,17 @@ class MainActivity : FlutterActivity() {
             .onFailure { result.success(false) }
     }
 
+    private fun findInstalledPlayerPackage(): String? {
+        val candidates = listOf("com.madar.player", "com.mader.player")
+        for (pkg in candidates) {
+            try {
+                packageManager.getPackageInfo(pkg, 0)
+                return pkg
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
     private fun openPlayer(
         url: String?, title: String?, userAgent: String?, referer: String?,
         headers: Map<String, String>?, backupSourcesJson: String?, isLive: Boolean, result: MethodChannel.Result,
@@ -282,10 +294,14 @@ class MainActivity : FlutterActivity() {
             result.success(false)
             return
         }
+        val targetPkg = findInstalledPlayerPackage()
+        if (targetPkg == null) {
+            result.success(false)
+            return
+        }
         try {
-            packageManager.getPackageInfo("com.madar.player", 0)
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setClassName("com.madar.player", "com.madar.player.PlayerActivity")
+                setClassName(targetPkg, "com.madar.player.PlayerActivity")
                 data = Uri.parse(stream)
                 putExtra("com.madar.player.extra.STREAM_URL", stream)
                 putExtra("com.madar.player.extra.TITLE", title.orEmpty())
@@ -300,6 +316,35 @@ class MainActivity : FlutterActivity() {
             result.success(true)
         } catch (_: Exception) {
             result.success(false)
+        }
+    }
+
+    private fun openExternalPlayer(url: String?, title: String?, result: MethodChannel.Result) {
+        val stream = url.orEmpty()
+        if (!isSafeMediaUrl(stream)) {
+            result.success(false)
+            return
+        }
+        try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(Uri.parse(stream), "video/*")
+                putExtra(Intent.EXTRA_TITLE, title.orEmpty())
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(Intent.createChooser(intent, "تشغيل عبر مشغل فيديو").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+            result.success(true)
+        } catch (_: Exception) {
+            try {
+                val fallbackIntent = Intent(Intent.ACTION_VIEW, Uri.parse(stream)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(fallbackIntent)
+                result.success(true)
+            } catch (_: Exception) {
+                result.success(false)
+            }
         }
     }
 
@@ -339,16 +384,13 @@ class MainActivity : FlutterActivity() {
     }
     private fun openPlayerStore(result: MethodChannel.Result) {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.madar.player")))
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://zaafilm.com/downloads/zag-player.apk")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+            result.success(true)
         } catch (_: Exception) {
-            try {
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.madar.player")))
-            } catch (_: Exception) {
-                result.success(false)
-                return
-            }
+            result.success(false)
         }
-        result.success(true)
     }
 
     companion object {

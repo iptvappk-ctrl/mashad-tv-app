@@ -18,7 +18,7 @@
 | **معرف تطبيق الأندرويد الأساسي (Flutter App ID)** | `1:409052366723:android:bc452737c581a8c63bd8b6` |
 | **معرف تطبيق المشغل (Player App ID)** | `1:409052366723:android:b3f343cd7702d71c3bd8b6` |
 | **اسم حزمة تطبيق العميل (Client Package Name)** | `com.madar.madar_flutter` |
-| **اسم حزمة المشغل (Player Package Name)** | `com.madar.player` (أو `com.madar.tv`) |
+| **اسم حزمة المشغل (Player Package Name)** | `com.mader.player` (أو `com.madar.tv`) |
 | **ملف الضبط الأساسي** | `MadarFlutter/android/app/google-services.json` |
 
 ### المتغيرات البيئية الخاصة بـ Firebase Admin SDK (في السيرفرات و Vercel):

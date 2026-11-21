@@ -1,4 +1,4 @@
-﻿package com.madar.tv.util
+package com.madar.tv.util
 
 import android.content.Context
 import android.content.Intent
@@ -17,7 +17,7 @@ data class PlayerSource(
 
 object PlayerLauncher {
 
-    const val PLAYER_PACKAGE = "com.madar.player"
+    const val PLAYER_PACKAGE = "com.mader.player"
     const val PLAYER_ACTIVITY = "com.madar.player.PlayerActivity"
 
     fun launchPlayer(

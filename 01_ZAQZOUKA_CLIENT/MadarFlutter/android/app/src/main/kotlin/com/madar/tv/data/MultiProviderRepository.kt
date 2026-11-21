@@ -351,12 +351,64 @@ object MultiProviderRepository {
 
     val PROVIDERS = listOf(
 
-        // ── 1. أكوام (Akwam) ───────────────────────────────────────────
+        // ── 1. عرب سيد / ماي سيد (MySeed / ArabSeed) ─────────────────────────
+        // PRIMARY #1: https://m.myseed.tv (سيرفر مباشر فائق السرعة + سيرفرات بديلة)
+        ProviderConfig(
+            id = "arabseed",
+            name = "عرب سيد",
+            baseUrl = "https://m.myseed.tv",
+            mirrorDomains = listOf("https://arabseed.cam", "https://arabseed.ac"),
+            moviesPath = "/movies/page/{page}/",
+            seriesPath = "/series/page/{page}/",
+            searchPath = "/find/?word={q}",
+            cardSelectors = listOf(
+                "a[href*='film-']", "a[href*='%d9%81%d9%8a%d9%84%d9%85-']",
+                ".innov-series-card a", "a.movie__block", ".item__contents a",
+                "article a", ".GridItem a",
+            ),
+            titleSelectors = listOf("h3", "h2", ".title", "img[alt]", "[title]"),
+        ),
+
+        // ── 2. عرب سيد الأصلي (ArabSeed Here) ──────────────────────────
+        // PRIMARY #2: https://arabseed.here (سيرفرات سريعة Earnvids / Vinovo / Uqload)
+        ProviderConfig(
+            id = "arabseed_here",
+            name = "عرب سيد الأصلي",
+            baseUrl = "https://arabseed.here",
+            mirrorDomains = emptyList(),
+            moviesPath = "/category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/page/{page}/",
+            seriesPath = "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/page/{page}/",
+            searchPath = "/search?s={q}",
+            cardSelectors = listOf(
+                "a[href*='/film/']", "a[href*='/episode/']",
+                "article a", ".post-item a", ".item-details a",
+            ),
+            titleSelectors = listOf("h2.title", "h2", "h3", ".title", "[title]"),
+        ),
+
+        // ── 3. وي سيما (WeCima) ────────────────────────────────────────
+        // PRIMARY #3: https://wecima.tips مع ميرورز شغالة 100%
+        ProviderConfig(
+            id = "wecima",
+            name = "وي سيما",
+            baseUrl = "https://wecima.tips",
+            mirrorDomains = listOf("https://mywecima.shop", "https://mywecima1.best", "https://wecima.cam"),
+            moviesPath = "/movies/page/{page}/",
+            seriesPath = "/series/page/{page}/",
+            searchPath = "/?s={q}",
+            cardSelectors = listOf(
+                "a[href*='watch-']", ".Thumb--GridItem a", ".GridItem a",
+                "div.Block--Item a", "article a",
+            ),
+            titleSelectors = listOf("strong.hasyear", "h3", "h2", ".Title", "[title]"),
+        ),
+
+        // ── 4. أكوام (Akwam - احتياطي) ─────────────────────────────────
         ProviderConfig(
             id = "akwam",
             name = "أكوام",
             baseUrl = "https://akw.cam",
-            mirrorDomains = listOf("https://akwam.cx"),
+            mirrorDomains = emptyList(),
             moviesPath = "/movies?page={page}",
             seriesPath = "/series?page={page}",
             searchPath = "/search?q={q}",
@@ -370,23 +422,6 @@ object MultiProviderRepository {
                 ".br-card a",
             ),
             titleSelectors = listOf("h3.br-card-title", "h3", "h2", ".title"),
-        ),
-
-        // ── 2. وي سيما (WeCima) ────────────────────────────────────────
-        // Live-tested 2026-11-14: mywecima.shop → 81 results ✅
-        ProviderConfig(
-            id = "wecima",
-            name = "وي سيما",
-            baseUrl = "https://mywecima.shop",
-            mirrorDomains = listOf("https://mywecima1.best", "https://wecima.cam"),
-            moviesPath = "/movies/page/{page}/",
-            seriesPath = "/series/page/{page}/",
-            searchPath = "/?s={q}",
-            cardSelectors = listOf(
-                "a[href*='watch-']", ".Thumb--GridItem a", ".GridItem a",
-                "div.Block--Item a", "article a",
-            ),
-            titleSelectors = listOf("strong.hasyear", "h3", "h2", ".Title", "[title]"),
         ),
 
         // ── 3. فاصل إعلاني (FaselHD) ──────────────────────────────────
@@ -472,26 +507,6 @@ object MultiProviderRepository {
             titleSelectors = listOf(".title", "h3", "h2", "[title]"),
         ),
 
-        // ── 8. توب سينما (TopCinema) ───────────────────────────────────
-        // Live-tested 2026-11-14: topcinemaa.one → 36 results ✅
-        ProviderConfig(
-            id = "topcinema",
-            name = "توب سينما",
-            baseUrl = "https://topcinemaa.one",
-            mirrorDomains = listOf("https://topcinemaa.vip", "https://topcinema.cam"),
-            moviesPath = "/movies/page/{page}/",
-            seriesPath = "/series/page/{page}/",
-            searchPath = "/?s={q}",
-            cardSelectors = listOf(
-                "div.Small--Box a", "a.recent--block", ".Small--Box a",
-                ".Posts--List a", ".SixInRow a",
-                "a[href*='film-']", "a[href*='%d9%85%d8%b3%d9%84%d8%b3%d9%84-']",
-                ".Thumb--GridItem a", ".GridItem a",
-                "article a", "div.Block--Item a",
-            ),
-            titleSelectors = listOf("strong.hasyear", "h3", "h2", ".Title", "[title]"),
-        ),
-
         // ── 9. عرب ليونز (ArabLionz) ───────────────────────────────────
         ProviderConfig(
             id = "arablionz",
@@ -518,10 +533,12 @@ object MultiProviderRepository {
             seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d9%87/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
-                "a[href*='movie-']", "article.bt a", ".content-box article a",
+                "a[href*='movie-']", "a[href*='video-']", "a[href*='episode-']",
+                "a[href*='%d9%85%d8%b3%d9%84%d8%b3%d9%84-']", "a[href*='%d9%81%d9%8a%d9%84%d9%85-']",
+                "article.bt a", ".content-box article a", ".post-item a", ".item-details a",
                 "h2.entry-title a", "article a",
             ),
-            titleSelectors = listOf("h2", "h3", ".entry-title", ".title"),
+            titleSelectors = listOf("h2", "h3", ".entry-title", ".title", "[title]"),
         ),
 
         // ── 11. قصة عشق (Esheeq) ───────────────────────────────────────
@@ -563,17 +580,18 @@ object MultiProviderRepository {
         ProviderConfig(
             id = "prestige",
             name = "بريستيج",
-            baseUrl = "https://prstej.asia",
-            mirrorDomains = listOf("https://prstej.lat", "https://brstej.com"),
-            moviesPath = "/movies",
-            seriesPath = "/series",
+            baseUrl = "https://hd1.brstej.com",
+            mirrorDomains = listOf("https://prstej.asia", "https://prstej.lat", "https://brstej.com"),
+            moviesPath = "/cat03.php?cat=aflam02-2024",
+            seriesPath = "/cat03.php?cat=arab8-2025",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
                 ".pgh-card a", ".pgh-series-card a", ".ptoday-card a",
-                ".movie__block a", "article a",
+                ".movie__block a", "article a", "a[href*='video.php']", "a[href*='watch.php']",
+                ".col-md-2 a", ".col-sm-3 a",
                 "a[href*='/movie/']", "a[href*='/series/']",
             ),
-            titleSelectors = listOf(".pgh-card-title", ".pgh-series-name", "h2", "h3", ".Title"),
+            titleSelectors = listOf(".pgh-card-title", ".pgh-series-name", "h2", "h3", ".Title", "[title]"),
         ),
 
         // ── 14. سيما كلوب (CimaClub) ───────────────────────────────────
@@ -719,23 +737,6 @@ object MultiProviderRepository {
             titleSelectors = listOf("h3.film-name a", "h3", "h2", "[title]"),
         ),
 
-        // ── 25. عرب سيد (ArabSeed) ─────────────────────────────────────
-        // Live-tested 2026-11-14: myseed.tv — search param is 'word' not 's' ✅
-        ProviderConfig(
-            id = "arabseed",
-            name = "عرب سيد",
-            baseUrl = "https://m.myseed.tv",
-            mirrorDomains = listOf("https://arabseed.cam", "https://arabseed.ac"),
-            moviesPath = "/movies/page/{page}/",
-            seriesPath = "/series/page/{page}/",
-            searchPath = "/find/?word={q}",
-            cardSelectors = listOf(
-                "a[href*='film-']", "a[href*='%d9%81%d9%8a%d9%84%d9%85-']",
-                "article a", ".GridItem a",
-            ),
-            titleSelectors = listOf("h3", "h2", ".title", "img[alt]", "[title]"),
-        ),
-
     )
 
 
@@ -807,7 +808,8 @@ object MultiProviderRepository {
         return PROVIDERS.firstOrNull { p ->
             (listOf(p.baseUrl) + p.mirrorDomains).any { hostMatches(url, it) }
         } ?: when {
-
+            url.contains("arabseed.here") -> PROVIDERS.firstOrNull { it.id == "arabseed_here" }
+            url.contains("myseed") || url.contains("arabseed") -> PROVIDERS.firstOrNull { it.id == "arabseed" }
             url.contains("akw") -> PROVIDERS.firstOrNull { it.id == "akwam" }
 
             url.contains("wecima") || url.contains("myweecima") || url.contains("mycima") -> PROVIDERS.firstOrNull { it.id == "wecima" }
@@ -830,7 +832,6 @@ object MultiProviderRepository {
 
             url.contains("movizland") -> PROVIDERS.firstOrNull { it.id == "movizland" }
             url.contains("fushaar") -> PROVIDERS.firstOrNull { it.id == "fushaar" }
-            url.contains("topcinema") -> PROVIDERS.firstOrNull { it.id == "topcinema" }
             url.contains("arablionz") -> PROVIDERS.firstOrNull { it.id == "arablionz" }
             url.contains("egydead") -> PROVIDERS.firstOrNull { it.id == "egydead" }
 
@@ -1321,13 +1322,15 @@ object MultiProviderRepository {
      */
     private fun categoryFeeds(categoryId: String): List<CategoryFeed> = when (categoryId) {
         "turkish_series" -> listOf(
-            CategoryFeed("wecima", "/category.php?cat=turkish-series", "/category.php?cat=turkish-series&page={page}"),
-            CategoryFeed("lodynet", "/category/مشاهدة-مسلسلات-تركية/"),
             CategoryFeed("esheeq", "/", "/page/{page}/"),
+            CategoryFeed("wecima", "/category.php?cat=turkish-series", "/category.php?cat=turkish-series&page={page}"),
+            CategoryFeed("akwam", "/category/مسلسلات-تركي", "/category/مسلسلات-تركي/page/{page}"),
+            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/page/{page}/"),
             CategoryFeed("egydead", "/category/مسلسلات-تركية/", "/category/مسلسلات-تركية/page/{page}/"),
         )
         "turkish_movies" -> listOf(
             CategoryFeed("wecima", "/category.php?cat=turkish-films", "/category.php?cat=turkish-films&page={page}"),
+            CategoryFeed("akwam", "/category/افلام-تركي", "/category/افلام-تركي/page/{page}"),
             CategoryFeed("egybest", "/movies/turkish/?page=1", "/movies/turkish/?page={page}"),
             CategoryFeed("egydead", "/category/افلام-تركية/", "/category/افلام-تركية/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-turki/"),
@@ -1335,61 +1338,92 @@ object MultiProviderRepository {
         "foreign_movies" -> listOf(
             CategoryFeed("akwam", "/category/افلام-اجنبي", "/category/افلام-اجنبي/page/{page}"),
             CategoryFeed("wecima", "/category.php?cat=foreign-films", "/category.php?cat=foreign-films&page={page}"),
+            CategoryFeed("egybest", "/movies/foreign/?page=1", "/movies/foreign/?page={page}"),
             CategoryFeed("egydead", "/category/افلام-اجنبي/", "/category/افلام-اجنبي/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-ajnabi/"),
         )
         "arabic_movies" -> listOf(
             CategoryFeed("wecima", "/category.php?cat=arabic-movies", "/category.php?cat=arabic-movies&page={page}"),
+            CategoryFeed("akwam", "/category/افلام-عربي", "/category/افلام-عربي/page/{page}"),
             CategoryFeed("egybest", "/movies/arabic/?page=1", "/movies/arabic/?page={page}"),
             CategoryFeed("egydead", "/category/افلام-عربي/", "/category/افلام-عربي/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-arabi/"),
         )
         "arabic_series" -> listOf(
+            CategoryFeed("prestige", "/cat03.php?cat=arab8-2025", "/cat03.php?cat=arab8-2025&page={page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=syy5-2025", "/cat03.php?cat=syy5-2025&page={page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=eg8-2025", "/cat03.php?cat=eg8-2025&page={page}"),
             CategoryFeed("wecima", "/category.php?cat=arabic-tv-series", "/category.php?cat=arabic-tv-series&page={page}"),
+            CategoryFeed("akwam", "/category/مسلسلات-عربي", "/category/مسلسلات-عربي/page/{page}"),
             CategoryFeed("egydead", "/category/مسلسلات-عربي/", "/category/مسلسلات-عربي/page/{page}/"),
         )
         "foreign_series" -> listOf(
+            CategoryFeed("akwam", "/category/مسلسلات-أجنبي", "/category/مسلسلات-أجنبي/page/{page}"),
+            CategoryFeed("wecima", "/category.php?cat=english-series", "/category.php?cat=english-series&page={page}"),
             CategoryFeed("egydead", "/category/مسلسلات-اجنبي/", "/category/مسلسلات-اجنبي/page/{page}/"),
             CategoryFeed("moviewatcher", "/tv-shows/page/{page}/"),
             CategoryFeed("spacemov", "/tv-series/page/{page}/"),
         )
         "asian_series" -> listOf(
+            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/page/{page}/"),
+            CategoryFeed("akwam", "/category/مسلسلات-أسيوي", "/category/مسلسلات-أسيوي/page/{page}"),
             CategoryFeed("egydead", "/category/مسلسلات-اسيوية/", "/category/مسلسلات-اسيوية/page/{page}/"),
         )
         "indian_series" -> listOf(
+            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d9%87/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d9%87/page/{page}/"),
             CategoryFeed("egydead", "/category/مسلسلات-هندية/", "/category/مسلسلات-هندية/page/{page}/"),
         )
         "dubbed_series" -> listOf(
+            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/page/{page}/"),
             CategoryFeed("egydead", "/category/مسلسلات-مدبلجة/", "/category/مسلسلات-مدبلجة/page/{page}/"),
         )
         "anime_series" -> listOf(
+            CategoryFeed("akwam", "/category/مسلسلات-الأنميات", "/category/مسلسلات-الأنميات/page/{page}"),
             CategoryFeed("egydead", "/category/مسلسلات-انمي/", "/category/مسلسلات-انمي/page/{page}/"),
             CategoryFeed("lodynet", "/category/anime/page/1/", "/category/anime/page/{page}/"),
         )
         "dubbed_movies" -> listOf(
             CategoryFeed("akwam", "/category/افلام-مدبلجة", "/category/افلام-مدبلجة/page/{page}"),
+            CategoryFeed("egydead", "/category/افلام-مدبلجة/", "/category/افلام-مدبلجة/page/{page}/"),
         )
         "asian_movies" -> listOf(
+            CategoryFeed("akwam", "/category/افلام-اسيوي", "/category/افلام-اسيوي/page/{page}"),
+            CategoryFeed("lodynet", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/page/{page}/"),
             CategoryFeed("egydead", "/category/افلام-اسيوية/", "/category/افلام-اسيوية/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-asiawiya/"),
         )
         "indian_movies" -> listOf(
+            CategoryFeed("lodynet", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a%d8%a9/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a%d8%a9/page/{page}/"),
+            CategoryFeed("akwam", "/category/افلام-هندي", "/category/افلام-هندي/page/{page}"),
+            CategoryFeed("wecima", "/category.php?cat=hindi-films", "/category.php?cat=hindi-films&page={page}"),
             CategoryFeed("egydead", "/category/افلام-هندي/", "/category/افلام-هندي/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-hindiya/"),
         )
         "animation_movies" -> listOf(
+            CategoryFeed("akwam", "/category/افلام-انمي", "/category/افلام-انمي/page/{page}"),
             CategoryFeed("wecima", "/category.php?cat=anime-and-cartoons", "/category.php?cat=anime-and-cartoons&page={page}"),
-            CategoryFeed("akwam", "/category/انمي", "/category/انمي/page/{page}"),
         )
         "anime_movies" -> listOf(
+            CategoryFeed("akwam", "/category/افلام-انمي", "/category/افلام-انمي/page/{page}"),
             CategoryFeed("wecima", "/category.php?cat=anime-and-cartoons", "/category.php?cat=anime-and-cartoons&page={page}"),
-            CategoryFeed("akwam", "/category/انمي", "/category/انمي/page/{page}"),
             CategoryFeed("lodynet", "/category/anime/page/1/", "/category/anime/page/{page}/"),
         )
-        "ramadan_2026" -> listOf(CategoryFeed("egydead", "/category/مسلسلات-رمضان-2026/", "/category/مسلسلات-رمضان-2026/page/{page}/"))
-        "ramadan_2025" -> listOf(CategoryFeed("egydead", "/category/مسلسلات-رمضان-2025/", "/category/مسلسلات-رمضان-2025/page/{page}/"))
-        "ramadan_2024" -> listOf(CategoryFeed("egydead", "/category/مسلسلات-رمضان-2024/", "/category/مسلسلات-رمضان-2024/page/{page}/"))
-        "ramadan_2023" -> listOf(CategoryFeed("egydead", "/category/مسلسلات-رمضان-2023/", "/category/مسلسلات-رمضان-2023/page/{page}/"))
+        "ramadan_2026" -> listOf(
+            CategoryFeed("prestige", "/cat03.php?cat=ramdan2026", "/cat03.php?cat=ramdan2026&page={page}"),
+            CategoryFeed("egydead", "/category/مسلسلات-رمضان-2026/", "/category/مسلسلات-رمضان-2026/page/{page}/"),
+        )
+        "ramadan_2025" -> listOf(
+            CategoryFeed("prestige", "/cat03.php?cat=ramadan2-2025", "/cat03.php?cat=ramadan2-2025&page={page}"),
+            CategoryFeed("egydead", "/category/مسلسلات-رمضان-2025/", "/category/مسلسلات-رمضان-2025/page/{page}/"),
+        )
+        "ramadan_2024" -> listOf(
+            CategoryFeed("prestige", "/cat03.php?cat=ramdan1-2024", "/cat03.php?cat=ramdan1-2024&page={page}"),
+            CategoryFeed("egydead", "/category/مسلسلات-رمضان-2024/", "/category/مسلسلات-رمضان-2024/page/{page}/"),
+        )
+        "ramadan_2023" -> listOf(
+            CategoryFeed("prestige", "/cat03.php?cat=ramda1-2023", "/cat03.php?cat=ramda1-2023&page={page}"),
+            CategoryFeed("egydead", "/category/مسلسلات-رمضان-2023/", "/category/مسلسلات-رمضان-2023/page/{page}/"),
+        )
         else -> emptyList()
     }
 
@@ -1728,6 +1762,66 @@ object MultiProviderRepository {
 
 
         try {
+
+            // 0. ArabSeed Here (https://arabseed.here) dedicated server resolver
+            if (pageUrl.contains("arabseed.here")) {
+                val watchUrl = when {
+                    pageUrl.contains("/film/") -> pageUrl.replace("/film/", "/watch/")
+                    pageUrl.contains("/episode/") -> pageUrl.replace("/episode/", "/watch/")
+                    pageUrl.contains("/watch/") -> pageUrl
+                    else -> "${baseUrl.trimEnd('/')}/watch/" + pageUrl.trimEnd('/').substringAfterLast('/')
+                }
+                try {
+                    val wHtml = fetchHtml(watchUrl, pageUrl)
+                    val keyMatch = Regex("""const\s+watchResolveKey\s*=\s*["']([^"']+)["']""").find(wHtml)
+                    val csrfMatch = Regex("""const\s+csrfToken\s*=\s*["']([^"']+)["']""").find(wHtml)
+                    val serversJsonMatch = Regex("""const\s+servers\s*=\s*(\[.*?\]);""").find(wHtml)
+                    if (keyMatch != null && csrfMatch != null && serversJsonMatch != null) {
+                        val watchKey = keyMatch.groupValues[1]
+                        val csrfToken = csrfMatch.groupValues[1]
+                        val serversArray = org.json.JSONArray(serversJsonMatch.groupValues[1])
+                        for (i in 0 until serversArray.length().coerceAtMost(6)) {
+                            val serverObj = serversArray.getJSONObject(i)
+                            val token = serverObj.optString("resolve_token")
+                            val sName = serverObj.optString("name", "سيرفر ${i + 1}")
+                            if (token.isNotBlank()) {
+                                try {
+                                    val postJson = JSONObject().apply {
+                                        put("key", watchKey)
+                                        put("token", token)
+                                        put("human_signal", JSONObject.NULL)
+                                    }
+                                    val resolveReq = Request.Builder()
+                                        .url("https://arabseed.here/watch/resolve")
+                                        .post(postJson.toString().toRequestBody("application/json".toMediaType()))
+                                        .header("User-Agent", UA)
+                                        .header("Referer", watchUrl)
+                                        .header("Origin", "https://arabseed.here")
+                                        .header("Accept", "application/json")
+                                        .header("X-CSRF-TOKEN", csrfToken)
+                                        .header("X-Requested-With", "XMLHttpRequest")
+                                        .build()
+                                    http.newCall(resolveReq).execute().use { res ->
+                                        val resBody = res.body?.string().orEmpty()
+                                        val resJson = JSONObject(resBody)
+                                        if (resJson.optBoolean("ok", false)) {
+                                            val mPath = resJson.optString("url")
+                                            val mFull = if (mPath.startsWith("/")) "https://arabseed.here$mPath" else mPath
+                                            val mHtml = fetchHtml(mFull, watchUrl)
+                                            val ifrSrc = Regex("""<iframe\b[^>]*src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+                                                .find(mHtml)?.groupValues?.get(1)?.trim().orEmpty()
+                                            val finalEmbed = ifrSrc.ifBlank { mFull }
+                                            if (isServerCandidateUrl(finalEmbed) && servers.none { it.embedUrl == finalEmbed }) {
+                                                servers += ArabseedServer("سيرفر ${servers.size + 1} ($sName)", finalEmbed)
+                                            }
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
 
             // 1. Akwam Servers (watch/.../servers)
             if (pageUrl.contains("akw")) {
@@ -3437,7 +3531,9 @@ object MultiProviderRepository {
                                 if (!strictlyMatches) continue
                                 val epNum = SeriesCatalogParser.episodeNumber(candidate.title, candidate.pageUrl)
                                 if (epNum != null && epNum > 0) {
-                                    val sNum = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl) ?: 1
+                                    val sNum = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl)
+                                        ?: SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                                        ?: 1
                                     directDiscoveredEpisodes.add(
                                         ArabseedEpisode(
                                             number = epNum,

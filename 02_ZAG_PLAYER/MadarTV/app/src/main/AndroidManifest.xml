@@ -2,7 +2,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <queries>
-        <package android:name="com.madar.player" />
+        <package android:name="com.mader.player" />
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />

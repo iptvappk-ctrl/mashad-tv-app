@@ -72,3 +72,10 @@ constants.txt
 !DOCUMENTATION/**/*.png
 !ZAQZOUKA_OFFICIAL_WEBSITE/**/*.png
 !06_WEB_AND_DISTRIBUTION/download-landing-page/**/*.png
+
+# Temporary scanner & system dumps
+4DefaultTempSaveScan/
+4DThumb/
+Boot/
+$Recycle.Bin/
+.dart_tool/

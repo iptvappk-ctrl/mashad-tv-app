@@ -1,0 +1,347 @@
+{
+  "timestamp": "2026-11-21 17:26:54",
+  "duration_sec": 12.3,
+  "active_categories": "13/13",
+  "successful_searches": "4/6",
+  "domains": {
+    "esheeq": [
+      {
+        "name": "قصة عشق (Esheeq - مسلسلات تركي)",
+        "url": "https://qesset.net",
+        "status": 200,
+        "latency_ms": 886,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://qesset.net/"
+      },
+      {
+        "name": "قصة عشق (Esheeq - مسلسلات تركي)",
+        "url": "https://qeseh.net",
+        "status": 200,
+        "latency_ms": 1459,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://qesset.net/"
+      }
+    ],
+    "lodynet": [
+      {
+        "name": "لودي نت (Lodynet - هندي وآسيوي)",
+        "url": "https://lodynet.watch",
+        "status": 200,
+        "latency_ms": 1228,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://lodynet.watch/"
+      },
+      {
+        "name": "لودي نت (Lodynet - هندي وآسيوي)",
+        "url": "https://lodynet.com",
+        "status": 200,
+        "latency_ms": 2221,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://lodynet.watch/"
+      }
+    ],
+    "akwam": [
+      {
+        "name": "أكوام (Akwam)",
+        "url": "https://akw.cam",
+        "status": 200,
+        "latency_ms": 1267,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://akw.cam/"
+      }
+    ],
+    "egydead": [
+      {
+        "name": "إيجي ديد (EgyDead)",
+        "url": "https://egidead.cam",
+        "status": 200,
+        "latency_ms": 1231,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://egidead.cam/"
+      },
+      {
+        "name": "إيجي ديد (EgyDead)",
+        "url": "https://egydead.surf",
+        "status": 200,
+        "latency_ms": 1393,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://egydead.bar/"
+      }
+    ],
+    "prestige": [
+      {
+        "name": "برستيج (Prestige - عربي ورمضان)",
+        "url": "https://prstej.asia",
+        "status": 200,
+        "latency_ms": 2153,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://hd1.brstej.com/home03"
+      },
+      {
+        "name": "برستيج (Prestige - عربي ورمضان)",
+        "url": "https://hd1.brstej.com",
+        "status": 200,
+        "latency_ms": 2185,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://hd1.brstej.com/home03"
+      },
+      {
+        "name": "برستيج (Prestige - عربي ورمضان)",
+        "url": "https://brstej.com",
+        "status": 200,
+        "latency_ms": 2197,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://hd1.brstej.com/home03"
+      }
+    ],
+    "arabseed": [
+      {
+        "name": "عرب سيد (ArabSeed)",
+        "url": "https://m.myseed.tv",
+        "status": 200,
+        "latency_ms": 880,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://m.myseed.tv/"
+      },
+      {
+        "name": "عرب سيد (ArabSeed)",
+        "url": "https://arabseed.ink",
+        "status": 200,
+        "latency_ms": 1387,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://m.myseed.tv/"
+      }
+    ],
+    "wecima": [
+      {
+        "name": "وي سيما (WeCima)",
+        "url": "https://mywecima1.best",
+        "status": 200,
+        "latency_ms": 3126,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://mywecima1.cyou/main"
+      },
+      {
+        "name": "وي سيما (WeCima)",
+        "url": "https://mywecima.shop",
+        "status": 200,
+        "latency_ms": 3429,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://mywecima1.cyou/main"
+      }
+    ],
+    "egybest": [
+      {
+        "name": "إيجي بست (EgyBest)",
+        "url": "https://egybest.live",
+        "status": 200,
+        "latency_ms": 5539,
+        "reachable": true,
+        "cloudflare_gate": false,
+        "final_url": "https://egybest.live/"
+      }
+    ]
+  },
+  "categories": [
+    {
+      "id": "indian_movies",
+      "name": "أفلام هندي",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "فيلم Maaya Oviyan 2026  فيلم21",
+        "فيلم Jodi Emon Hoto 2025  فيلم12"
+      ]
+    },
+    {
+      "id": "foreign_movies",
+      "name": "أفلام أجنبي",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "فيلم Primetime Preacher$ 2026  فيلم20",
+        "فيلم On Behalf Of My Son 2026  فيلم12"
+      ]
+    },
+    {
+      "id": "asian_movies",
+      "name": "أفلام آسيوية",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "فيلم OK! Madam: Bon Voyage 2026  فيلم8",
+        "فيلم Detective Kien: The Headless Horror 2025  فيلم6"
+      ]
+    },
+    {
+      "id": "turkish_series",
+      "name": "مسلسلات تركي",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "مسلسل القهوة المالحة الحلقة 11 ةالحلقة 1115",
+        "مسلسل حبك نار الحلقة 11 ةالحلقة 1115"
+      ]
+    },
+    {
+      "id": "turkish_movies",
+      "name": "أفلام تركي",
+      "count": 12,
+      "active": true,
+      "sample": [
+        "فيلم العشاء الأخير Last Dinner 2026  فيلم5",
+        "فيلم الخلاص Salvation 2026  فيلم23"
+      ]
+    },
+    {
+      "id": "foreign_series",
+      "name": "مسلسلات أجنبي",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "مسلسل The Lord Of The Rings: The Rings Of Power الموسم الثالث الحلقة 5الحلقة 535",
+        "مسلسل Georgie &amp; Mandy&#039;s First Marriage الموسم الثالث الحلقة 7الحلقة 714"
+      ]
+    },
+    {
+      "id": "asian_series",
+      "name": "مسلسلات آسيوي وكوري",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "مسلسل شريك جيد Good Partner 2 الحلقة 1الحلقة 115",
+        "مسلسل عشرة تائهون LOST10 الحلقة 5الحلقة 510"
+      ]
+    },
+    {
+      "id": "indian_series",
+      "name": "مسلسلات هندي",
+      "count": 37,
+      "active": true,
+      "sample": [
+        "مسلسل ماذا أسمي هذه العلاقة الموسم 2 الحلقة 1705",
+        "مسلسل ماذا أسمي هذه العلاقة الموسم 2 الحلقة 1704"
+      ]
+    },
+    {
+      "id": "anime_series",
+      "name": "مسلسلات أنمي وكرتون",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "انمي Tokyo Revengers: Santen Sensou-hen الحلقة 8 ةالحلقة 816",
+        "انمي Uchi No Otouto-domo Ga Sumimasen الحلقة 20 ةالحلقة 209"
+      ]
+    },
+    {
+      "id": "arabic_movies",
+      "name": "أفلام عربي ومصري",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "مشاهدة فيلم موسكو كايرو 2026 اونلاينفيلم122",
+        "مشاهدة فيلم نصيب 2026 اونلاينفيلم279"
+      ]
+    },
+    {
+      "id": "ramadan_2025",
+      "name": "مسلسلات رمضان",
+      "count": 19,
+      "active": true,
+      "sample": [
+        "مسلسل محمد الفاتح سلطان الفتوحات الحلقة 92 الثانية والتسعون ة HD",
+        "مسلسل حب اسود الحلقة 32 الثانية والثلاثون"
+      ]
+    },
+    {
+      "id": "animation_movies",
+      "name": "أفلام أنميشن",
+      "count": 20,
+      "active": true,
+      "sample": [
+        "فيلم Steps 2026  فيلم17",
+        "فيلم Barbie In The Nutcracker 2026  فيلم5"
+      ]
+    },
+    {
+      "id": "arabic_series",
+      "name": "مسلسلات عربي",
+      "count": 19,
+      "active": true,
+      "sample": [
+        "مسلسل محمد الفاتح سلطان الفتوحات الحلقة 92 الثانية والتسعون ة HD",
+        "مسلسل حب اسود الحلقة 32 الثانية والثلاثون"
+      ]
+    }
+  ],
+  "search": [
+    {
+      "query": "Gladiator",
+      "genre": "سينما أجنبي",
+      "count": 0,
+      "success": false,
+      "sample": []
+    },
+    {
+      "query": "موسكو كايرو",
+      "genre": "سينما عربي",
+      "count": 2,
+      "success": true,
+      "sample": [
+        "مشاهدة فيلم موسكو كايرو 2026 اونلاينفيلم122",
+        "مسلسل The Idaho Murders: A College Town Nightmare الموسم الاول الحلقة 2الحلقة 271"
+      ]
+    },
+    {
+      "query": "عثمان",
+      "genre": "مسلسلات تركي",
+      "count": 0,
+      "success": false,
+      "sample": []
+    },
+    {
+      "query": "Titan",
+      "genre": "أنمي",
+      "count": 8,
+      "success": true,
+      "sample": [
+        "مشاهدة انمي Tokyo Revengers الموسم الرابع الحلقة 3 الثالثة ةالحلقة 343",
+        "مشاهدة انمي Tokyo Revengers الموسم الرابع الحلقة 2 الثانية ةالحلقة 244"
+      ]
+    },
+    {
+      "query": "شاروخان",
+      "genre": "سينما هندية",
+      "count": 9,
+      "success": true,
+      "sample": [
+        "مسلسل Student of the Year: After Dark 2026  الموسم الأول الحلقة 6 الأخيرة",
+        "مسلسل Student of the Year: After Dark 2026  الموسم الأول الحلقة 5"
+      ]
+    },
+    {
+      "query": "Squid",
+      "genre": "دراما كوري",
+      "count": 12,
+      "success": true,
+      "sample": [
+        "مسلسل Student of the Year: After Dark 2026  الموسم الأول الحلقة 6 الأخيرة",
+        "مسلسل Student of the Year: After Dark 2026  الموسم الأول الحلقة 5"
+      ]
+    }
+  ]
+}

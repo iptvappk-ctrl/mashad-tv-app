@@ -29,23 +29,76 @@ module.exports = async (req, res) => {
     const landingVisitorsObj = landingVisitorsSnap.val() || {};
     const landingVisitors = Object.values(landingVisitorsObj)
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, 30);
+      .slice(0, 30)
+      .map((v) => {
+        let dev = (v.device || 'هاتف').toString();
+        if (dev.includes('mob') || dev.includes('موب') || dev.startsWith('ظ') || dev.includes('Phone')) dev = 'هاتف محمول';
+        else if (dev.includes('desk') || dev.includes('كمب') || dev.includes('PC') || dev.includes('Windows')) dev = 'كمبيوتر';
+
+        let ref = (v.referrer || 'مباشر').toString();
+        if (ref.includes('Facebook') || ref.includes('فيسبوك') || ref.startsWith('ظپ')) ref = 'فيسبوك (Facebook)';
+        else if (ref.includes('Direct') || ref.includes('مباشر') || ref.startsWith('ظ…ط¨')) ref = 'زيارة مباشرة (Direct)';
+        else if (ref.includes('zaafilm')) ref = 'موقع زافيلم (zaafilm.com)';
+        else if (ref.includes('Google') || ref.includes('جوجل')) ref = 'بحث جوجل (Google)';
+        else if (ref.includes('TikTok') || ref.includes('تيك توك')) ref = 'تيك توك (TikTok)';
+
+        return {
+          ...v,
+          device: dev,
+          referrer: ref,
+        };
+      });
 
     const landingTotalVisits = landing.totalVisits || 0;
+    const landingBundleDownloads = landing.downloads_bundle || 0;
     const landingAppDownloads = landing.downloads_app || 0;
     const landingPlayerDownloads = landing.downloads_player || 0;
-    const landingTotalDownloads = landingAppDownloads + landingPlayerDownloads;
+    const landingTotalDownloads = landing.total_downloads || (landingBundleDownloads + landingAppDownloads + landingPlayerDownloads);
+    const landingDownloadsPerVisit = landingTotalVisits > 0
+      ? (landingTotalDownloads / landingTotalVisits).toFixed(1)
+      : '0.0';
     const landingConversionRate = landingTotalVisits > 0
-      ? ((landingTotalDownloads / landingTotalVisits) * 100).toFixed(1)
+      ? Math.min(100, Math.round((landingTotalDownloads / (landingTotalVisits * 2)) * 100)).toFixed(1)
       : '0.0';
 
     const landingTopReferrers = Object.entries(landing.referrers || {})
-      .map(([name, count]) => ({
-        name: name.replace(/_/g, '.'),
-        count,
-        percent: landingTotalVisits > 0 ? Math.round((count / landingTotalVisits) * 100) : 0,
-      }))
+      .map(([name, count]) => {
+        let clean = name.replace(/_/g, '.');
+        if (clean.includes('Facebook') || clean.includes('فيسبوك') || clean.startsWith('ظپ')) clean = 'فيسبوك (Facebook)';
+        else if (clean.includes('Direct') || clean.includes('مباشر') || clean.startsWith('ظ…ط¨')) clean = 'زيارة مباشرة (Direct)';
+        else if (clean.includes('zaafilm')) clean = 'موقع زافيلم (zaafilm.com)';
+        else if (clean.includes('Google') || clean.includes('جوجل')) clean = 'بحث جوجل (Google)';
+        else if (clean.includes('TikTok') || clean.includes('تيك توك')) clean = 'تيك توك (TikTok)';
+        return {
+          name: clean,
+          count,
+          percent: landingTotalVisits > 0 ? Math.min(100, Math.round((count / landingTotalVisits) * 100)) : 0,
+        };
+      })
       .sort((a, b) => b.count - a.count);
+
+    const landingCountries = Object.entries(landing.countries || {})
+      .map(([country, count]) => {
+        let clean = country.replace(/_/g, '.');
+        if (clean.includes('مصر') || clean.includes('EG')) clean = 'مصر 🇪🇬';
+        else if (clean.includes('السعودية') || clean.includes('SA')) clean = 'السعودية 🇸🇦';
+        else if (clean.includes('ليبيا') || clean.includes('LY')) clean = 'ليبيا 🇱🇾';
+        else if (clean.includes('الجزائر') || clean.includes('DZ')) clean = 'الجزائر 🇩🇿';
+        else if (clean.includes('السودان') || clean.includes('SD')) clean = 'السودان 🇸🇩';
+        else if (clean.includes('سوريا') || clean.includes('SY')) clean = 'سوريا 🇸🇾';
+        else if (clean.includes('الأردن') || clean.includes('JO')) clean = 'الأردن 🇯🇴';
+        else if (clean.includes('العراق') || clean.includes('IQ')) clean = 'العراق 🇮🇶';
+        else if (clean.includes('الإمارات') || clean.includes('AE')) clean = 'الإمارات 🇦🇪';
+        else if (clean.includes('أمريكا') || clean.includes('US')) clean = 'أمريكا 🇺🇸';
+        else if (clean.includes('ألمانيا') || clean.includes('DE')) clean = 'ألمانيا 🇩🇪';
+        return {
+          country: clean,
+          count,
+          percent: landingTotalVisits > 0 ? Math.min(100, Math.round((count / landingTotalVisits) * 100)) : 0,
+        };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15);
 
     const stats = statsSnap.val() || {};
     const sessionsObj = sessionsSnap.val() || {};
@@ -139,11 +192,71 @@ module.exports = async (req, res) => {
         }
       }
     }
-    const devices = Array.from(deviceMap.values()).map(d => ({
-      ...d,
-      status: d.isActiveDevice ? 'active' : 'closed',
-      actionsCount: d.sessionsHistory.reduce((acc, x) => acc + (x.actionsCount || 0), 0),
-    }));
+    const dayMs = 24 * 60 * 60 * 1000;
+    let appDevicesCount = 0;
+    let installedActive = 0;
+    let installedIdle = 0;
+    let uninstalledCount = 0;
+
+    function cleanLocationStr(loc, city, region, country) {
+      let s = (loc || (city ? `${city}، ${region ? region + '، ' : ''}${country || 'مصر (EG)'}` : country || 'مصر (EG)')).toString();
+      const egCities = ['طنطا', 'القاهرة', 'الجيزة', 'الإسكندرية', 'المنصورة', 'الزقازيق', 'المحلة', 'دمنهور', 'بنها', 'سوهاج', 'أسيوط', 'المنيا', 'قنا', 'الأقصر', 'أسوان'];
+      for (const egC of egCities) {
+        if (s.includes(egC)) {
+          s = s.replace(/السعودية\s*\(SA\)/g, 'مصر (EG)')
+               .replace(/Medina Region/gi, '')
+               .replace(/Riyadh/gi, '')
+               .replace(/Saudi Arabia/gi, 'Egypt');
+        }
+      }
+      return s.replace(/،\s*،/g, '،').replace(/^،\s*/, '').replace(/،\s*$/, '').trim();
+    }
+
+    const devices = Array.from(deviceMap.values()).map(d => {
+      const isApp = d.platform !== 'web' && d.deviceType !== 'web';
+      const lastSeenTime = new Date(d.lastSeen || d.openedAt || 0).getTime();
+      const daysSince = Math.max(0, Math.floor((now - lastSeenTime) / dayMs));
+
+      let installStatus = 'installed_active';
+      let installStatusText = 'مثبت ونشط 🟢';
+
+      if (isApp) {
+        appDevicesCount++;
+        if (d.isActiveDevice || daysSince <= 1) {
+          installedActive++;
+          installStatus = 'installed_active';
+          installStatusText = 'مثبت ونشط 🟢';
+        } else if (daysSince <= 7) {
+          installedIdle++;
+          installStatus = 'installed_idle';
+          installStatusText = 'مثبت (خامل) 🟡';
+        } else {
+          uninstalledCount++;
+          installStatus = 'uninstalled_churn';
+          installStatusText = 'احتمال حذف التطبيق 🔴';
+        }
+      }
+
+      const cleanLoc = cleanLocationStr(d.location, d.city, d.region, d.country);
+
+      return {
+        ...d,
+        location: cleanLoc,
+        status: d.isActiveDevice ? 'active' : 'closed',
+        actionsCount: d.sessionsHistory.reduce((acc, x) => acc + (x.actionsCount || 0), 0),
+        daysSinceLastSeen: daysSince,
+        installStatus,
+        installStatusText,
+      };
+    });
+
+    const totalAppInstalls = Math.max(stats.totalInstalls || 0, appDevicesCount);
+    const stillInstalled = installedActive + installedIdle;
+    if (totalAppInstalls > stillInstalled) {
+      uninstalledCount = totalAppInstalls - stillInstalled;
+    }
+    const retentionRate = totalAppInstalls > 0 ? ((stillInstalled / totalAppInstalls) * 100).toFixed(1) : '100.0';
+    const uninstallRate = totalAppInstalls > 0 ? ((uninstalledCount / totalAppInstalls) * 100).toFixed(1) : '0.0';
 
     // 6. Device brands
     const brandMap = {};
@@ -188,8 +301,7 @@ module.exports = async (req, res) => {
     // 6.b Detailed Cities Breakdown (المواقع والمدن بالتفصيل)
     const cityMap = {};
     for (const s of sessions) {
-      let loc = s.location || (s.city ? `${s.city}، ${s.region || ''} ${s.country || ''}` : s.country || 'مصر (EG)');
-      loc = loc.replace(/،\s*،/g, '،').trim();
+      const loc = cleanLocationStr(s.location, s.city, s.region, s.country);
       cityMap[loc] = (cityMap[loc] || 0) + 1;
     }
     const topCities = Object.entries(cityMap)
@@ -263,9 +375,35 @@ module.exports = async (req, res) => {
       }))
       .sort((a, b) => b.count - a.count);
 
-    // 9. Top content
+    // 9. Top content with accurate dynamic icons
     const topContentObj = topContentSnap.val() || {};
     const topContent = Object.values(topContentObj)
+      .map((item) => {
+        let cat = (item.category || '').toLowerCase();
+        let title = (item.title || '').toLowerCase();
+        let icon = '🎬';
+        if (cat.includes('بث') || cat.includes('مباراة') || cat.includes('رياضة') || cat.includes('sport') || title.includes('سيتي') || title.includes('مباراة') || title.includes('bein') || title.includes('كأس')) {
+          icon = '⚽';
+          cat = item.category || 'بث مباشر ورياضة';
+        } else if (cat.includes('مسلسل') || title.includes('مسلسل') || title.includes('حلقة')) {
+          icon = '📺';
+          cat = item.category || 'مسلسلات';
+        } else if (cat.includes('أنمي') || cat.includes('انمي') || title.includes('أنمي')) {
+          icon = '⚔️';
+          cat = item.category || 'أنمي';
+        } else if (cat.includes('مسرح')) {
+          icon = '🎭';
+          cat = item.category || 'مسرحيات';
+        } else {
+          icon = '🎬';
+          cat = item.category || 'أفلام';
+        }
+        return {
+          ...item,
+          category: cat,
+          categoryIcon: icon,
+        };
+      })
       .sort((a, b) => b.views - a.views)
       .slice(0, 30);
 
@@ -296,6 +434,13 @@ module.exports = async (req, res) => {
         webActiveNow,
         firstOpens,
         totalInstalls: stats.totalInstalls || 0,
+        totalAppInstalls,
+        stillInstalled,
+        uninstalledCount,
+        installedActive,
+        installedIdle,
+        retentionRate,
+        uninstallRate,
         webVisits: stats.webVisits || 0,
         bouncedUsers: bounced,
         bounceRate,
@@ -326,16 +471,26 @@ module.exports = async (req, res) => {
       },
       monetization,
       landingAnalytics: {
+        siteUrl: 'zaafilm.com',
+        siteName: 'موقع التحميل الرسمي ZAAFILM',
+        status: 'active',
+        statusText: 'نشط ومتصل بالسحابة',
         totalVisits: landingTotalVisits,
+        downloadsBundle: landingBundleDownloads,
         downloadsApp: landingAppDownloads,
         downloadsPlayer: landingPlayerDownloads,
         totalDownloads: landingTotalDownloads,
+        downloadsPerVisit: landingDownloadsPerVisit,
         conversionRate: landingConversionRate,
         topReferrers: landingTopReferrers,
+        topCountries: landingCountries,
         recentVisitors: landingVisitors,
       },
       devices,
-      sessions,
+      sessions: sessions.map(s => ({
+        ...s,
+        location: cleanLocationStr(s.location, s.city, s.region, s.country),
+      })),
       topContent,
       searches: searchesList,
       errors: errorsList,

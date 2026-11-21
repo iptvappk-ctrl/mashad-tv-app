@@ -35,6 +35,8 @@ android {
             storePassword = "zaqzouka_release_pass"
             keyAlias = "zaqzouka"
             keyPassword = "zaqzouka_release_pass"
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
@@ -45,9 +47,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Sign release build with debug key to maintain 100% signature compatibility
-            // with all previously installed user versions (v1 - v58).
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

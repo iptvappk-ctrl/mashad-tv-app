@@ -328,9 +328,9 @@ Map<String, String> _posterHeaders(String rawUrl) {
   final host = uri?.host.toLowerCase() ?? '';
   final referer = switch (host) {
     _ when host.contains('myseed') => 'https://m.myseed.tv/',
-    _ when host.contains('arabseed') => 'https://arabseed.health/',
+    _ when host.contains('arabseed') => 'https://arabseed.here/',
     _ when host.contains('akw') => 'https://akw.cam/',
-    _ when host.contains('wecima') => 'https://myweecima.casa/',
+    _ when host.contains('wecima') => 'https://wecima.tips/',
     _ when host.contains('fasel') => 'https://wb49584.fasel4k.site/',
     _ when host.isNotEmpty =>
       '${uri!.scheme.isEmpty ? 'https' : uri.scheme}://$host/',

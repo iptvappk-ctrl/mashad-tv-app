@@ -183,15 +183,15 @@ class InAppUpdateManager(private val activity: MainActivity) {
     private fun respondForRelease(release: UpdateRelease, result: MethodChannel.Result) {
         val installed = installedVersionCode()
         val installedPlayerCode = getInstalledPlayerVersionCode()
-        val playerRel = release.playerRelease
-        val playerNeedsUpdate = playerRel != null && installedPlayerCode < playerRel.versionCode
+        val playerRel = null
+        val playerNeedsUpdate = false
         val appNeedsUpdate = release.versionCode > installed
 
         latestRelease = release
 
-        if (!appNeedsUpdate && !playerNeedsUpdate) {
+        if (!appNeedsUpdate) {
             latestRelease = null
-            Log.i(TAG, "No newer public update (app installed=$installed, player installed=$installedPlayerCode); clearing stale cache")
+            Log.i(TAG, "No newer public update (app installed=$installed); clearing stale cache")
             activity.getSharedPreferences(UPDATE_PREFS, android.content.Context.MODE_PRIVATE).edit()
                 .remove(CACHED_RELEASE_JSON)
                 .remove(CACHED_RELEASE_ETAG)
@@ -218,15 +218,15 @@ class InAppUpdateManager(private val activity: MainActivity) {
             "versionName" to release.versionName,
             "releaseNotes" to release.releaseNotes,
             "appDownloaded" to (getDownloadedAppApk() != null),
-            "playerUpdateAvailable" to playerNeedsUpdate,
+            "playerUpdateAvailable" to false,
             "playerInstalled" to (installedPlayerCode > 0L),
             "playerCurrentCode" to installedPlayerCode,
-            "playerVersionCode" to (playerRel?.versionCode ?: 18L),
-            "playerVersionName" to (playerRel?.versionName ?: "1.1.3"),
-            "playerReleaseNotes" to (playerRel?.releaseNotes ?: ""),
-            "playerApkUrl" to (playerRel?.apkUrl ?: "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.64-69/zaqzouka-player-1.1.18.apk"),
-            "playerSha256" to (playerRel?.sha256 ?: "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39"),
-            "playerDownloaded" to (getDownloadedPlayerApk() != null),
+            "playerVersionCode" to 0L,
+            "playerVersionName" to "",
+            "playerReleaseNotes" to "",
+            "playerApkUrl" to "",
+            "playerSha256" to "",
+            "playerDownloaded" to false,
         ))
     }
 
@@ -247,7 +247,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
         val apkFile = File(updateDirectory, "zaqzouka-player-update.apk")
         if (apkFile.exists() && apkFile.length() > 0) {
             val archived = activity.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
-            if (archived?.packageName == "com.madar.player") {
+            if (archived?.packageName == "com.madar.player" || archived?.packageName == "com.mader.player") {
                 return apkFile
             }
         }
@@ -255,21 +255,23 @@ class InAppUpdateManager(private val activity: MainActivity) {
     }
 
     fun getInstalledPlayerVersionCode(): Long {
-        return try {
-            val pkg = activity.packageManager.getPackageInfo("com.madar.player", 0)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pkg.longVersionCode else @Suppress("DEPRECATION") pkg.versionCode.toLong()
-        } catch (_: Exception) {
-            0L
+        val candidates = listOf("com.madar.player", "com.mader.player")
+        for (pkgName in candidates) {
+            try {
+                val pkg = activity.packageManager.getPackageInfo(pkgName, 0)
+                return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pkg.longVersionCode else @Suppress("DEPRECATION") pkg.versionCode.toLong()
+            } catch (_: Exception) {}
         }
+        return 0L
     }
 
     fun downloadAndInstallPlayer(apkUrl: String?, sha256Expected: String?, result: MethodChannel.Result) {
         val targetUrl = apkUrl?.takeIf { it.isNotBlank() }
             ?: latestRelease?.playerRelease?.apkUrl
-            ?: "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.64-69/zaqzouka-player-1.1.18.apk"
+            ?: "https://zaafilm.com/downloads/zag-player.apk"
         val expectedHash = sha256Expected?.takeIf { it.isNotBlank() }
             ?: latestRelease?.playerRelease?.sha256
-            ?: "80ece49776510e353e2531724adf0d6de2840da2239f356c4affd1c7f531df39"
+            ?: ""
 
         val updateDirectory = File(activity.cacheDir, "updates")
         val apkFile = File(updateDirectory, "zaqzouka-player-update.apk")
@@ -278,7 +280,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
         // 1. If already fully downloaded and valid: directly install!
         if (apkFile.exists() && apkFile.length() > 0) {
             val archived = activity.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
-            if (archived?.packageName == "com.madar.player") {
+            if (archived?.packageName == "com.madar.player" || archived?.packageName == "com.mader.player") {
                 openInstaller(apkFile)
                 respond(result, mapOf("status" to "install_started"))
                 return
@@ -376,7 +378,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
                         }
 
                         val archived = activity.packageManager.getPackageArchiveInfo(partFile.absolutePath, 0)
-                        if (archived?.packageName != "com.madar.player") {
+                        if (archived?.packageName != "com.madar.player" && archived?.packageName != "com.mader.player") {
                             partFile.delete()
                             throw IOException("Downloaded package is not com.madar.player")
                         }
@@ -611,9 +613,13 @@ class InAppUpdateManager(private val activity: MainActivity) {
         .digest(bytes)
         .joinToString("") { byte -> "%02x".format(byte) }
 
-    private fun isTrustedAssetHost(host: String): Boolean =
-        host == "github.com" || host == "release-assets.githubusercontent.com" ||
-            host == "objects.githubusercontent.com"
+    private fun isTrustedAssetHost(host: String): Boolean {
+        val h = host.lowercase()
+        return h == "github.com" || h == "release-assets.githubusercontent.com" ||
+            h == "objects.githubusercontent.com" ||
+            h == "zaafilm.com" || h == "www.zaafilm.com" ||
+            h == "madartv-updates.web.app" || h.endsWith(".vercel.app")
+    }
 
     private fun postProgress(downloaded: Long, total: Long) {
         val payload = mapOf(
@@ -662,17 +668,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
                     throw IOException("Required Firebase update metadata is missing or untrusted")
                 }
 
-                val playerObj = json.optJSONObject("player")
-                val playerRelease = if (playerObj != null) {
-                    val pCode = playerObj.optLong("versionCode", 0L)
-                    val pName = playerObj.optString("versionName", "")
-                    val pUrl = playerObj.optString("apkUrl", "")
-                    val pSha = playerObj.optString("sha256", "")
-                    val pNotes = playerObj.optString("releaseNotes", "")
-                    if (pCode > 0L && pUrl.isNotBlank()) {
-                        PlayerRelease(pCode, pName, pNotes, pUrl, pSha)
-                    } else null
-                } else null
+                val playerRelease = null
 
                 return UpdateRelease(
                     versionCode = versionCode,
@@ -710,21 +706,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
                     throw IOException("Required update metadata is missing or untrusted")
                 }
 
-                val playerAsset = json.optJSONArray("assets")?.let { assets ->
-                    (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }
-                        .firstOrNull { it.optString("name").startsWith("zaqzouka-player-") && it.optString("state") == "uploaded" }
-                }
-                val playerRelease = if (playerAsset != null) {
-                    val pUrl = playerAsset.optString("browser_download_url")
-                    val pSha = playerAsset.optString("digest").removePrefix("sha256:")
-                    PlayerRelease(
-                        versionCode = 18L,
-                        versionName = "1.1.3",
-                        releaseNotes = "تحديث مشغل زقزوقة: استعادة وإتاحة كافة خيارات الجودة الكاملة (أقصى توفير، متوازن، أعلى جودة، تلقائي، ضغط ذكي HD) وسلاسة فائقة.",
-                        apkUrl = pUrl,
-                        sha256 = pSha,
-                    )
-                } else null
+                val playerRelease = null
 
                 return UpdateRelease(
                     versionCode = versionCode,
@@ -758,9 +740,9 @@ class InAppUpdateManager(private val activity: MainActivity) {
         private const val FIREBASE_UPDATE_URL =
             "https://madartv-updates.web.app/updates/android/latest.json"
         private const val LATEST_RELEASE_URL =
-            "https://api.github.com/repos/hassanIssa00/madartv-updates/releases/latest"
+            "https://api.github.com/repos/iptvappk-ctrl/madartv-updates/releases/latest"
         private const val GITHUB_API_VERSION = "2022-11-28"
-        private const val GITHUB_RELEASE_PATH = "/hassanIssa00/madartv-updates/releases/download/"
+        private const val GITHUB_RELEASE_PATH = "/iptvappk-ctrl/madartv-updates/releases/download/"
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         private const val MAX_RELEASE_RESPONSE_CHARS = 256 * 1024
         private const val MAX_VERSION_NAME_CHARS = 40

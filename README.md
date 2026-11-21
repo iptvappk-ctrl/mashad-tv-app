@@ -89,7 +89,7 @@ curl -X POST https://zaqzouka-hub.vercel.app/api/system_control \
 
 ### 2. ZAG Player (02_ZAG_PLAYER)
 - Kotlin + ExoPlayer + YouTube Custom Tab
-- Package: `com.madar.player`
+- Package: `com.mader.player`
 - يدعم HLS, MP4, YouTube embeds
 - مع تبديل جودة + ترجمة + ملء الشاشة
 
