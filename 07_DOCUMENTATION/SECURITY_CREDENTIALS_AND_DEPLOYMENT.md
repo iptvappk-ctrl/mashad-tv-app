@@ -1,6 +1,6 @@
 # 🛡️ تقرير التوثيق الأمني وهندسة النظام — زقزوقة TV & حمادة AI
 
-**تاريخ التحديث:** 20 نوفمبر 2026  
+**تاريخ التحديث:** 21 نوفمبر 2026  
 **الحالة:** مكتمل ومفعل في الإنتاج (Production Active) ✅  
 
 ---
@@ -38,6 +38,10 @@
 
 تم إعادة نشر (Redeploy) الخدمات التالية على Vercel بأحدث إعدادات أمان:
 
+* **بوابة التوزيع والموقع الرسمي للمنظومة:**  
+  https://zaqzouka-tv.vercel.app  
+  *Deployment Status:* Ready ✅ (توزيع مباشر لتطبيقات APK بدون إعلانات)
+
 * **لوحة تحكم وتحليلات السحابة الرئيسية:**  
   https://zaqzouka-dashboard-api.vercel.app  
   *Deployment ID:* `dpl_GVXP7fPU8UhQiFwiBpeiX1DnysHD` (Ready ✅)
@@ -68,10 +72,20 @@
 
 ---
 
-## 5. النسخ التنفيذية الجاهزة على سطح المكتب (Desktop Binaries)
+## 5. النسخ التنفيذية الجاهزة للتوزيع (Binaries & APKs)
 
 | اسم التطبيق | المسار | الحجم | التفاصيل |
 |---|---|---|---|
+| **Zaqzouka TV Client** | `ZAQZOUKA_OFFICIAL_WEBSITE/downloads/zaqzouka-app.apk` | 53.4 MB | تطبيق المشاهدة الرئيسي للجمهور |
+| **ZAG Player Engine** | `ZAQZOUKA_OFFICIAL_WEBSITE/downloads/zag-player.apk` | 4.6 MB | مشغل الفيديو النقي التوربيني |
 | **Zaqzouka Admin** | `c:\Users\hassa\Desktop\zaqzouka-admin.apk` | 49.8 MB | نسخة الأدمن الشاملة والآمنة بدون زر إعدادات |
 | **Zaqzouka Admin v2** | `c:\Users\hassa\Desktop\zaqzouka-admin-v2.apk` | 49.8 MB | نسخة احتياطية متطابقة على الديسكتوب |
 | **Hamada AI** | `c:\Users\hassa\Desktop\Hamada_AI.apk` | 16.1 MB | المساعد الصوتي المصري الفوري (Whisper + Gemini TTS) |
+
+---
+
+## 6. موقع الويب الرسمي المخصص للتوزيع
+* المجلد الرئيسي للموقع داخل المشروع: `ZAQZOUKA_OFFICIAL_WEBSITE/`
+* النسخة المتزامنة في التوزيع: `06_WEB_AND_DISTRIBUTION/download-landing-page/`
+* الرابط المباشر للجمهور: https://zaqzouka-tv.vercel.app
+* تم توثيق كامل البنية في: `07_DOCUMENTATION/11_ZAQZOUKA_OFFICIAL_WEBSITE_AND_DISTRIBUTION.md`
