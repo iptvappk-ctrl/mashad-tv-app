@@ -51,7 +51,7 @@
           if (!data) continue;
           const status = (data.status || 'active').toLowerCase();
           const comps = data.components || {};
-          const websiteEnabled = comps.website_enabled !== false;
+          const websiteEnabled = comps.download_site_enabled !== false && comps.website_enabled !== false;
 
           if (status === 'frozen' || status === 'wiped' || !websiteEnabled) {
             showMaintenance(data.message);

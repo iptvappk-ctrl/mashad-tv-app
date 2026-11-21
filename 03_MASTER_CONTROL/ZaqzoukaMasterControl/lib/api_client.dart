@@ -18,6 +18,8 @@ class MasterApiClient {
           // Ensure components map exists
           if (!data.containsKey('components') || data['components'] == null) {
             data['components'] = {
+              'download_site_enabled': true,
+              'web_player_enabled': true,
               'website_enabled': true,
               'app_enabled': true,
               'player_enabled': true,
@@ -40,6 +42,8 @@ class MasterApiClient {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         if (!data.containsKey('components') || data['components'] == null) {
           data['components'] = {
+            'download_site_enabled': true,
+            'web_player_enabled': true,
             'website_enabled': true,
             'app_enabled': true,
             'player_enabled': true,
@@ -56,6 +60,8 @@ class MasterApiClient {
       'updatedAt': 0,
       'wipeTimestamp': 0,
       'components': {
+        'download_site_enabled': true,
+        'web_player_enabled': true,
         'website_enabled': true,
         'app_enabled': true,
         'player_enabled': true,

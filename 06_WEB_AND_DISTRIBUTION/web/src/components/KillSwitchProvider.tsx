@@ -90,10 +90,17 @@ export default function KillSwitchProvider({ children }: { children: React.React
 
         if (res.ok) {
           const data = await res.json();
-          const normalizedStatus = (data.status || "active").toLowerCase() as
+          let normalizedStatus = (data.status || "active").toLowerCase() as
             | "active"
             | "frozen"
             | "wiped";
+
+          const comps = data.components || {};
+          if (comps.web_player_enabled === false || comps.website_enabled === false) {
+            if (normalizedStatus === "active") {
+              normalizedStatus = "frozen";
+            }
+          }
 
           const nextState: SystemState = {
             status: normalizedStatus,

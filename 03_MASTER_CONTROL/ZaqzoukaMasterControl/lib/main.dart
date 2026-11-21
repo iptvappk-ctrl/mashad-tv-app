@@ -177,11 +177,18 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   // Component definitions
   static const List<Map<String, dynamic>> _components = [
     {
-      'key': 'website_enabled',
-      'label': 'الموقع الرسمي',
+      'key': 'download_site_enabled',
+      'label': 'موقع التحميل (Download Hub)',
       'subtitle': 'zaqzouka-tv.vercel.app',
-      'icon': Icons.language_rounded,
+      'icon': Icons.cloud_download_rounded,
       'color': Color(0xFF4A90D9),
+    },
+    {
+      'key': 'web_player_enabled',
+      'label': 'موقع زقزوقة ويب (Web Player)',
+      'subtitle': 'web-nu-teal-29.vercel.app',
+      'icon': Icons.public_rounded,
+      'color': Color(0xFF9B51E0),
     },
     {
       'key': 'app_enabled',
@@ -233,13 +240,22 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     final raw = _statusData['components'];
     if (raw is Map) {
       return {
+        'download_site_enabled': raw['download_site_enabled'] != false && raw['website_enabled'] != false,
+        'web_player_enabled': raw['web_player_enabled'] != false && raw['website_enabled'] != false,
         'website_enabled': raw['website_enabled'] != false,
         'app_enabled': raw['app_enabled'] != false,
         'player_enabled': raw['player_enabled'] != false,
         'admin_enabled': raw['admin_enabled'] != false,
       };
     }
-    return {'website_enabled': true, 'app_enabled': true, 'player_enabled': true, 'admin_enabled': true};
+    return {
+      'download_site_enabled': true,
+      'web_player_enabled': true,
+      'website_enabled': true,
+      'app_enabled': true,
+      'player_enabled': true,
+      'admin_enabled': true,
+    };
   }
 
   Future<void> _toggleComponent(String key, bool newValue) async {

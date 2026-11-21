@@ -56,6 +56,8 @@ export default async function handler(req, res) {
           updatedAt: Date.now(),
           wipeTimestamp: 0,
           components: {
+            download_site_enabled: true,
+            web_player_enabled: true,
             website_enabled: true,
             app_enabled: true,
             player_enabled: true,
@@ -92,7 +94,7 @@ export default async function handler(req, res) {
       // NEW: Toggle individual component
       if (action === 'set_component') {
         if (!component) return res.status(400).json({ error: 'Missing component name' });
-        const validComponents = ['website_enabled', 'app_enabled', 'player_enabled', 'admin_enabled'];
+        const validComponents = ['download_site_enabled', 'web_player_enabled', 'website_enabled', 'app_enabled', 'player_enabled', 'admin_enabled'];
         if (!validComponents.includes(component)) {
           return res.status(400).json({ error: 'Invalid component name' });
         }
@@ -108,6 +110,8 @@ export default async function handler(req, res) {
           updatedAt: now,
           wipeTimestamp: 0,
           components: {
+            download_site_enabled: false,
+            web_player_enabled: false,
             website_enabled: false,
             app_enabled: false,
             player_enabled: false,
@@ -125,6 +129,8 @@ export default async function handler(req, res) {
           updatedAt: now,
           wipeTimestamp: now,
           components: {
+            download_site_enabled: false,
+            web_player_enabled: false,
             website_enabled: false,
             app_enabled: false,
             player_enabled: false,
@@ -148,6 +154,8 @@ export default async function handler(req, res) {
           updatedAt: now,
           wipeTimestamp: 0,
           components: {
+            download_site_enabled: true,
+            web_player_enabled: true,
             website_enabled: true,
             app_enabled: true,
             player_enabled: true,
