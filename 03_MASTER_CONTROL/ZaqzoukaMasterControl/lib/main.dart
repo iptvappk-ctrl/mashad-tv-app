@@ -179,7 +179,7 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     {
       'key': 'download_site_enabled',
       'label': 'موقع التحميل (Download Hub)',
-      'subtitle': 'zaqzouka-tv.vercel.app',
+      'subtitle': 'zaafilm.com (الرسمي)',
       'icon': Icons.cloud_download_rounded,
       'color': Color(0xFF4A90D9),
     },
