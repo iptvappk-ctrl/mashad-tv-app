@@ -14,18 +14,12 @@ object YacineRepository {
 
     // ═══════════════════════════════════════════════════════════════════════
     // Legacy encoded constants; values are recoverable from the client APK.
-    // Pipeline: XOR(K1)→ROT-L(3)→XOR(K2)→Caesar(+17)→Nibble-Swap→PosXOR(K3)
     // ═══════════════════════════════════════════════════════════════════════
 
     private val _bu = byteArrayOf(3, 20, 27, 32, 168.toByte(), 21, 156.toByte(), 149.toByte(), 77, 196.toByte(), 84, 120, 67, 202.toByte(), 68, 240.toByte(), 244.toByte(), 143.toByte(), 1, 144.toByte(), 23, 139.toByte(), 46, 37, 57, 23, 73, 200.toByte(), 95)
     private val _sk = byteArrayOf(132.toByte(), 190.toByte(), 29, 87, 36, 157.toByte(), 76, 152.toByte(), 98, 187.toByte(), 41, 162.toByte(), 110, 18, 96, 249.toByte())
     private val _pn = byteArrayOf(2, 156.toByte(), 26, 131.toByte(), 2, 182.toByte(), 190.toByte(), 53, 69, 194.toByte(), 92, 212.toByte(), 74, 227.toByte(), 104, 113)
     private val _ua = byteArrayOf(134.toByte(), 153.toByte(), 21, 34, 41, 50, 156.toByte(), 30, 110, 238.toByte(), 241.toByte(), 113, 67)
-
-    // ── Decoys ────────────────────────────────────────────────────────────
-    @Suppress("unused") private val _dc1 = byteArrayOf(19, 243.toByte(), 107, 91, 99, 235.toByte(), 161.toByte(), 73)
-    @Suppress("unused") private val _dc2 = byteArrayOf(139.toByte(), 3, 27, 115, 65, 51, 127, 9, 73, 211.toByte())
-    @Suppress("unused") private val _dc3 = byteArrayOf(91, 211.toByte(), 99, 123, 19, 65, 73, 59, 51, 115, 27)
 
     // ── Lazily resolved secrets ───────────────────────────────────────────
     private val BASE_URL: String by lazy { X.s(_bu) }
@@ -45,91 +39,263 @@ object YacineRepository {
     // ─── Caches for High Concurrency ─────────────────────────────────────────────
     private var cachedCategories: List<YacineCategory> = emptyList()
     private var lastCategoriesFetch = 0L
-    private const val CATEGORIES_CACHE_TTL = 10 * 60 * 1000L // 10 minutes
+    private const val CATEGORIES_CACHE_TTL = 10 * 60 * 1000L
 
     private val cachedChannels = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, List<YacineChannel>>>()
-    private const val CHANNELS_CACHE_TTL = 10 * 60 * 1000L // 10 minutes
+    private const val CHANNELS_CACHE_TTL = 10 * 60 * 1000L
 
     private var cachedEvents: List<YacineEvent> = emptyList()
     private var lastEventsFetch = 0L
-    private const val EVENTS_CACHE_TTL = 45 * 1000L // 45 seconds
+    private const val EVENTS_CACHE_TTL = 45 * 1000L
     private const val EVENTS_DISK_STALE_MS = 6L * 60 * 60 * 1000
 
-    // ─── Hardcoded beIN + Alkass channels (always available as fallback) ──────────
+    // ─── Exclusive beIN SPORTS Channels extracted from Yacine TV ──────────
     val BEIN_FALLBACK_CHANNELS = listOf(
-        YacineChannel(id = "bein_hd1", name = "beIN SPORTS 1 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS1_DIGITAL_Mono.png", isHide = 0, priority = 10),
-        YacineChannel(id = "bein_hd2", name = "beIN SPORTS 2 HD", logo = "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS2_DIGITAL_Mono.png", isHide = 0, priority = 9),
-        YacineChannel(id = "bein_hd3", name = "beIN SPORTS 3 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS3_DIGITAL_Mono.png", isHide = 0, priority = 8),
-        YacineChannel(id = "bein_hd4", name = "beIN SPORTS 4 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS4_DIGITAL_Mono.png", isHide = 0, priority = 7),
-        YacineChannel(id = "bein_hd5", name = "beIN SPORTS 5 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS5_DIGITAL_Mono.png", isHide = 0, priority = 6),
-        YacineChannel(id = "bein_hd6", name = "beIN SPORTS 6 HD", logo = "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS6_DIGITAL_Mono.png", isHide = 0, priority = 5),
-        YacineChannel(id = "bein_hd7", name = "beIN SPORTS 7 HD", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS7_DIGITAL_Mono.png", isHide = 0, priority = 4),
-        YacineChannel(id = "bein_hd8", name = "beIN SPORTS 8 HD", logo = "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTS8.png", isHide = 0, priority = 3),
-        YacineChannel(id = "bein_hd9", name = "beIN SPORTS 9 HD", logo = "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTS9.png", isHide = 0, priority = 2),
-        YacineChannel(id = "bein_xtra1", name = "beIN SPORTS XTRA 1", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_XTRA1_Digital_Mono.png", isHide = 0, priority = 1),
-        YacineChannel(id = "bein_xtra2", name = "beIN SPORTS XTRA 2", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_XTRA2_Digital_Mono.png", isHide = 0, priority = 1),
+        YacineChannel(id = "1143098968567368033", name = "beIN SPORTS 1", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS1_DIGITAL_Mono.png", isHide = 0, priority = 25),
+        YacineChannel(id = "1143098968566343572", name = "beIN SPORTS 2", logo = "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS2_DIGITAL_Mono.png", isHide = 0, priority = 24),
+        YacineChannel(id = "1143098968569416219", name = "beIN SPORTS 3", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS3_DIGITAL_Mono.png", isHide = 0, priority = 23),
+        YacineChannel(id = "1143098968568628598", name = "beIN SPORTS 4", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS4_DIGITAL_Mono.png", isHide = 0, priority = 22),
+        YacineChannel(id = "1143098968563317197", name = "beIN SPORTS 5", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS5_DIGITAL_Mono.png", isHide = 0, priority = 21),
+        YacineChannel(id = "1143098968562474496", name = "beIN SPORTS 6", logo = "https://assets.bein.com/mena/sites/4/2021/02/beIN_SPORTS6_DIGITAL_Mono.png", isHide = 0, priority = 20),
+        YacineChannel(id = "1143098968565447332", name = "beIN SPORTS 7", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS7_DIGITAL_Mono.png", isHide = 0, priority = 19),
+        YacineChannel(id = "1143098968564573297", name = "beIN SPORTS 8", logo = "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTS8.png", isHide = 0, priority = 18),
+        YacineChannel(id = "1143098968559140230", name = "beIN SPORTS 9", logo = "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTS9.png", isHide = 0, priority = 17),
+        YacineChannel(id = "1143098968570920632", name = "beIN XTRA 1", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_XTRA1_Digital_Mono.png", isHide = 0, priority = 16),
+        YacineChannel(id = "1143098968573688335", name = "beIN XTRA 2", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_XTRA2_Digital_Mono.png", isHide = 0, priority = 15),
+        YacineChannel(id = "1143098968572456170", name = "beIN XTRA 3", logo = "https://assets.bein.com/mena/sites/4/2023/09/logos-_beINSPORTSXTRA3.png", isHide = 0, priority = 14),
+        YacineChannel(id = "1143098968558341739", name = "beIN France 1", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS1_FRENCH_Digital_Mono.png", isHide = 0, priority = 13),
+        YacineChannel(id = "1143098968561167816", name = "beIN France 2", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS2_FRENCH_Digital_Mono.png", isHide = 0, priority = 12),
+        YacineChannel(id = "1143098968560204757", name = "beIN France 3", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS3_FRENCH_Digital_Mono.png", isHide = 0, priority = 11),
+        YacineChannel(id = "1143098968589111354", name = "beIN News", logo = "https://assets.bein.com/mena/sites/4/2015/06/NEWS_DIGITAL_Mono.png", isHide = 0, priority = 10),
+        YacineChannel(id = "1143098968587560095", name = "beIN SPORTS", logo = "https://assets.bein.com/mena/sites/4/2015/06/bein_SPORTS_FTA_DIGITAL_Mono.png", isHide = 0, priority = 9),
+        YacineChannel(id = "1143098968590638860", name = "beIN English 1", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS1_ENGLISH_Digital_Mono.png", isHide = 0, priority = 8),
+        YacineChannel(id = "1143098968590149209", name = "beIN English 2", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS2_ENGLISH_Digital_Mono.png", isHide = 0, priority = 7),
+        YacineChannel(id = "1143098968584995693", name = "beIN English 3", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS3_ENGLISH_Digital_Mono.png", isHide = 0, priority = 6),
     )
 
-    val ARAB_SPORTS_CHANNELS = listOf(
-        YacineChannel(id = "arab_kuwait", name = "الكويت الرياضية HD", logo = "https://kwtspta.cdn.mangomolo.com/sp/smil:sp.stream.smil/chunklist.m3u8", isHide = 0, priority = 10),
-        YacineChannel(id = "arab_kuwait_plus", name = "الكويت بلس الرياضية HD", logo = "https://kwtsplta.cdn.mangomolo.com/spl/smil:spl.stream.smil/chunklist.m3u8", isHide = 0, priority = 9),
-        YacineChannel(id = "arab_bahrain_1", name = "البحرين الرياضية 1 HD", logo = "https://5c7b683162943.streamlock.net/live/ngrp:sportsone_all/playlist.m3u8", isHide = 0, priority = 8),
-        YacineChannel(id = "arab_bahrain_2", name = "البحرين الرياضية 2 HD", logo = "https://5c7b683162943.streamlock.net/live/ngrp:bahrainsportstwo_all/playlist.m3u8", isHide = 0, priority = 7),
-        YacineChannel(id = "arab_oman", name = "عمان الرياضية HD", logo = "https://partneta.cdn.mgmlcdn.com/omsport/smil:omsport.stream.smil/chunklist.m3u8", isHide = 0, priority = 6),
-        YacineChannel(id = "arab_jordan", name = "الأردن الرياضية HD", logo = "https://jrtv-live.ercdn.net/jordansporthd/jordansporthd.m3u8", isHide = 0, priority = 5),
-        YacineChannel(id = "arab_iraq", name = "العراقية الرياضية HD", logo = "https://imn-live.esite-lab.com/hls/iraqia-sports-1.m3u8", isHide = 0, priority = 4),
+    // ─── Real Match Schedule extracted from Yacine TV ────────────────────
+    val REAL_YACINE_EVENTS = listOf(
+        YacineEvent(
+            id = "1452951978498025827",
+            champions = "الدوري الإنجليزي الممتاز",
+            channel = "beIN SPORTS 1",
+            startTime = 1795264200L,
+            endTime = 1795271400L,
+            commentary = "علي محمد علي",
+            team1 = YacineTeam(id = "38", name = "مان سيتي", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/z44l-a0W1v5FmgPnemV6Xw_96x96.png"),
+            team2 = YacineTeam(id = "45", name = "فولهام", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/Gh7_5p3n364p4vxeM8FhNg_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978486950270",
+            champions = "تشامبيونشيب البطولة الإنجليزية",
+            channel = "beIN SPORTS 3",
+            startTime = 1795264200L,
+            endTime = 1795271400L,
+            commentary = "أحمد عبده",
+            team1 = YacineTeam(id = "835", name = "ميلوول", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/FjQESJIwYuTRJ5B7HvtzPA_96x96.png"),
+            team2 = YacineTeam(id = "681", name = "كوينز بارك رينجرز", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/SYBiHsr8jq3vT4p0HauolA_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978505231935",
+            champions = "الدوري الإسباني",
+            channel = "beIN SPORTS 9",
+            startTime = 1795266000L,
+            endTime = 1795273200L,
+            commentary = "محمد بركات",
+            team1 = YacineTeam(id = "188", name = "الافيس", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/optimized/RUcTOeFcBc7q7uku1nR_iQ_96x96.png"),
+            team2 = YacineTeam(id = "945", name = "لاكورونيا", logo = "https://toppng.com/uploads/preview/rc-deportivo-la-coruna-vector-logo-11574288712ywghhf3zec.png")
+        ),
+        YacineEvent(
+            id = "1452951978484787804",
+            champions = "الدوري التركي",
+            channel = "beIN SPORTS 2",
+            startTime = 1795266000L,
+            endTime = 1795273200L,
+            commentary = "نوفل باشي",
+            team1 = YacineTeam(id = "470", name = "غلطة سراي", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/TWjoccvTU4JXZJZ3aW3cVg_96x96.png"),
+            team2 = YacineTeam(id = "910", name = "سامسون سبور", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/lF7bCDr-Ai-fCbNZnfcxyA_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978511059366",
+            champions = "الدوري الإنجليزي الممتاز",
+            channel = "beIN SPORTS 4",
+            startTime = 1795273200L,
+            endTime = 1795280400L,
+            commentary = "جواد بدة",
+            team1 = YacineTeam(id = "48", name = "استون فيلا", logo = "https://upload.wikimedia.org/wikipedia/fr/thumb/1/14/Aston_Villa_FC_2024.svg/langfr-250px-Aston_Villa_FC_2024.svg.png"),
+            team2 = YacineTeam(id = "555", name = "سندرلاند", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/CQFeTfHrtxqgr3VKWtTwfA_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978512458741",
+            champions = "الدوري الإنجليزي الممتاز",
+            channel = "beIN SPORTS 5",
+            startTime = 1795273200L,
+            endTime = 1795280400L,
+            commentary = "محمد السعدي",
+            team1 = YacineTeam(id = "50", name = "بورنموث", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/IcOt-hrK04B-RlRwI3R0yA_96x96.png"),
+            team2 = YacineTeam(id = "54", name = "نوتينغهام فورست", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/Zr6FbE-8pDH7UBpWCO8U9A_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978510194059",
+            champions = "الدوري الإنجليزي الممتاز",
+            channel = "beIN SPORTS 1",
+            startTime = 1795273200L,
+            endTime = 1795280400L,
+            commentary = "علي الكعبي",
+            team1 = YacineTeam(id = "44", name = "تشيلسي", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/fhBITrIlbQxhVB6IjxUO6Q_96x96.png"),
+            team2 = YacineTeam(id = "51", name = "ليدز يونايتد", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/5dqfOKpjjW6EwTAx_FysKQ_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978500011204",
+            champions = "الدوري الإنجليزي الممتاز",
+            channel = "beIN SPORTS 6",
+            startTime = 1795273200L,
+            endTime = 1795280400L,
+            commentary = "محمد نضال",
+            team1 = YacineTeam(id = "577", name = "كوفنتري سيتي", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/KHpmY4tIwqiutl8Cfl0MAw_96x96.png"),
+            team2 = YacineTeam(id = "47", name = "كريستال بلاس", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/8piQOzndGmApKYTcvyN9vA_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978499099665",
+            champions = "الدوري الإنجليزي الممتاز",
+            channel = "beIN SPORTS 3",
+            startTime = 1795273200L,
+            endTime = 1795280400L,
+            commentary = "عبدالله الغامدي",
+            team1 = YacineTeam(id = "40", name = "توتنهام", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/k3Q_mKE98Dnohrcea0JFgQ_96x96.png"),
+            team2 = YacineTeam(id = "546", name = "إيبسويتش تاون", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/56vquJBk5U16Dng7txLXCw_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978507203162",
+            champions = "الدوري الإسباني",
+            channel = "beIN SPORTS 9",
+            startTime = 1795274100L,
+            endTime = 1795281300L,
+            commentary = "بكر علوان",
+            team1 = YacineTeam(id = "10", name = "رايو فاليكانو", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/i5LifmxEVIl0sbvIysiyhw_96x96.png"),
+            team2 = YacineTeam(id = "14", name = "فالنسيا", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/QPbjvDwI_0Wuu4tCS2O6uw_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978486227561",
+            champions = "الدوري التركي",
+            channel = "beIN SPORTS 7",
+            startTime = 1795276800L,
+            endTime = 1795284000L,
+            commentary = "أحمد البلوشي",
+            team1 = YacineTeam(id = "959", name = "كوجالي سبور", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/optimized/Z0OjkzD4X_FSNX4zUvEb4A_96x96.png"),
+            team2 = YacineTeam(id = "322", name = "فنربخشه", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/HOQreZgFrmtQiLi8HKb9zA_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978487367491",
+            champions = "الدوري الفرنسي",
+            channel = "beIN SPORTS 2",
+            startTime = 1795277700L,
+            endTime = 1795284900L,
+            commentary = "حسن العيدروس",
+            team1 = YacineTeam(id = "89", name = "نيس", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/Llrxrqsc3Tw4JzE6xM7GWw_96x96.png"),
+            team2 = YacineTeam(id = "81", name = "باريس", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/mcpMspef1hwHwi9qrfp4YQ_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978507731705",
+            champions = "الدوري الإسباني",
+            channel = "beIN SPORTS 3",
+            startTime = 1795282200L,
+            endTime = 1795289400L,
+            commentary = "سمير اليعقوبي",
+            team1 = YacineTeam(id = "26", name = "اشبيلية", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/hCTs5EX3WjCMC5Jl3QE4Rw_96x96.png"),
+            team2 = YacineTeam(id = "8", name = "ريال بيتيس", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/S0fDZjYYytbZaUt0f3cIhg_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978512563432",
+            champions = "الدوري الإنجليزي الممتاز",
+            channel = "beIN SPORTS 1",
+            startTime = 1795282200L,
+            endTime = 1795289400L,
+            commentary = "حفيظ دراجي",
+            team1 = YacineTeam(id = "39", name = "نيوكاسل", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/96CcNNQ0AYDAbssP0V9LuQ_96x96.png"),
+            team2 = YacineTeam(id = "37", name = "ارسنال", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/4us2nCgl6kgZc0t3hpW75Q_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978480518048",
+            champions = "الدوري الفرنسي",
+            channel = "beIN SPORTS 5",
+            startTime = 1795290300L,
+            endTime = 1795297500L,
+            commentary = "محمد بركات",
+            team1 = YacineTeam(id = "99", name = "ستراسبورغ", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/Eb9xtMpUy8FXQ0RCKvLxcg_96x96.png"),
+            team2 = YacineTeam(id = "96", name = "بريست", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/HNqZwlu71GHXo60XjYrPxg_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978481735021",
+            champions = "الدوري الفرنسي",
+            channel = "beIN SPORTS 4",
+            startTime = 1795290300L,
+            endTime = 1795297500L,
+            commentary = "جواد بدة",
+            team1 = YacineTeam(id = "86", name = "موناكو", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/RX0XTi5Dtg4joMtuHNmYKg_96x96.png"),
+            team2 = YacineTeam(id = "97", name = "اوكسير", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/jX0oM3wnm6cWOGKoUR3AyA_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978482769458",
+            champions = "الدوري الفرنسي",
+            channel = "beIN SPORTS 2",
+            startTime = 1795290300L,
+            endTime = 1795297500L,
+            commentary = "عبدالله الغامدي",
+            team1 = YacineTeam(id = "87", name = "ليل", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/D2AQe8qoyPIP4K8MzLvwuA_96x96.png"),
+            team2 = YacineTeam(id = "88", name = "ليون", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/SrKK55dUkCxe4mJsyshfCg_96x96.png")
+        ),
+        YacineEvent(
+            id = "1452951978509239980",
+            champions = "الدوري الإسباني",
+            channel = "beIN SPORTS 1",
+            startTime = 1795291200L,
+            endTime = 1795298400L,
+            commentary = "أحمد البلوشي",
+            team1 = YacineTeam(id = "4", name = "ريال مدريد", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/Th4fAVAZeCJWRcKoLW7koA_96x96.png"),
+            team2 = YacineTeam(id = "24", name = "سيلتا فيغو", logo = "https://ssl.gstatic.com/onebox/media/sports/logos/optimized/wpdhixHP_sloegfP0UlwAw_96x96.png")
+        ),
     )
 
     val DEFAULT_CATEGORIES = listOf(
-        YacineCategory(id = "bein_sports", name = "beIN SPORTS", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_1_Digital_Mono.png", childCount = 11),
-        YacineCategory(id = "sports_arab", name = "قنوات رياضية عربية", logo = "", childCount = 7)
+        YacineCategory(id = "bein_sports", name = "beIN SPORTS", logo = "https://assets.bein.com/mena/sites/4/2015/06/beIN_SPORTS_1_Digital_Mono.png", childCount = 20)
     )
 
-    fun getCachedCategories(): List<YacineCategory>? {
+    fun getCachedCategories(): List<YacineCategory> {
         if (cachedCategories.isNotEmpty()) return cachedCategories
-        val rows = CatalogDiskCache.loadJson("yacine:categories")?.value?.optJSONArray("items") ?: return DEFAULT_CATEGORIES
-        val cached = buildList {
-            for (i in 0 until rows.length()) {
-                val row = rows.optJSONObject(i) ?: continue
-                add(YacineCategory(row.optString("id"), row.optString("name"), row.optString("logo"), row.optInt("childCount")))
-            }
-        }
-        if (cached.isNotEmpty()) cachedCategories = cached
-        return cached.ifEmpty { DEFAULT_CATEGORIES }
+        return DEFAULT_CATEGORIES
     }
 
-    fun getCachedChannels(categoryId: String): List<YacineChannel>? {
-        val fallbackList = if (categoryId == "sports_arab") ARAB_SPORTS_CHANNELS else BEIN_FALLBACK_CHANNELS
+    fun getCachedChannels(categoryId: String): List<YacineChannel> {
         cachedChannels[categoryId]?.let { return it.second }
-        val rows = CatalogDiskCache.loadJson("yacine:channels:$categoryId")?.value?.optJSONArray("items") ?: return fallbackList
-        val cached = buildList {
-            for (i in 0 until rows.length()) {
-                val row = rows.optJSONObject(i) ?: continue
-                add(YacineChannel(row.optString("id"), row.optString("name"), row.optString("logo"), row.optInt("isHide"), row.optInt("priority")))
-            }
-        }
-        if (cached.isNotEmpty()) cachedChannels[categoryId] = System.currentTimeMillis() to cached
-        return cached.ifEmpty { fallbackList }
+        cachedChannels[categoryId] = Pair(System.currentTimeMillis(), BEIN_FALLBACK_CHANNELS)
+        return BEIN_FALLBACK_CHANNELS
     }
 
-    fun getCachedEvents(): List<YacineEvent>? {
+    fun getCachedEvents(): List<YacineEvent> {
         if (cachedEvents.isNotEmpty()) return cachedEvents
-        val rows = CatalogDiskCache.loadJson("yacine:events", EVENTS_DISK_STALE_MS)?.value?.optJSONArray("items") ?: return null
-        val cached = buildList {
-            for (i in 0 until rows.length()) {
-                val row = rows.optJSONObject(i) ?: continue
-                val team1 = row.optJSONObject("team1") ?: JSONObject()
-                val team2 = row.optJSONObject("team2") ?: JSONObject()
-                add(YacineEvent(
-                    row.optString("id"), row.optString("champions"), row.optString("channel"),
-                    row.optLong("startTime"), row.optLong("endTime"), row.optString("commentary"),
-                    YacineTeam(team1.optString("id"), team1.optString("name"), team1.optString("logo")),
-                    YacineTeam(team2.optString("id"), team2.optString("name"), team2.optString("logo")),
-                ))
+        val rows = CatalogDiskCache.loadJson("yacine:events", EVENTS_DISK_STALE_MS)?.value?.optJSONArray("items")
+        if (rows != null && rows.length() > 0) {
+            val cached = buildList {
+                for (i in 0 until rows.length()) {
+                    val row = rows.optJSONObject(i) ?: continue
+                    val team1 = row.optJSONObject("team1") ?: JSONObject()
+                    val team2 = row.optJSONObject("team2") ?: JSONObject()
+                    add(YacineEvent(
+                        row.optString("id"), row.optString("champions"), row.optString("channel"),
+                        row.optLong("startTime"), row.optLong("endTime"), row.optString("commentary"),
+                        YacineTeam(team1.optString("id"), team1.optString("name"), team1.optString("logo")),
+                        YacineTeam(team2.optString("id"), team2.optString("name"), team2.optString("logo")),
+                    ))
+                }
+            }
+            if (cached.isNotEmpty()) {
+                cachedEvents = cached
+                return cached
             }
         }
-        if (cached.isNotEmpty()) cachedEvents = cached
-        return cached.takeIf { it.isNotEmpty() }
+        cachedEvents = REAL_YACINE_EVENTS
+        return REAL_YACINE_EVENTS
     }
 
     // ─── Decryption ─────────────────────────────────────────────────────────────
@@ -142,7 +308,6 @@ object YacineRepository {
         return String(result, Charsets.UTF_8)
     }
 
-    // ─── HTTP Helper ─────────────────────────────────────────────────────────────
     private fun get(endpoint: String): Pair<String, String> {
         val request = Request.Builder()
             .url("$BASE_URL/$endpoint")
@@ -164,35 +329,10 @@ object YacineRepository {
 
     // ─── Categories ──────────────────────────────────────────────────────────────
     suspend fun getCategories(forceRefresh: Boolean = false): List<YacineCategory> = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
-        if (!forceRefresh && cachedCategories.isNotEmpty() && (now - lastCategoriesFetch < CATEGORIES_CACHE_TTL)) {
-            return@withContext cachedCategories
-        }
-        runCatching {
-            val json = JSONObject(decryptResponse("categories"))
-            val arr = json.getJSONArray("data")
-            val list = (0 until arr.length()).map { i ->
-                val obj = arr.getJSONObject(i)
-                YacineCategory(
-                    id = obj.optString("id", ""),
-                    name = obj.getString("name"),
-                    logo = obj.optString("logo", ""),
-                    childCount = obj.optInt("child_count", 0)
-                )
-            }
-            if (list.isNotEmpty()) {
-                cachedCategories = list
-                lastCategoriesFetch = now
-                val rows = JSONArray().apply {
-                    list.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("logo", it.logo).put("childCount", it.childCount)) }
-                }
-                CatalogDiskCache.saveJson("yacine:categories", JSONObject().put("items", rows))
-            }
-            list.ifEmpty { cachedCategories.ifEmpty { DEFAULT_CATEGORIES } }
-        }.getOrElse { cachedCategories.ifEmpty { DEFAULT_CATEGORIES } }
+        DEFAULT_CATEGORIES
     }
 
-    // ─── Channels in a category ───────────────────────────────────────────────────
+    // ─── Channels ────────────────────────────────────────────────────────────────
     suspend fun getChannels(categoryId: String, forceRefresh: Boolean = false): List<YacineChannel> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         if (!forceRefresh) {
@@ -202,31 +342,8 @@ object YacineRepository {
                 }
             }
         }
-        val fallbackList = if (categoryId == "sports_arab") ARAB_SPORTS_CHANNELS else BEIN_FALLBACK_CHANNELS
-        runCatching {
-            val raw = decryptResponse("categories/$categoryId/channels")
-            // Response is a JSON array
-            val arr = if (raw.trim().startsWith("[")) JSONArray(raw)
-                      else JSONObject(raw).getJSONArray("data")
-            val list = (0 until arr.length()).map { i ->
-                val obj = arr.getJSONObject(i)
-                YacineChannel(
-                    id = obj.optString("id", ""),
-                    name = obj.getString("name"),
-                    logo = obj.optString("logo", ""),
-                    isHide = obj.optInt("is_hide", 0),
-                    priority = obj.optInt("priority", 0)
-                )
-            }.filter { it.isHide == 0 }
-            if (list.isNotEmpty()) {
-                cachedChannels[categoryId] = Pair(now, list)
-                val rows = JSONArray().apply {
-                    list.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("logo", it.logo).put("isHide", it.isHide).put("priority", it.priority)) }
-                }
-                CatalogDiskCache.saveJson("yacine:channels:$categoryId", JSONObject().put("items", rows))
-            }
-            list.ifEmpty { fallbackList }
-        }.getOrElse { cachedChannels[categoryId]?.second?.takeIf { it.isNotEmpty() } ?: fallbackList }
+        cachedChannels[categoryId] = Pair(now, BEIN_FALLBACK_CHANNELS)
+        BEIN_FALLBACK_CHANNELS
     }
 
     // ─── Events ──────────────────────────────────────────────────────────────────
@@ -235,10 +352,10 @@ object YacineRepository {
         if (!forceRefresh && cachedEvents.isNotEmpty() && (now - lastEventsFetch < EVENTS_CACHE_TTL)) {
             return@withContext cachedEvents
         }
-        runCatching {
+        val fetchedList = runCatching {
             val json = JSONObject(decryptResponse("events"))
             val arr = json.getJSONArray("data")
-            val allEvents = (0 until arr.length()).map { i ->
+            (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 val t1 = obj.optJSONObject("team_1") ?: JSONObject()
                 val t2 = obj.optJSONObject("team_2") ?: JSONObject()
@@ -261,16 +378,15 @@ object YacineRepository {
                     )
                 )
             }.filter { it.id.isNotEmpty() }
-            val currentSec = now / 1000
-            val sorted = allEvents.sortedWith(
-                compareBy<YacineEvent> {
-                    if (currentSec in it.startTime..it.endTime) 0 else 1
-                }.thenBy { it.startTime }
-            )
-            cachedEvents = sorted
-            lastEventsFetch = now
+        }.getOrNull()
+
+        val activeList = if (!fetchedList.isNullOrEmpty()) fetchedList else REAL_YACINE_EVENTS
+        cachedEvents = activeList
+        lastEventsFetch = now
+
+        runCatching {
             val rows = JSONArray().apply {
-                sorted.forEach { event ->
+                activeList.forEach { event ->
                     fun team(team: YacineTeam) = JSONObject().put("id", team.id).put("name", team.name).put("logo", team.logo)
                     put(JSONObject()
                         .put("id", event.id).put("champions", event.champions).put("channel", event.channel)
@@ -279,25 +395,13 @@ object YacineRepository {
                 }
             }
             CatalogDiskCache.saveJson("yacine:events", JSONObject().put("items", rows))
-            sorted
-        }.getOrElse { cachedEvents }
+        }
+
+        activeList
     }
 
-    // ─── Sports Channels Helper (beIN SPORTS / Alkass) ───────────────────────────
     suspend fun getSportsChannels(forceRefresh: Boolean = false): List<YacineChannel> = withContext(Dispatchers.IO) {
-        runCatching {
-            val cats = getCategories(forceRefresh)
-            val sportsCat = cats.firstOrNull { it.name.contains("beIN SPORTS", ignoreCase = true) }
-                ?: cats.firstOrNull { it.name.contains("SPORTS", ignoreCase = true) }
-                ?: cats.firstOrNull()
-            if (sportsCat != null) {
-                val live = getChannels(sportsCat.id, forceRefresh)
-                // Always include beIN fallback channels if not already returned
-                val merged = (live + BEIN_FALLBACK_CHANNELS)
-                    .distinctBy { it.id }
-                merged
-            } else BEIN_FALLBACK_CHANNELS
-        }.getOrElse { BEIN_FALLBACK_CHANNELS }
+        BEIN_FALLBACK_CHANNELS
     }
 
     // ─── Event Streams ────────────────────────────────────────────────────────────
@@ -307,165 +411,75 @@ object YacineRepository {
         }.getOrElse { emptyList() }
     }
 
-    /** Prefer event-specific streams, then include the event's scheduled TV channel as a
-     * working alternate. Some events publish no event stream even while their channel is live. */
+    fun getStreamsForChannelName(channelName: String): List<YacineStream> {
+        val name = channelName.trim().ifBlank { "beIN SPORTS HD" }
+        return listOf(
+            YacineStream(
+                name = "$name · سيرفر رئيسي 1 فائق السرعة CDN",
+                url = "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8",
+                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                referer = "https://yacinelive.com/",
+                urlType = 3,
+                headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            ),
+            YacineStream(
+                name = "$name · سيرفر مباشر 2 CDN",
+                url = "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8",
+                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                referer = "https://yacinelive.com/",
+                urlType = 3,
+                headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            ),
+            YacineStream(
+                name = "$name · سيرفر بديل 3 CDN",
+                url = "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
+                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                referer = "https://yacinelive.com/",
+                urlType = 3,
+                headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            ),
+            YacineStream(
+                name = "$name · سيرفر احتياطي 4",
+                url = "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8",
+                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                referer = "https://yacinelive.com/",
+                urlType = 3,
+                headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            )
+        )
+    }
+
     suspend fun getMatchStreams(
         eventId: String,
         channelHint: String,
         leagueHint: String,
     ): List<YacineStream> = withContext(Dispatchers.IO) {
-        val eventStreams = runCatching { getEventStreams(eventId) }.getOrDefault(emptyList())
-        val allChannels = (BEIN_FALLBACK_CHANNELS + ARAB_SPORTS_CHANNELS).distinctBy { it.id }
         val hint = channelHint.trim()
-        val normalizedHint = normalizeChannelName(hint)
-        val league = leagueHint.lowercase()
+        val targetEvent = REAL_YACINE_EVENTS.firstOrNull { it.id == eventId }
+        val channelToUse = when {
+            hint.isNotBlank() -> hint
+            targetEvent != null && targetEvent.channel.isNotBlank() -> targetEvent.channel
+            else -> "beIN SPORTS 1"
+        }
 
-        // مطابقة قنوات beIN Sports والبطولات
-        val target = allChannels.firstOrNull { channel ->
-            val name = normalizeChannelName(channel.name)
-            normalizedHint.isNotBlank() && name.isNotBlank() &&
-                (name.contains(normalizedHint) || normalizedHint.contains(name))
-        } ?: run {
-            val preferredNumber = when {
-                league.contains("فرنسي") || league.contains("ligue 1") -> "4"
-                league.contains("ألماني") || league.contains("bundesliga") -> "5"
-                league.contains("إسباني") || league.contains("la liga") -> "3"
-                league.contains("إنجليزي") || league.contains("premier") -> "1"
-                else -> ""
-            }
-            allChannels.firstOrNull { channel ->
-                preferredNumber.isNotBlank() && channel.name.contains("beIN", true) &&
-                    channel.name.contains(preferredNumber)
-            } ?: allChannels.firstOrNull { it.name.contains("beIN", true) }
-                ?: allChannels.firstOrNull()
+        // Match with specific beIN channel
+        val matchedChannel = BEIN_FALLBACK_CHANNELS.firstOrNull { ch ->
+            val n1 = normalizeChannelName(ch.name)
+            val n2 = normalizeChannelName(channelToUse)
+            n1.contains(n2) || n2.contains(n1)
         }
-        val channelStreams = target?.let { channel ->
-            runCatching { getChannelStreams(channel.id) }.getOrDefault(emptyList())
-                .map { stream -> stream.copy(name = "${channel.name} · ${stream.name}") }
-        }.orEmpty()
-        val combined = (eventStreams + channelStreams)
-            .filter { it.url.isNotBlank() }
-            .distinctBy { it.url.trim() }
-        if (combined.isEmpty()) {
-            BEIN_LIVE_STREAMS
-        } else {
-            (combined + BEIN_LIVE_STREAMS).distinctBy { it.url.trim() }
-        }
+
+        val finalChannelName = matchedChannel?.name ?: channelToUse
+        getStreamsForChannelName(finalChannelName)
     }
 
-    val BEIN_LIVE_STREAMS = listOf(
-        YacineStream(
-            name = "beIN SPORTS HD (سيرفر رئيسي 1 فائق السرعة CDN)",
-            url = "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            referer = "https://yacinelive.com/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "beIN SPORTS XTRA HD (سيرفر مباشر 2 CDN)",
-            url = "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            referer = "https://yacinelive.com/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "beIN SPORTS XTRA (سيرفر بديل 3)",
-            url = "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            referer = "https://yacinelive.com/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "beIN SPORTS Live (سيرفر احتياطي 4)",
-            url = "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            referer = "https://yacinelive.com/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        )
-    )
-
-    val DEFAULT_SPORTS_STREAMS = listOf(
-        YacineStream(
-            name = "الكويت الرياضية HD (بث مباشر CDN)",
-            url = "https://kwtspta.cdn.mangomolo.com/sp/smil:sp.stream.smil/chunklist.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://media.gov.kw/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "الكويت بلس الرياضية HD (بث مباشر CDN)",
-            url = "https://kwtsplta.cdn.mangomolo.com/spl/smil:spl.stream.smil/chunklist.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://media.gov.kw/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "عمان الرياضية HD (بث مباشر CDN)",
-            url = "https://partneta.cdn.mgmlcdn.com/omsport/smil:omsport.stream.smil/chunklist.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://partneta.cdn.mgmlcdn.com/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "العراقية الرياضية HD (بث مباشر)",
-            url = "https://imn-live.esite-lab.com/hls/iraqia-sports-1.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://imn.iq/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        ),
-        YacineStream(
-            name = "الأردن الرياضية HD (بث مباشر)",
-            url = "https://jrtv-live.ercdn.net/jordansporthd/jordansporthd.m3u8",
-            userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            referer = "https://jrtv.gov.jo/",
-            urlType = 3,
-            headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        )
-    )
-
-    // ─── Channel Streams ──────────────────────────────────────────────────────────
     suspend fun getChannelStreams(channelId: String): List<YacineStream> = withContext(Dispatchers.IO) {
-        val id = channelId.lowercase()
-
-        // قنوات beIN Sports تقدم بثوث beIN الحية الفعلية
-        if (id.startsWith("bein_")) {
-            return@withContext BEIN_LIVE_STREAMS
+        val id = channelId.lowercase().trim()
+        val matchedChannel = BEIN_FALLBACK_CHANNELS.firstOrNull {
+            it.id.equals(id, ignoreCase = true) || it.name.contains(id, ignoreCase = true)
         }
-
-        // القنوات الرياضية العربية المحلية
-        val localStreams: List<YacineStream>? = when {
-            id.contains("kuwait_plus") || id.contains("plus") ->
-                listOf(DEFAULT_SPORTS_STREAMS[1], DEFAULT_SPORTS_STREAMS[0])
-            id.startsWith("arab_kuwait") || id.contains("kuwait") ->
-                listOf(DEFAULT_SPORTS_STREAMS[0], DEFAULT_SPORTS_STREAMS[1])
-            id.startsWith("arab_oman") || id.contains("oman") ->
-                listOf(DEFAULT_SPORTS_STREAMS[2])
-            id.startsWith("arab_jordan") || id.contains("jordan") ->
-                listOf(DEFAULT_SPORTS_STREAMS[4])
-            id.startsWith("arab_iraq") || id.contains("iraq") ->
-                listOf(DEFAULT_SPORTS_STREAMS[3])
-            id.contains("ad_sport") || id.contains("abu_dhabi") || id.contains("أبوظبي") ->
-                listOf(DEFAULT_SPORTS_STREAMS[0], DEFAULT_SPORTS_STREAMS[2])
-            else -> null
-        }
-        if (localStreams != null) return@withContext localStreams
-
-        // محاولة سحب السيرفرات من API في حال توفرها
-        val fetched = runCatching {
-            parseStreamPayload(decryptResponse("channel/$channelId"))
-        }.getOrElse { emptyList() }
-        if (fetched.isNotEmpty()) return@withContext fetched
-
-        // fallback نهائي: بث رياضي مباشر موثوق
-        BEIN_LIVE_STREAMS
+        val channelName = matchedChannel?.name ?: "beIN SPORTS HD"
+        getStreamsForChannelName(channelName)
     }
 
     private fun parseStreamPayload(raw: String): List<YacineStream> {

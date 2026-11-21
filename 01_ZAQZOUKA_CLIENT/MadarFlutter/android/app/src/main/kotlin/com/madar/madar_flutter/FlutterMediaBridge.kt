@@ -306,24 +306,18 @@ class FlutterMediaBridge(context: Context) {
                 resolved?.takeIf(::isAllowedResolverInput)
             }
         }
-        "live.events.cached" -> (YacineRepository.getCachedEvents() ?: emptyList()).map { it.toMap() }
+        "live.events.cached" -> YacineRepository.getCachedEvents().map { it.toMap() }
         "live.events.fetch" -> YacineRepository.getEvents(forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
-        "live.categories.cached" -> (YacineRepository.getCachedCategories() ?: emptyList()).map { it.toMap() }
+        "live.categories.cached" -> YacineRepository.getCachedCategories().map { it.toMap() }
         "live.categories.fetch" -> YacineRepository.getCategories(forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
         "live.channels.cached" -> {
             val catId = call.argument<String>("categoryId").orEmpty()
-            val fallbackList = if (catId == "sports_arab") YacineRepository.ARAB_SPORTS_CHANNELS else YacineRepository.BEIN_FALLBACK_CHANNELS
-            val cached = YacineRepository.getCachedChannels(catId) ?: emptyList()
-            val result = if (cached.isEmpty()) fallbackList else cached
-            result.map { it.toMap() }
+            YacineRepository.getCachedChannels(catId).map { it.toMap() }
         }
         "live.channels.fetch" -> {
             val catId = call.argument<String>("categoryId").orEmpty()
             val force = call.argument<Boolean>("force") ?: false
-            val fallbackList = if (catId == "sports_arab") YacineRepository.ARAB_SPORTS_CHANNELS else YacineRepository.BEIN_FALLBACK_CHANNELS
-            val fetched = YacineRepository.getChannels(catId, forceRefresh = force)
-            val merged = (fetched + fallbackList).distinctBy { it.id }
-            merged.map { it.toMap() }
+            YacineRepository.getChannels(catId, forceRefresh = force).map { it.toMap() }
         }
         "live.eventStreams" -> YacineRepository.getEventStreams(call.argument<String>("id").orEmpty()).map { it.toMap() }
         "live.matchStreams" -> YacineRepository.getMatchStreams(

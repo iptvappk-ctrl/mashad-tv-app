@@ -79,3 +79,5 @@ constants.txt
 Boot/
 $Recycle.Bin/
 .dart_tool/
+*.hprof
+

@@ -166,7 +166,7 @@ class _SportsPageState extends State<SportsPage> {
           ],
         ),
       ),
-      if (_section == 'channels' && _categories.isNotEmpty)
+      if (_section == 'channels' && _categories.length > 1)
         SizedBox(
           height: 45,
           child: ListView.separated(
@@ -851,7 +851,13 @@ class _SportsPageState extends State<SportsPage> {
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => _chooseStreams(id, _matchTitle(event), true),
+        onTap: () => _chooseStreams(
+          id,
+          _matchTitle(event),
+          true,
+          channelOverride: _text(event['channel']),
+          leagueOverride: _text(event['champions']),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -871,12 +877,19 @@ class _SportsPageState extends State<SportsPage> {
                   else
                     _eventScheduledBadge(start),
                   const SizedBox(width: 8),
-                  Text(
-                    _text(event['channel']),
-                    style: const TextStyle(
-                      color: _brick,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _brick.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      _text(event['channel']).ifEmpty('beIN SPORTS'),
+                      style: const TextStyle(
+                        color: _brick,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -910,6 +923,21 @@ class _SportsPageState extends State<SportsPage> {
                 ],
               ),
               const SizedBox(height: 8),
+              if (_text(event['commentary']).isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.mic_rounded, size: 13, color: _muted),
+                      const SizedBox(width: 4),
+                      Text(
+                        'تعليق: ${_text(event['commentary'])}',
+                        style: const TextStyle(color: _muted, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
               if (hasResult)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 7),
@@ -934,9 +962,20 @@ class _SportsPageState extends State<SportsPage> {
                   ),
                 )
               else
-                const Text(
-                  'اضغط لاختيار سيرفر البث',
-                  style: TextStyle(color: _muted, fontSize: 11),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.play_circle_fill_rounded, size: 14, color: _brick),
+                    const SizedBox(width: 5),
+                    Text(
+                      'شاهد عبر ${_text(event['channel']).ifEmpty('beIN SPORTS')} 🔴',
+                      style: const TextStyle(
+                        color: _brick,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
             ],
           ),
