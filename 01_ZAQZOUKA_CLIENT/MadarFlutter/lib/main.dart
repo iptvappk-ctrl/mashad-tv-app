@@ -187,24 +187,6 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
           return;
         }
       }
-
-      if (playerUpdateAvailable) {
-        final pCode = (update['playerVersionCode'] as num?)?.toInt();
-        if (pCode != null && pCode > 0 && pCode != _shownPlayerVersionCode) {
-          _shownPlayerVersionCode = pCode;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              NativeBridge.promptPlayerUpdate(
-                context,
-                apkUrl: update['playerApkUrl'] as String?,
-                sha256: update['playerSha256'] as String?,
-                versionName: update['playerVersionName'] as String?,
-                releaseNotes: update['playerReleaseNotes'] as String?,
-              );
-            }
-          });
-        }
-      }
     } on PlatformException catch (_) {
     } catch (_) {
     }
