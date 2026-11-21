@@ -11,6 +11,7 @@ interface SystemState {
 }
 
 const STATUS_ENDPOINTS = [
+  "https://zaqzouka-dashboard-api.vercel.app/api/system_control",
   "/api/status",
   "/status/system.json",
   "https://zaqzouka-dashboard-api.vercel.app/api/status",

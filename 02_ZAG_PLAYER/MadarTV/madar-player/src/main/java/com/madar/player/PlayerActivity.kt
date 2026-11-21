@@ -102,7 +102,11 @@ import com.google.android.gms.cast.framework.CastButtonFactory
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -143,6 +147,58 @@ class PlayerActivity : ComponentActivity() {
     private val currentIsLive = mutableStateOf(false)
     private val currentBackupSources = androidx.compose.runtime.mutableStateListOf<PlaybackSource>()
     private var launchedFromExternalIntent = false
+    private val isPlayerBlocked = mutableStateOf(false)
+    private val blockMessage = mutableStateOf("عفواً، المشغل متوقف حالياً للصيانة.")
+    private var statusPollingJob: Job? = null
+    private val activityScope = CoroutineScope(Dispatchers.Main)
+
+    private fun checkSystemStatus() {
+        activityScope.launch(Dispatchers.IO) {
+            val endpoints = listOf(
+                "https://zaqzouka-dashboard-api.vercel.app/api/system_control",
+                "https://zaqzouka-dashboard-api.vercel.app/api/status"
+            )
+            for (endpoint in endpoints) {
+                try {
+                    val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 3000
+                        readTimeout = 3000
+                        requestMethod = "GET"
+                        setRequestProperty("Accept", "application/json")
+                        setRequestProperty("Cache-Control", "no-cache")
+                    }
+                    if (conn.responseCode == 200) {
+                        val text = conn.inputStream.bufferedReader().use { it.readText() }
+                        val json = JSONObject(text)
+                        val status = json.optString("status", "active").lowercase()
+                        val msg = json.optString("message", "عفواً، المشغل متوقف حالياً للصيانة.")
+                        val comps = json.optJSONObject("components")
+                        val playerEnabled = comps?.optBoolean("player_enabled", true) ?: true
+
+                        withContext(Dispatchers.Main) {
+                            if (status == "wiped" || status == "frozen" || !playerEnabled) {
+                                isPlayerBlocked.value = true
+                                blockMessage.value = msg
+                            } else {
+                                isPlayerBlocked.value = false
+                            }
+                        }
+                        break
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun startStatusPolling() {
+        statusPollingJob?.cancel()
+        statusPollingJob = activityScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                checkSystemStatus()
+                delay(8000)
+            }
+        }
+    }
 
     private val openVideoLauncher = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetContent()
@@ -233,6 +289,8 @@ class PlayerActivity : ComponentActivity() {
 
         extractStreamFromIntent(intent)
 
+        startStatusPolling()
+
         if (isSupportedStream(currentStreamUrl.value)) {
             launchedFromExternalIntent = true
             enterFullscreen()
@@ -243,37 +301,21 @@ class PlayerActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                val url = currentStreamUrl.value
-                val isPlaying = isSupportedStream(url)
-
-                if (isPlaying) {
+                if (isPlayerBlocked.value) {
                     BackHandler {
-                        if (launchedFromExternalIntent) {
-                            finish()
-                        } else {
-                            currentStreamUrl.value = ""
-                            exitFullscreen()
-                        }
+                        finish()
                     }
+                    PlayerBlockedScreen(
+                        message = blockMessage.value,
+                        onRefresh = { checkSystemStatus() },
+                        onClose = { finish() }
+                    )
+                } else {
+                    val url = currentStreamUrl.value
+                    val isPlaying = isSupportedStream(url)
 
-                    PlayerScreen(
-                        streamUrl = url,
-                        title = currentTitle.value,
-                        userAgent = currentUserAgent.value,
-                        referer = currentReferer.value,
-                        streamHeaders = currentStreamHeaders.value,
-                        fallbackUrl = currentFallbackUrl.value,
-                        fallbackReferer = currentFallbackReferer.value,
-                        isLive = currentIsLive.value,
-                        backupSources = currentBackupSources,
-                        onSwitchStream = { next, nextUa, nextRef, nextHeaders ->
-                            Log.i("MadarPlayer", "switch host=${safeHost(currentStreamUrl.value)} -> ${safeHost(next)}")
-                            currentStreamUrl.value = next
-                            currentUserAgent.value = nextUa.ifBlank { currentUserAgent.value }
-                            currentReferer.value = nextRef.ifBlank { currentReferer.value }
-                            currentStreamHeaders.value = nextHeaders
-                        },
-                        onClose = {
+                    if (isPlaying) {
+                        BackHandler {
                             if (launchedFromExternalIntent) {
                                 finish()
                             } else {
@@ -281,23 +323,55 @@ class PlayerActivity : ComponentActivity() {
                                 exitFullscreen()
                             }
                         }
-                    )
-                } else {
-                    BackHandler {
-                        finish()
-                    }
 
-                    PlayerDashboardScreen(
-                        onPlay = { t, u, ua ->
-                            playStreamFromDashboard(title = t, url = u, userAgent = ua)
-                        },
-                        onPickLocalFile = {
-                            openVideoLauncher.launch("video/*")
+                        PlayerScreen(
+                            streamUrl = url,
+                            title = currentTitle.value,
+                            userAgent = currentUserAgent.value,
+                            referer = currentReferer.value,
+                            streamHeaders = currentStreamHeaders.value,
+                            fallbackUrl = currentFallbackUrl.value,
+                            fallbackReferer = currentFallbackReferer.value,
+                            isLive = currentIsLive.value,
+                            backupSources = currentBackupSources,
+                            onSwitchStream = { next, nextUa, nextRef, nextHeaders ->
+                                Log.i("MadarPlayer", "switch host=${safeHost(currentStreamUrl.value)} -> ${safeHost(next)}")
+                                currentStreamUrl.value = next
+                                currentUserAgent.value = nextUa.ifBlank { currentUserAgent.value }
+                                currentReferer.value = nextRef.ifBlank { currentReferer.value }
+                                currentStreamHeaders.value = nextHeaders
+                            },
+                            onClose = {
+                                if (launchedFromExternalIntent) {
+                                    finish()
+                                } else {
+                                    currentStreamUrl.value = ""
+                                    exitFullscreen()
+                                }
+                            }
+                        )
+                    } else {
+                        BackHandler {
+                            finish()
                         }
-                    )
+
+                        PlayerDashboardScreen(
+                            onPlay = { t, u, ua ->
+                                playStreamFromDashboard(title = t, url = u, userAgent = ua)
+                            },
+                            onPickLocalFile = {
+                                openVideoLauncher.launch("video/*")
+                            }
+                        )
+                    }
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        statusPollingJob?.cancel()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -4440,6 +4514,90 @@ private fun SavedStreamCard(
                 IconButton(onClick = onDelete) {
                     Text("🗑", fontSize = 14.sp)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayerBlockedScreen(
+    message: String,
+    onRefresh: () -> Unit,
+    onClose: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF08080C)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(32.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xFF14141E))
+                .border(1.5.dp, Color(0xFFD4AF37).copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+                .padding(horizontal = 24.dp, vertical = 36.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFD4AF37).copy(alpha = 0.12f))
+                    .border(1.dp, Color(0xFFD4AF37).copy(alpha = 0.3f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "🔒", fontSize = 32.sp)
+            }
+            Spacer(modifier = Modifier.height(18.dp))
+            Surface(
+                color = Color(0xFFD4AF37).copy(alpha = 0.15f),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Text(
+                    text = "صيانة مؤقتة",
+                    color = Color(0xFFD4AF37),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "مشغل زقزوقة (ZAG Player)",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = message.ifBlank { "عفواً، المشغل متوقف حالياً للصيانة والتحديث." },
+                color = Color(0xFF9E9EB2),
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(28.dp))
+            Button(
+                onClick = onRefresh,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFD4AF37),
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text(text = "إعادة التحقق الآن", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onClose,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text(text = "إغلاق المشغل", fontSize = 14.sp)
             }
         }
     }

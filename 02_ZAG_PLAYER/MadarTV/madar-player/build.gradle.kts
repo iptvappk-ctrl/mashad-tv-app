@@ -1,10 +1,26 @@
-﻿import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+val releaseSigningProperties = Properties().apply {
+    val propertiesFile = project.file("keystore.properties")
+    if (propertiesFile.isFile) {
+        propertiesFile.inputStream().use { load(it) }
+    }
+}
+val releaseStoreFile = releaseSigningProperties.getProperty("storeFile")?.let { project.file(it) }
+val releaseStorePassword = releaseSigningProperties.getProperty("storePassword")
+val releaseKeyAlias = releaseSigningProperties.getProperty("keyAlias")
+val releaseKeyPassword = releaseSigningProperties.getProperty("keyPassword")
+val releaseSigningConfigured = releaseStoreFile?.isFile == true &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "com.madar.player"
@@ -19,13 +35,12 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            val key = file("release-key.jks")
-            if (key.exists()) {
-                storeFile = key
-                storePassword = "zaqzouka_release_pass"
-                keyAlias = "zaqzouka"
-                keyPassword = "zaqzouka_release_pass"
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = requireNotNull(releaseStoreFile)
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
             }
         }
     }
@@ -33,12 +48,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            val releaseKey = file("release-key.jks")
-            signingConfig = if (releaseKey.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -61,6 +71,16 @@ android {
 }
 
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
+
+tasks.configureEach {
+    if (name in setOf("validateSigningRelease", "signReleaseBundle", "bundleRelease", "assembleRelease")) {
+        doFirst {
+            check(releaseSigningConfigured) {
+                "Release signing is not configured. Add madar-player/keystore.properties and the matching release key."
+            }
+        }
+    }
+}
 
 dependencies {
     implementation(platform(libs.androidx.compose.bom))

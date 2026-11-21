@@ -19,6 +19,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _Cfg {
   // Live Endpoints (Dashboard API is where Master Control writes directly)
   static const vercelStatusUrls = [
+    'https://zaqzouka-dashboard-api.vercel.app/api/system_control',
     'https://zaqzouka-dashboard-api.vercel.app/api/status',
     'https://web-nu-teal-29.vercel.app/api/status',
     'https://zaqzouka-vercel-hub.vercel.app/api/status',
@@ -55,6 +56,7 @@ class SystemStatus {
   final int updatedAt;
   final int wipeTimestamp;
   final String source;
+  final Map<String, dynamic> components;
 
   const SystemStatus({
     required this.status,
@@ -62,15 +64,28 @@ class SystemStatus {
     required this.updatedAt,
     required this.wipeTimestamp,
     required this.source,
+    this.components = const {},
   });
 
   factory SystemStatus.fromJson(Map<String, dynamic> j, {String source = 'unknown'}) {
+    final comps = (j['components'] as Map<String, dynamic>?) ?? {};
+    // 🔑 KEY FIX: If app_enabled=false in components → treat as frozen
+    // This is what makes the Master Control kill switch actually work
+    String resolvedStatus = (j['status'] as String? ?? 'active').toLowerCase();
+    String resolvedMessage = j['message'] as String? ?? 'المنظومة نشطة';
+
+    if (resolvedStatus == 'active' && comps['app_enabled'] == false) {
+      resolvedStatus = 'frozen';
+      resolvedMessage = 'عفواً، التطبيق متوقف حالياً للصيانة.';
+    }
+
     return SystemStatus(
-      status: (j['status'] as String? ?? 'active').toLowerCase(),
-      message: j['message'] as String? ?? 'المنظومة نشطة',
+      status: resolvedStatus,
+      message: resolvedMessage,
       updatedAt: (j['updatedAt'] as num?)?.toInt() ?? 0,
       wipeTimestamp: (j['wipeTimestamp'] as num?)?.toInt() ?? 0,
       source: j['_source'] as String? ?? source,
+      components: comps,
     );
   }
 
@@ -80,6 +95,7 @@ class SystemStatus {
         updatedAt: 0,
         wipeTimestamp: 0,
         source: 'hardcoded_default',
+        components: {},
       );
 
   factory SystemStatus.frozen({String message = 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.'}) =>
@@ -89,6 +105,7 @@ class SystemStatus {
         updatedAt: DateTime.now().millisecondsSinceEpoch,
         wipeTimestamp: 0,
         source: 'cache_frozen',
+        components: {},
       );
 
   bool get isActive => status == 'active';
