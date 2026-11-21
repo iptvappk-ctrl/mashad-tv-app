@@ -632,7 +632,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                               style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: _textPrimary),
                             ),
                             Text(
-                              'المحتفظون بالتطبيق مقابل من قاموا بمسحه',
+                              'الأجهزة النشطة والمثبت لديها التطبيق حالياً',
                               style: TextStyle(fontSize: 11, color: _textMuted),
                             ),
                           ],
