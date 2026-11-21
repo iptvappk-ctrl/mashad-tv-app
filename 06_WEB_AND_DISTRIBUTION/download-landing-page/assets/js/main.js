@@ -1,295 +1,403 @@
 /**
- * ZAQZOUKA TV & ZAG PLAYER - OFFICIAL SCRIPT
- * High-performance vanilla JavaScript, zero external dependencies
+ * (c) 2026 Zaqzouka Network Architecture - All Rights Reserved.
+ * Protected under International Copyright & Digital Rights Protection Treaties.
+ * Unauthorized copying, reverse engineering, tampering, or distribution is strictly prohibited.
  */
+(function(_0xroot, _0xdoc) {
+  'use strict';
 
-document.addEventListener('DOMContentLoaded', () => {
-  initFaqAccordion();
-  initScrollEffects();
-  initLanguageSwitcher();
-  initQrModal();
-});
+  // ── Anti-DevTools & Anti-Inspection Shield ──
+  (function _0xshield() {
+    try {
+      // Disable Context Menu (Right Click)
+      _0xdoc.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        return false;
+      }, false);
 
-/* -------------------------------------------------------------
-   2. FAQ Accordion
-   ------------------------------------------------------------- */
-function initFaqAccordion() {
-  const items = document.querySelectorAll('.faq-item');
-  items.forEach(item => {
-    const question = item.querySelector('.faq-question');
-    const answer = item.querySelector('.faq-answer');
-    if (!question || !answer) return;
+      // Disable DevTools Key Combinations
+      _0xdoc.addEventListener('keydown', function(e) {
+        // F12
+        if (e.keyCode === 123) {
+          e.preventDefault();
+          return false;
+        }
+        // Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C
+        if (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) {
+          e.preventDefault();
+          return false;
+        }
+        // Ctrl+U (View Source), Ctrl+S (Save)
+        if (e.ctrlKey && (e.keyCode === 85 || e.keyCode === 83)) {
+          e.preventDefault();
+          return false;
+        }
+      }, false);
 
-    question.addEventListener('click', () => {
-      const isOpen = item.classList.contains('active');
+      // Console Warning Banner
+      const _0xcw = function() {
+        if (_0xroot.console) {
+          _0xroot.console.clear();
+          _0xroot.console.log(
+            '%c[!] نظام حماية زقزوقة المعتمد 2026\nهذه الصفحة مشفرة ومحمية بالكامل ضد الهندسة العكسية أو التلاعب.',
+            'color:#E5A958; font-size:16px; font-weight:bold; background:#141014; padding:12px; border:2px solid #B94E3C; border-radius:8px;'
+          );
+        }
+      };
+      _0xcw();
 
-      // Close all
-      items.forEach(i => {
-        i.classList.remove('active');
-        const a = i.querySelector('.faq-answer');
-        if (a) a.style.maxHeight = null;
+      // Anti-Debugging Guard (Pauses execution if DevTools is force-opened)
+      setInterval(function() {
+        (function() {
+          try {
+            return !function() {}['constructor']('debugger')();
+          } catch(e) { return false; }
+        })();
+      }, 3000);
+    } catch (_) {}
+  })();
+
+  // ── Encrypted Cloud Kill Switch & System Verifier ──
+  (function _0xverifier() {
+    const _0xkey = 126;
+    const _0xraw = [[22, 10, 10, 14, 13, 68, 81, 81, 4, 31, 15, 4, 17, 11, 21, 31, 83, 26, 31, 13, 22, 28, 17, 31, 12, 26, 83, 31, 14, 23, 80, 8, 27, 12, 29, 27, 18, 80, 31, 14, 14, 81, 31, 14, 23, 81, 13, 7, 13, 10, 27, 19, 33, 29, 17, 16, 10, 12, 17, 18], [22, 10, 10, 14, 13, 68, 81, 81, 4, 31, 15, 4, 17, 11, 21, 31, 83, 8, 27, 12, 29, 27, 18, 83, 22, 11, 28, 80, 8, 27, 12, 29, 27, 18, 80, 31, 14, 14, 81, 31, 14, 23, 81, 13, 7, 13, 10, 27, 19, 33, 29, 17, 16, 10, 12, 17, 18]];
+    const _0xurls = _0xraw.map(arr => arr.map(c => String.fromCharCode(c ^ _0xkey)).join(''));
+
+    function _0xshowMaint(_0xmsg) {
+      if (_0xdoc.getElementById('zq-maintenance-overlay')) return;
+      _0xdoc.documentElement.style.overflow = 'hidden';
+      _0xdoc.body.style.overflow = 'hidden';
+
+      const _0xov = _0xdoc.createElement('div');
+      _0xov.id = 'zq-maintenance-overlay';
+      _0xov.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0E0B0E;z-index:9999999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Cairo,system-ui,sans-serif;direction:rtl;padding:20px;box-sizing:border-box;';
+      _0xov.innerHTML = `
+        <div style="text-align:center;max-width:520px;background:#141014;border:1px solid rgba(185,78,60,0.3);border-radius:24px;padding:48px 32px;box-shadow:0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(185,78,60,0.15);">
+          <div style="width:84px;height:84px;border-radius:50%;background:rgba(185,78,60,0.12);border:2px solid #B94E3C;display:flex;align-items:center;justify-content:center;margin:0 auto 24px;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#E5A958" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+          </div>
+          <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:rgba(185,78,60,0.15);border:1px solid rgba(185,78,60,0.4);border-radius:100px;margin-bottom:20px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#B94E3C;"></span>
+            <span style="color:#E5A958;font-size:13px;font-weight:700;">توقف مؤقت للصيانة</span>
+          </div>
+          <h1 style="color:#FFFFFF;font-size:24px;font-weight:800;margin:0 0 14px;letter-spacing:-0.5px;">الخدمة متوقفة مؤقتاً</h1>
+          <p style="color:#9E9A9E;font-size:15px;line-height:1.7;margin:0 0 28px;">${_0xmsg || 'نعمل حالياً على تحديثات شاملة وتطوير خوادم البث لضمان أفضل تجربة مشاهدة. سنعود للعمل قريباً جداً.'}</p>
+          <div style="color:#6E6A6E;font-size:12px;border-top:1px solid rgba(255,255,255,0.06);padding-top:20px;">
+            منظومة زقزوقة TV - الإدارة العليا
+          </div>
+        </div>
+      `;
+      if (_0xdoc.body) {
+        _0xdoc.body.appendChild(_0xov);
+      } else {
+        _0xdoc.addEventListener('DOMContentLoaded', () => _0xdoc.body.appendChild(_0xov));
+      }
+    }
+
+    async function _0xchk() {
+      for (const _0xu of _0xurls) {
+        try {
+          const _0xr = await fetch(_0xu, { cache: 'no-store' });
+          if (_0xr.ok) {
+            const _0xd = await _0xr.json();
+            if (!_0xd) continue;
+            const _0xs = (_0xd.status || 'active').toLowerCase();
+            const _0xc = _0xd.components || {};
+            const _0xon = _0xc.download_site_enabled !== false && _0xc.website_enabled !== false;
+
+            if (_0xs === 'frozen' || _0xs === 'wiped' || !_0xon) {
+              _0xshowMaint(_0xd.message);
+            } else {
+              const _0xel = _0xdoc.getElementById('zq-maintenance-overlay');
+              if (_0xel) _0xel.remove();
+              _0xdoc.documentElement.style.overflow = '';
+              _0xdoc.body.style.overflow = '';
+            }
+            return;
+          }
+        } catch (_) {}
+      }
+    }
+
+    _0xchk();
+    setInterval(_0xchk, 15000);
+  })();
+
+  // ── Interactive UI Components ──
+  _0xdoc.addEventListener('DOMContentLoaded', function() {
+    _0xfaq();
+    _0xscroll();
+    _0xlang();
+    _0xqr();
+  });
+
+  // FAQ
+  function _0xfaq() {
+    const _0xitems = _0xdoc.querySelectorAll('.faq-item');
+    _0xitems.forEach(_0xitem => {
+      const _0xq = _0xitem.querySelector('.faq-question');
+      const _0xa = _0xitem.querySelector('.faq-answer');
+      if (!_0xq || !_0xa) return;
+
+      _0xq.addEventListener('click', () => {
+        const _0xopen = _0xitem.classList.contains('active');
+        _0xitems.forEach(_0xi => {
+          _0xi.classList.remove('active');
+          const _0xans = _0xi.querySelector('.faq-answer');
+          if (_0xans) _0xans.style.maxHeight = null;
+        });
+        if (!_0xopen) {
+          _0xitem.classList.add('active');
+          _0xa.style.maxHeight = _0xa.scrollHeight + 'px';
+        }
       });
+    });
+  }
 
-      // Toggle current
-      if (!isOpen) {
-        item.classList.add('active');
-        answer.style.maxHeight = answer.scrollHeight + 'px';
+  // Scroll
+  function _0xscroll() {
+    const _0xhdr = _0xdoc.querySelector('.site-header');
+    const _0xmbar = _0xdoc.querySelector('.mobile-bottom-bar');
+    const _0xhero = _0xdoc.querySelector('.hero-section');
+
+    _0xroot.addEventListener('scroll', () => {
+      const _0xpos = _0xroot.scrollY;
+      if (_0xhdr) {
+        if (_0xpos > 40) _0xhdr.classList.add('scrolled');
+        else _0xhdr.classList.remove('scrolled');
+      }
+      if (_0xmbar && _0xhero) {
+        const _0xbottom = _0xhero.offsetTop + _0xhero.offsetHeight;
+        _0xmbar.style.display = (_0xpos > _0xbottom - 180) ? 'grid' : 'none';
       }
     });
-  });
-}
+  }
 
-/* -------------------------------------------------------------
-   3. Header & Sticky Mobile Bar Scroll Effects
-   ------------------------------------------------------------- */
-function initScrollEffects() {
-  const header = document.querySelector('.site-header');
-  const mobileBar = document.querySelector('.mobile-bottom-bar');
-  const hero = document.querySelector('.hero-section');
+  // Language Switcher
+  const _0xdict = {
+    ar: {
+      brandTag: 'منظومة البث السينمائي المتكاملة',
+      navHome: 'الرئيسية',
+      navApps: 'التطبيقات',
+      navHowTo: 'طريقة التثبيت',
+      navFeatures: 'المميزات',
+      navFaq: 'الأسئلة الشائعة',
+      btnFastDownload: 'تحميل مباشر',
+      heroBadge: 'الإصدار المعتمد 2026 — آمن 100% وخالٍ من الإعلانات',
+      heroTitle: 'عالمك الترفيهي بدون حدود مع <span class="highlight-brick">تطبيق زقزوقة</span> ومحرك <span class="highlight-gold">زاغ بلاير</span>',
+      heroDesc: 'منظومة متكاملة لمشاهدة آلاف الأفلام والمسلسلات الحصرية والقنوات التلفزيونية والرياضية الحية بأعلى جودة وسيرفرات فائقة السرعة بدون أي تقطيع أو اشتراكات.',
+      heroBtnApp: 'تحميل تطبيق زقزوقة TV',
+      heroBtnAppSub: 'v1.0.74 · حزمة APK مباشرة (53.4 MB)',
+      heroBtnPlayer: 'تحميل مشغل زاغ ZAG Player',
+      heroBtnPlayerSub: 'v1.1.28 · المحرك الأساسي (4.6 MB)',
+      trustVerified: 'مفحوص ونظيف 100%',
+      trustSmartTv: 'يدعم الهواتف وشاشات Smart TV',
+      trustNoBuffer: 'تقنية مانع التقطيع',
+      tabHome: 'الرئيسية',
+      tabSeries: 'المسلسلات والمواسم',
+      tabLive: 'البث المباشر',
+      appsTag: 'التحميل المباشر',
+      appsTitle: 'حمّل التطبيقين معاً لتجربة سينمائية كاملة',
+      appsDesc: 'تطبيق زقزوقة يمنحك مكتبة الأفلام والمسلسلات والبحث الذكي، ومشغل زاغ يتولى فك التشفير والتشغيل الفوري بدون أي استهلاك للموارد.',
+      app1Role: 'التطبيق الرئيسي',
+      app1Name: 'تطبيق زقزوقة TV الرسمي',
+      app1Desc: 'تصفح أكبر مكتبة مسلسلات وأفلام عربية وأجنبية بجودة فائقة وبثوث رياضية مباشرة مع إمكانية البحث والترجمة الفورية وتحديد قوائم المشاهدة المفضلة.',
+      app1Req: 'أندرويد 6.0 أو أحدث (هاتف أو TV)',
+      app1Pkg: 'com.madar.madar_flutter',
+      btnDownloadApp: 'تحميل تطبيق زقزوقة TV',
+      btnQrApp: 'رمز QR',
+      app2Role: 'محرك التشغيل وفك التشفير',
+      app2Name: 'مشغل زاغ بلاير ZAG Player',
+      app2Desc: 'المحرك البرمجي المسؤول عن تشغيل الفيديوهات وفك التشفير بأعلى كفاءة لضمان بث متواصل بدون تقطيع وبأقل استهلاك لذاكرة الجهاز والإنترنت.',
+      app2Req: 'أندرويد 5.0 أو أحدث (تلقائي التكامل)',
+      app2Pkg: 'com.madar.player',
+      btnDownloadPlayer: 'تحميل مشغل زاغ ZAG Player',
+      btnQrPlayer: 'رمز QR',
+      howTag: 'دليل الاستخدام',
+      howTitle: 'خطوات التشغيل في أقل من دقيقتين',
+      howDesc: 'اتبع هذه الخطوات البسيطة لتثبيت المنظومة بالكامل والبدء بالمشاهدة فوراً بدون تعقيد.',
+      step1Num: '01',
+      step1Title: 'تنزيل حزمتي APK',
+      step1Desc: 'اضغط على أزرار التحميل أعلاه لتنزيل تطبيقي (زقزوقة TV) و (زاغ بلاير) مباشرة إلى جهازك.',
+      step2Num: '02',
+      step2Title: 'السماح بالمصادر غير المعروفة',
+      step2Desc: 'عند فتح ملف الـ APK، اختر السماح بتثبيت التطبيقات من هذا المتصفح للمتابعة بكل أمان.',
+      step3Num: '03',
+      step3Title: 'تثبيت التطبيقين معاً',
+      step3Desc: 'قم بتثبيت التطبيق الرئيسي أولاً ثم مشغل زاغ بلاير ليكتمل اندماج محرك المشاهدة.',
+      step4Num: '04',
+      step4Title: 'فتح زقزوقة والاستمتاع',
+      step4Desc: 'شغّل تطبيق زقزوقة TV، وسيتولى التطبيق الاتصال تلقائياً بمشغل زاغ لبدء العرض فوراً.',
+      featTag: 'لماذا زقزوقة TV؟',
+      featTitle: 'أقوى المزايا المصممة لعشاق السينما',
+      f1Title: 'سيرفرات فائقة السرعة',
+      f1Desc: 'خوادم مجهزة بتقنيات CDN لضمان تشغيل الفيديو في أجزاء من الثانية دون أي انتظار.',
+      f2Title: 'بث 4K و Full HD',
+      f2Desc: 'صورة نقية وصوت محيطي نقي مع خيارات جودة متعددة تناسب كل سرعات الإنترنت.',
+      f3Title: 'دعم كامل لشاشات التلفزيون',
+      f3Desc: 'واجهة مصممة خصيصاً للتنقل السلس بالريموت كنترول على شاشات Android TV و TV Box.',
+      f4Title: 'تحديثات مستمرة وفورية',
+      f4Desc: 'إضافة الحلقات والأفلام الجديدة لحظة بلحظة فور عرضها عالمياً مع سيرفرات بديلة دائماً.',
+      f5Title: 'بدون إعلانات مزعجة',
+      f5Desc: 'تجربة مشاهدة صافية ومريحة خالية تماماً من النوافذ المنبثقة والإعلانات الإجبارية.',
+      f6Title: 'مجاني بالكامل',
+      f6Desc: 'بدون أي رسوم اشتراك، وبدون أي باقات مدفوعة، ومتاح لجميع أجهزتك بلا قيود.',
+      faqTag: 'الأسئلة الشائعة',
+      faqTitle: 'إجابات على أهم الاستفسارات',
+      q1: 'لماذا أحتاج لتثبيت تطبيقين (زقزوقة وزاغ)؟',
+      a1: 'تطبيق زقزوقة TV هو واجهة المكتبة والبحث واختيار الحلقات، بينما زاغ بلاير هو المحرك المادي المخصص لفك تشفير الفيديو دون استهلاك الذاكرة. فصلهما يمنحك سرعة استثنائية وخفة لا مثيل لها.',
+      q2: 'هل يعمل التطبيق على أجهزة التلفزيون و TV Box؟',
+      a2: 'نعم، التطبيقان متوافقان بنسبة 100% مع جميع شاشات التلفزيون الذكية التي تعمل بنظام Android TV وأجهزة Fire TV مع دعم كامل للريموت كنترول.',
+      q3: 'ماذا أفعل إذا ظهر تحذير أمني عند التثبيت؟',
+      a3: 'هذا إجراء روتيني طبيعي من أندرويد عند تثبيت تطبيقات من خارج متجر جوجل بلاي. التطبيقات آمنة ومفحوصة تماماً، فقط اضغط على الإعدادات ثم اسمح بالتثبيت.',
+      q4: 'كيف يمكنني تحديث التطبيق مستقبلاً؟',
+      a4: 'يحتوي تطبيق زقزوقة على نظام تحديث داخلي ذكي ينبهك فور صدور أي إصدار جديد، ويمكنك التحديث بنقرة واحدة دون أن تفقد أي من مفضلاتك.',
+      footerCopy: 'جميع الحقوق محفوظة © 2026 شبكة زقزوقة TV ومشغل زاغ الرسمي.',
+      qrTitle: 'امسح رمز QR للتحميل السريع',
+      qrDesc: 'امسح هذا الرمز بكاميرا هاتفك أو شاشتك الذكية لبدء التحميل المباشر فوراً:',
+      mobileBtnApp: 'تحميل تطبيق زقزوقة',
+      mobileBtnPlayer: 'مشغل زاغ بلاير'
+    },
+    en: {
+      brandTag: 'All-in-One Cinematic Streaming',
+      navHome: 'Home',
+      navApps: 'Apps',
+      navHowTo: 'How to Install',
+      navFeatures: 'Features',
+      navFaq: 'FAQ',
+      btnFastDownload: 'Direct Download',
+      heroBadge: 'Verified 2026 Edition — 100% Safe & Ad-Free',
+      heroTitle: 'Limitless Entertainment with <span class="highlight-brick">Zaqzouka TV</span> & <span class="highlight-gold">ZAG Player</span> Engine',
+      heroDesc: 'All-in-one ecosystem for thousands of exclusive movies, TV shows, and live sports in pristine 4K streaming with zero lag or subscriptions.',
+      heroBtnApp: 'Download Zaqzouka TV App',
+      heroBtnAppSub: 'v1.0.74 · Direct APK (53.4 MB)',
+      heroBtnPlayer: 'Download ZAG Player Engine',
+      heroBtnPlayerSub: 'v1.1.28 · Core Engine (4.6 MB)',
+      trustVerified: '100% Verified & Clean',
+      trustSmartTv: 'Smart TV & Android Box Ready',
+      trustNoBuffer: 'Anti-Buffering Engine',
+      tabHome: 'Home',
+      tabSeries: 'Series & Seasons',
+      tabLive: 'Live Channels',
+      appsTag: 'Direct Downloads',
+      appsTitle: 'Download Both Apps for Complete Experience',
+      appsDesc: 'Zaqzouka TV handles catalog browsing and smart search, while ZAG Player manages instant hardware video decoding with zero bloat.',
+      app1Role: 'Primary Streaming App',
+      app1Name: 'Zaqzouka TV Official App',
+      app1Desc: 'Browse Arabic and global movies, latest series, and sports streams with instant subtitle selection and personalized watchlists.',
+      app1Req: 'Android 6.0+ (Phone & Smart TV)',
+      app1Pkg: 'com.madar.madar_flutter',
+      btnDownloadApp: 'Download Zaqzouka TV',
+      btnQrApp: 'QR Code',
+      app2Role: 'Hardware Decoder Engine',
+      app2Name: 'ZAG Player Engine',
+      app2Desc: 'Ultra-lightweight engine handling video decoding with maximum hardware acceleration for zero buffering and minimal memory usage.',
+      app2Req: 'Android 5.0+ (Auto-Integrated)',
+      app2Pkg: 'com.madar.player',
+      btnDownloadPlayer: 'Download ZAG Player',
+      btnQrPlayer: 'QR Code',
+      howTag: 'Quick Start Guide',
+      howTitle: 'Get Started in Under Two Minutes',
+      howDesc: 'Follow these simple steps to install the full suite and begin streaming immediately.',
+      step1Num: '01',
+      step1Title: 'Download Both APK Packages',
+      step1Desc: 'Tap the direct download buttons above to get both Zaqzouka TV and ZAG Player onto your device.',
+      step2Num: '02',
+      step2Title: 'Allow Unknown Sources',
+      step2Desc: 'When launching the APK file, toggle permission to install from this browser source to proceed safely.',
+      step3Num: '03',
+      step3Title: 'Install Both Applications',
+      step3Desc: 'Complete installation for Zaqzouka TV first, then install ZAG Player for seamless engine integration.',
+      step4Num: '04',
+      step4Title: 'Launch Zaqzouka & Enjoy',
+      step4Desc: 'Open Zaqzouka TV; it connects automatically to ZAG Player to begin instant playback.',
+      featTag: 'Why Zaqzouka TV?',
+      featTitle: 'Engineered for Pure Cinema Performance',
+      f1Title: 'Ultra-Fast Servers',
+      f1Desc: 'Smart CDN edge caching ensures instant video playback with zero wait time.',
+      f2Title: '4K & Full HD Streams',
+      f2Desc: 'Crystal clear picture and surround audio with auto and manual bitrate options.',
+      f3Title: 'Full Android TV Compatibility',
+      f3Desc: 'Intuitive 10-foot interface navigation designed specifically for TV remotes.',
+      f4Title: 'Instant Content Updates',
+      f4Desc: 'New series episodes and blockbuster releases synced immediately upon global debut.',
+      f5Title: '100% Ad-Free Experience',
+      f5Desc: 'No annoying popups or forced banners, keeping your viewing experience undisturbed.',
+      f6Title: 'Free Forever',
+      f6Desc: 'No monthly subscriptions, no hidden paywalls, and no device quantity restrictions.',
+      faqTag: 'FAQ',
+      faqTitle: 'Frequently Asked Questions',
+      q1: 'Why do I need to install two apps (Zaqzouka TV and ZAG Player)?',
+      a1: 'Zaqzouka TV manages content discovery, catalog browsing, and episodes navigation. ZAG Player handles low-level hardware decoding. Decoupling them keeps the app extremely fast and responsive without memory bloat.',
+      q2: 'Does it work on Android TV and Fire TV?',
+      a2: 'Yes, both applications are fully tested and compatible with Android TV, TV boxes, and smart TVs with full remote navigation.',
+      q3: 'What if Android warns about an unknown source?',
+      a3: 'This is standard Android security for apps installed outside Google Play. Simply tap Settings and toggle Allow from this source. All binaries are verified and clean.',
+      q4: 'How do updates work?',
+      a4: 'Zaqzouka TV includes an in-app update detector that notifies you whenever a new build is released and updates with a single tap without resetting your favorites.',
+      footerCopy: 'All rights reserved © 2026 Zaqzouka TV Network & ZAG Player Official.',
+      qrTitle: 'Scan QR Code for Fast Download',
+      qrDesc: 'Scan this code with your phone camera or TV to start direct download:',
+      mobileBtnApp: 'Download Zaqzouka TV',
+      mobileBtnPlayer: 'ZAG Player'
+    }
+  };
 
-  window.addEventListener('scroll', () => {
-    const scrollPos = window.scrollY;
+  function _0xlang() {
+    const _0xbtn = _0xdoc.getElementById('lang-switch-btn');
+    if (!_0xbtn) return;
+    let _0xcurr = 'ar';
+    _0xbtn.addEventListener('click', () => {
+      _0xcurr = _0xcurr === 'ar' ? 'en' : 'ar';
+      _0xdoc.documentElement.lang = _0xcurr;
+      _0xdoc.documentElement.dir = _0xcurr === 'ar' ? 'rtl' : 'ltr';
+      _0xdoc.body.setAttribute('dir', _0xcurr === 'ar' ? 'rtl' : 'ltr');
+      const _0xlbl = _0xbtn.querySelector('.lang-label');
+      if (_0xlbl) _0xlbl.textContent = _0xcurr === 'ar' ? 'EN' : 'عربي';
+      const _0xd = _0xdict[_0xcurr];
+      _0xdoc.querySelectorAll('[data-i18n]').forEach(_0xel => {
+        const _0xk = _0xel.getAttribute('data-i18n');
+        if (_0xd[_0xk]) _0xel.innerHTML = _0xd[_0xk];
+      });
+      _0xdoc.querySelectorAll('.faq-item.active .faq-answer').forEach(_0xans => {
+        _0xans.style.maxHeight = _0xans.scrollHeight + 'px';
+      });
+    });
+  }
 
-    if (header) {
-      if (scrollPos > 40) {
-        header.classList.add('scrolled');
-      } else {
-        header.classList.remove('scrolled');
-      }
+  // QR Modal
+  function _0xqr() {
+    const _0xm = _0xdoc.getElementById('qr-modal');
+    const _0xcbtn = _0xdoc.querySelector('.modal-close-btn');
+    const _0xqrbtns = _0xdoc.querySelectorAll('.btn-card-qr');
+    const _0xtargetLbl = _0xdoc.getElementById('qr-target-filename');
+    const _0xwrap = _0xdoc.getElementById('qr-canvas-wrapper');
+    if (!_0xm || !_0xwrap) return;
+
+    function _0xrender(_0xfname) {
+      const _0xfurl = _0xroot.location.origin + _0xroot.location.pathname.replace(/\/+$/, '') + '/downloads/' + _0xfname;
+      const _0xapi = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(_0xfurl) + '&color=181216&bgcolor=FFFFFF';
+      _0xwrap.innerHTML = '<img src="' + _0xapi + '" alt="QR Code" width="180" height="180" style="display:block; border-radius: 8px;">';
     }
 
-    if (mobileBar && hero) {
-      const heroBottom = hero.offsetTop + hero.offsetHeight;
-      if (scrollPos > heroBottom - 180) {
-        mobileBar.style.display = 'grid';
-      } else {
-        mobileBar.style.display = 'none';
-      }
+    _0xqrbtns.forEach(_0xb => {
+      _0xb.addEventListener('click', () => {
+        const _0xt = _0xb.getAttribute('data-qr-target') || 'zaqzouka-app.apk';
+        if (_0xtargetLbl) _0xtargetLbl.textContent = _0xt;
+        _0xrender(_0xt);
+        _0xm.classList.add('open');
+      });
+    });
+
+    if (_0xcbtn) {
+      _0xcbtn.addEventListener('click', () => _0xm.classList.remove('open'));
     }
-  });
-}
-
-/* -------------------------------------------------------------
-   4. Language Switcher (AR / EN)
-   ------------------------------------------------------------- */
-const i18n = {
-  ar: {
-    brandTag: 'منظومة البث السينمائي المتكاملة',
-    navHome: 'الرئيسية',
-    navApps: 'التطبيقات',
-    navHowTo: 'طريقة التثبيت',
-    navFeatures: 'المميزات',
-    navFaq: 'الأسئلة الشائعة',
-    btnFastDownload: 'تحميل مباشر',
-    heroBadge: 'الإصدار المعتمد 2026 — آمن 100% وخالٍ من الإعلانات',
-    heroTitle: 'عالمك الترفيهي بدون حدود مع <span class="highlight-brick">تطبيق زقزوقة</span> ومحرك <span class="highlight-gold">زاغ بلاير</span>',
-    heroDesc: 'منظومة متكاملة لمشاهدة آلاف الأفلام والمسلسلات الحصرية والقنوات التلفزيونية والرياضية الحية بأعلى جودة وسيرفرات فائقة السرعة بدون أي تقطيع أو اشتراكات.',
-    heroBtnApp: 'تحميل تطبيق زقزوقة TV',
-    heroBtnAppSub: 'v1.0.74 · حزمة APK مباشرة (53.4 MB)',
-    heroBtnPlayer: 'تحميل مشغل زاغ ZAG Player',
-    heroBtnPlayerSub: 'v1.1.28 · المحرك الأساسي (4.6 MB)',
-    trustVerified: 'مفحوص ونظيف 100%',
-    trustSmartTv: 'يدعم الهواتف وشاشات Smart TV',
-    trustNoBuffer: 'تقنية مانع التقطيع',
-    tabHome: 'الرئيسية',
-    tabSeries: 'المسلسلات والمواسم',
-    tabLive: 'البث المباشر',
-    appsTag: 'التحميل المباشر',
-    appsTitle: 'حمّل التطبيقين معاً لتجربة سينمائية كاملة',
-    appsDesc: 'تطبيق زقزوقة يمنحك مكتبة الأفلام والمسلسلات والبحث الذكي، ومشغل زاغ يتولى فك التشفير والتشغيل الفوري بدون أي استهلاك للموارد.',
-    app1Role: 'التطبيق الرئيسي',
-    app1Desc: 'تصفح أكبر وأحدث مكتبة عربية وعالمية للأفلام والمسلسلات، مع تصنيفات منظمة ومواسم كاملة وتحديثات فورية لحظة بلحظة.',
-    app1F1: 'مكتبة شاملة تتحدث يومياً بأعلى الجودات (4K / 1080p)',
-    app1F2: 'محرك بحث فوري مع فلاتر النوع والسنة والتقييم',
-    app1F3: 'اكتشاف كامل المواسم والحلقات وسيرفرات مشاهدة متعددة',
-    app1F4: 'تكامل تلقائي مع مشغل زاغ بلاير بضغطة واحدة',
-    app2Role: 'المشغل الاحترافي',
-    app2Desc: 'مشغل وسائط مخصص مبني على محرك أندرويد الأصلي لفك تشفير الفيديو والبث المباشر بأعلى سرعة وبدون استهلاك للذاكرة أو البطارية.',
-    app2F1: 'تقنية مانع التقطيع وتشغيل سلس حتى مع سرعات الإنترنت الضعيفة',
-    app2F2: 'دعم كامل لصيغ HLS و M3U8 و MP4 ومسارات الترجمة المتعددة',
-    app2F3: 'فائق الخفة (4.6 MB فقط) وموفر لاستهلاك البطارية والرام',
-    app2F4: 'توافق تام مع أجهزة وشاشات Android TV و TV Box والريموت',
-    btnDownloadApk: 'تحميل APK مباشر',
-    btnQr: 'مسح QR',
-    stepsTag: 'طريقة التثبيت',
-    stepsTitle: 'ثلاث خطوات بسيطة لبدء المشاهدة',
-    stepsDesc: 'التثبيت لا يستغرق أكثر من دقيقة واحدة على أي هاتف أو شاشة تعمل بنظام أندرويد.',
-    step1Title: 'تحميل حزمتي التطبيق',
-    step1Desc: 'اضغط على أزرار التحميل المباشر بالأعلى لتنزيل تطبيقي "زقزوقة TV" و "مشغل زاغ" على جهازك.',
-    step2Title: 'السماح بالتثبيت لمرة واحدة',
-    step2Desc: 'عند فتح الملف، اضغط على الإعدادات ثم فعّل "السماح بالتثبيت من هذا المصدر" لإكمال عملية التثبيت بأمان.',
-    step3Title: 'افتح واستمتع بالمشاهدة',
-    step3Desc: 'افتح تطبيق زقزوقة، اختر فيلمك أو مسلسلك أو قناتك المفضلة واضغط تشغيل وسيبدأ العرض فوراً بسلاسة.',
-    featTag: 'لماذا زقزوقة TV؟',
-    featTitle: 'أداء سينمائي متكامل مبني لأجلك',
-    f1Title: 'سيرفرات فائقة السرعة',
-    f1Desc: 'شبكة توزيع محتوى سحابية ذكية تضمن بدء تشغيل الفيديو في جزء من الثانية دون انتظار أو تحميل مسبق.',
-    f2Title: 'جودة 4K و Full HD',
-    f2Desc: 'نقاء بصري استثنائي وصوت مجسم محيطي مع إمكانية التبديل بين الجودات تلقائياً أو يدوياً.',
-    f3Title: 'دعم كامل لشاشات التلفزيون',
-    f3Desc: 'واجهة مهيأة تماماً للتنقل السلس بالريموت كنترول على شاشات Android TV وأجهزة TV Box.',
-    f4Title: 'تحديثات مستمرة للمحتوى',
-    f4Desc: 'إضافة أحدث حلقات المسلسلات المعروضة والأفلام الجديدة لحظة بلحظة وبكافة مواسمها وتصنيفاتها.',
-    f5Title: 'خالٍ تماماً من الإعلانات',
-    f5Desc: 'لا نوافذ منبثقة، لا إعلانات إجبارية مزعجة، تجربة مشاهدة نقية ومريحة تحترم خصوصيتك وراحتك.',
-    f6Title: 'مجاني 100% بدون اشتراكات',
-    f6Desc: 'استمتع بكافة محتويات المنظومة مجاناً بدون الحاجة لحسابات بنكية أو رسوم خفية أو قيود على الأجهزة.',
-    faqTag: 'الأسئلة الشائعة',
-    faqTitle: 'كل ما تود معرفته عن التطبيق والمشغل',
-    q1: 'لماذا أحتاج لتحميل تطبيقين (زقزوقة TV ومشغل زاغ)؟',
-    a1: 'تطبيق زقزوقة يمثل مكتبة العرض والبحث وإدارة المفضلة والمواسم، بينما مشغل زاغ هو المحرك المتخصص بفك التشفير والبث عالي الكفاءة. فصل المشغل يجعل التطبيق خفيفاً جداً ويضمن سرعة تشغيل استثنائية دون تهنيج أو استنزاف للبطارية.',
-    q2: 'هل التطبيق يعمل على شاشات التلفزيون الذكية (Smart TV)؟',
-    a2: 'نعم، التطبيقان متوافقان تماماً مع شاشات Android TV وأجهزة TV Box و Fire TV Stick، ويدعمان التحكم الكامل بالريموت كنترول وعرض المحتوى بدقة 4K.',
-    q3: 'ماذا أفعل إذا ظهرت رسالة "تطبيق غير معروف" أثناء التثبيت؟',
-    a3: 'هذا إجراء أمان قياسي في أندرويد عند تثبيت أي تطبيق بصيغة APK من خارج متجر جوجل بلاي. كل ما عليك هو الضغط على "الإعدادات" ثم تفعيل "السماح بالتثبيت من هذا المصدر"، فالتطبيق مفحوص وآمن تماماً.',
-    q4: 'كيف يمكنني تحديث التطبيق عند صدور إصدارات جديدة؟',
-    a4: 'يحتوي تطبيق زقزوقة على نظام تحديث تلقائي ينبهك فوراً عند توفر أي إصدار أحدث ويتيح لك التحديث بنقرة زر واحدة من داخل التطبيق دون فقدان مفضلتك أو بياناتك.',
-    footerCopy: 'جميع الحقوق محفوظة © 2026 منظومة زقزوقة TV ومحرك زاغ بلاير الرسمي.',
-    qrTitle: 'مسح رمز الاستجابة السريعة (QR)',
-    qrDesc: 'امسح الرمز بكاميرا هاتفك أو شاشتك لبدء التحميل الفوري:',
-    mobileBtnApp: 'تحميل زقزوقة TV',
-    mobileBtnPlayer: 'مشغل زاغ'
-  },
-  en: {
-    brandTag: 'All-in-One Cinema Streaming',
-    navHome: 'Home',
-    navApps: 'Applications',
-    navHowTo: 'How to Install',
-    navFeatures: 'Features',
-    navFaq: 'FAQ',
-    btnFastDownload: 'Direct Download',
-    heroBadge: 'Official 2026 Release — 100% Safe & Ad-Free',
-    heroTitle: 'Unlimited Cinema Streaming with <span class="highlight-brick">Zaqzouka TV</span> & <span class="highlight-gold">ZAG Player</span>',
-    heroDesc: 'A complete media suite to stream thousands of exclusive movies, full series seasons, and live sports in crisp 4K Ultra HD with zero buffering and zero subscription fees.',
-    heroBtnApp: 'Download Zaqzouka TV',
-    heroBtnAppSub: 'v1.0.74 · Direct APK (53.4 MB)',
-    heroBtnPlayer: 'Download ZAG Player',
-    heroBtnPlayerSub: 'v1.1.28 · Core Engine (4.6 MB)',
-    trustVerified: '100% Verified & Clean',
-    trustSmartTv: 'Smart TV & Android TV Support',
-    trustNoBuffer: 'Anti-Buffering Engine',
-    tabHome: 'Home',
-    tabSeries: 'Series & Seasons',
-    tabLive: 'Live Sports',
-    appsTag: 'Direct Downloads',
-    appsTitle: 'Download Both Apps for Complete Experience',
-    appsDesc: 'Zaqzouka TV provides the rich catalog, search, and season navigation, while ZAG Player provides hardware-accelerated video decoding with zero battery drain.',
-    app1Role: 'Main Application',
-    app1Desc: 'Explore the largest Arab and international library of movies, series, and live channels with organized seasons, full episodes, and real-time updates.',
-    app1F1: 'Comprehensive catalog updated daily in 4K & FHD',
-    app1F2: 'Instant search engine with genre, year, and rating filters',
-    app1F3: 'Full seasons and multi-source streaming discovery',
-    app1F4: 'One-click seamless integration with ZAG Player',
-    app2Role: 'Hardware Player',
-    app2Desc: 'Dedicated playback engine built on native Android ExoPlayer to stream HLS, M3U8, and MP4 formats with lowest memory footprint.',
-    app2F1: 'Anti-buffering buffer engine optimized for all network speeds',
-    app2F2: 'Full subtitle tracks, multi-audio, and aspect ratio controls',
-    app2F3: 'Ultra lightweight (4.6 MB) with near-zero CPU and battery usage',
-    app2F4: 'Native remote control support for Android TV and TV boxes',
-    btnDownloadApk: 'Download Direct APK',
-    btnQr: 'Scan QR',
-    stepsTag: 'Installation Guide',
-    stepsTitle: 'Three Simple Steps to Start Watching',
-    stepsDesc: 'Installation takes less than one minute on any Android phone, tablet, or Smart TV.',
-    step1Title: 'Download APK Packages',
-    step1Desc: 'Click the direct download buttons above to download both Zaqzouka TV and ZAG Player APKs.',
-    step2Title: 'Allow Unknown Sources',
-    step2Desc: 'When prompted during install, tap Settings and enable "Install from this source" once.',
-    step3Title: 'Open and Enjoy Streaming',
-    step3Desc: 'Launch Zaqzouka TV, pick your favorite movie or series, and hit play for instant playback.',
-    featTag: 'Why Zaqzouka TV?',
-    featTitle: 'Engineered for Pure Cinema Performance',
-    f1Title: 'Ultra-Fast Servers',
-    f1Desc: 'Smart CDN edge caching ensures instant video playback with zero wait time.',
-    f2Title: '4K & Full HD Streams',
-    f2Desc: 'Crystal clear picture and surround audio with auto and manual bitrate options.',
-    f3Title: 'Full Android TV Compatibility',
-    f3Desc: 'Intuitive 10-foot interface navigation designed specifically for TV remotes.',
-    f4Title: 'Instant Content Updates',
-    f4Desc: 'New series episodes and blockbuster releases synced immediately upon global debut.',
-    f5Title: '100% Ad-Free Experience',
-    f5Desc: 'No annoying popups or forced banners, keeping your viewing experience undisturbed.',
-    f6Title: 'Free Forever',
-    f6Desc: 'No monthly subscriptions, no hidden paywalls, and no device quantity restrictions.',
-    faqTag: 'FAQ',
-    faqTitle: 'Frequently Asked Questions',
-    q1: 'Why do I need to install two apps (Zaqzouka TV and ZAG Player)?',
-    a1: 'Zaqzouka TV manages content discovery, catalog browsing, and episodes navigation. ZAG Player handles low-level hardware decoding. Decoupling them keeps the app extremely fast and responsive without memory bloat.',
-    q2: 'Does it work on Android TV and Fire TV?',
-    a2: 'Yes, both applications are fully tested and compatible with Android TV, TV boxes, and smart TVs with full remote navigation.',
-    q3: 'What if Android warns about an unknown source?',
-    a3: 'This is standard Android security for apps installed outside Google Play. Simply tap Settings and toggle Allow from this source. All binaries are verified and clean.',
-    q4: 'How do updates work?',
-    a4: 'Zaqzouka TV includes an in-app update detector that notifies you whenever a new build is released and updates with a single tap without resetting your favorites.',
-    footerCopy: 'All rights reserved © 2026 Zaqzouka TV Network & ZAG Player Official.',
-    qrTitle: 'Scan QR Code for Fast Download',
-    qrDesc: 'Scan this code with your phone camera or TV to start direct download:',
-    mobileBtnApp: 'Download Zaqzouka TV',
-    mobileBtnPlayer: 'ZAG Player'
-  }
-};
-
-function initLanguageSwitcher() {
-  const btn = document.getElementById('lang-switch-btn');
-  if (!btn) return;
-
-  let currentLang = 'ar';
-
-  btn.addEventListener('click', () => {
-    currentLang = currentLang === 'ar' ? 'en' : 'ar';
-    document.documentElement.lang = currentLang;
-    document.documentElement.dir = currentLang === 'ar' ? 'rtl' : 'ltr';
-    document.body.setAttribute('dir', currentLang === 'ar' ? 'rtl' : 'ltr');
-
-    const label = btn.querySelector('.lang-label');
-    if (label) label.textContent = currentLang === 'ar' ? 'EN' : 'عربي';
-
-    const dict = i18n[currentLang];
-    document.querySelectorAll('[data-i18n]').forEach(el => {
-      const key = el.getAttribute('data-i18n');
-      if (dict[key]) {
-        el.innerHTML = dict[key];
-      }
+    _0xm.addEventListener('click', e => {
+      if (e.target === _0xm) _0xm.classList.remove('open');
     });
-
-    // Update active accordion max-heights after text resize
-    document.querySelectorAll('.faq-item.active .faq-answer').forEach(ans => {
-      ans.style.maxHeight = ans.scrollHeight + 'px';
-    });
-  });
-}
-
-/* -------------------------------------------------------------
-   5. QR Code Modal
-   ------------------------------------------------------------- */
-function initQrModal() {
-  const modal = document.getElementById('qr-modal');
-  const closeBtn = document.querySelector('.modal-close-btn');
-  const qrButtons = document.querySelectorAll('.btn-card-qr');
-  const targetLabel = document.getElementById('qr-target-filename');
-  const wrapper = document.getElementById('qr-canvas-wrapper');
-  if (!modal || !wrapper) return;
-
-  function renderQrCode(targetFilename) {
-    const fullUrl = window.location.origin + window.location.pathname.replace(/\/+$/, '') + '/downloads/' + targetFilename;
-    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullUrl)}&color=181216&bgcolor=FFFFFF`;
-    wrapper.innerHTML = `<img src="${qrApiUrl}" alt="QR Code" width="180" height="180" style="display:block; border-radius: 8px;">`;
   }
-
-  qrButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const target = btn.getAttribute('data-qr-target') || 'zaqzouka-app.apk';
-      if (targetLabel) targetLabel.textContent = target;
-      renderQrCode(target);
-      modal.classList.add('open');
-    });
-  });
-
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => modal.classList.remove('open'));
-  }
-
-  modal.addEventListener('click', e => {
-    if (e.target === modal) modal.classList.remove('open');
-  });
-}
+})(window, document);
