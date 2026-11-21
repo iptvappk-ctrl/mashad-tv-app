@@ -31,13 +31,20 @@
 
 ---
 
-## 3. مسارات الملفات والنسخ الجاهزة
-1. **داخل مجلد المشروع الأساسي:**
+## 3. مسارات الملفات والنسخ والروابط الحية
+1. **الرابط الرسمي المباشر على Vercel (Production Live):**
+   - 🌐 **رابط الموقع الرئيسي:** [https://zaqzouka-tv.vercel.app](https://zaqzouka-tv.vercel.app)
+   - 📥 **تحميل تطبيق زقزوقة TV المباشر:** [https://zaqzouka-tv.vercel.app/downloads/zaqzouka-app.apk](https://zaqzouka-tv.vercel.app/downloads/zaqzouka-app.apk)
+   - 📥 **تحميل مشغل زاغ المباشر:** [https://zaqzouka-tv.vercel.app/downloads/zag-player.apk](https://zaqzouka-tv.vercel.app/downloads/zag-player.apk)
+   - *معرف النشر (Deployment ID):* `dpl_8ZjP1apm7hJnYnUZdy65Xv7PwShU` (Ready ✅)
+
+2. **داخل مجلد المشروع الأساسي:**
    - المسار: `06_WEB_AND_DISTRIBUTION/download-landing-page/`
-   - يحتوي على: `index.html`، `assets/css/style.css`، `assets/js/main.js`، `assets/images/`، ومجلد `downloads/` بداخله الـ APKs الحقيقية.
-2. **على سطح المكتب (Desktop):**
+   - يحتوي على: `index.html`، `vercel.json`، `assets/css/style.css`، `assets/js/main.js`، ومجلد `downloads/` بداخله الـ APKs الحقيقية.
+
+3. **على سطح المكتب (Desktop):**
    - المجلد المفتوح: `c:\Users\hassa\Desktop\zaqzouka-landing-page\`
-   - الملف المضغوط الجاهز للرفع الفوري على الاستضافة: `c:\Users\hassa\Desktop\zaqzouka-landing-page.zip` (32 MB).
+   - الملف المضغوط الجاهز للرفع الفوري على أي استضافة: `c:\Users\hassa\Desktop\zaqzouka-landing-page.zip` (32 MB).
 
 ---
 
