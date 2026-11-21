@@ -517,7 +517,15 @@ class _SportsPageState extends State<SportsPage> {
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => _chooseStreamsForFixture(match),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => MatchDetailPage(
+              fixtureMatch: match,
+              yacineEvents: _events,
+              footballMatches: _footballMatches,
+            ),
+          ),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -851,12 +859,13 @@ class _SportsPageState extends State<SportsPage> {
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => _chooseStreams(
-          id,
-          _matchTitle(event),
-          true,
-          channelOverride: _text(event['channel']),
-          leagueOverride: _text(event['champions']),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => MatchDetailPage(
+              event: event,
+              footballMatches: _footballMatches,
+            ),
+          ),
         ),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -2337,6 +2346,570 @@ class MatchHighlightsService {
       return 'كأس العالم';
     }
     return 'بطولات كبرى';
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⚽ MatchDetailPage — صفحة تفاصيل الماتش الكاملة
+// ════════════════════════════════════════════════════════════════════════════
+
+class MatchDetailPage extends StatefulWidget {
+  /// بيانات حدث ياسين (من قائمة beIN)
+  final Map<String, dynamic>? event;
+
+  /// بيانات مباراة FootballRepository (من جدول المباريات)
+  final Map<String, dynamic>? fixtureMatch;
+
+  /// قائمة أحداث ياسين المحتملة للمضاهاة
+  final List<Map<String, dynamic>> yacineEvents;
+
+  /// قائمة المباريات الكاملة للنتائج
+  final List<Map<String, dynamic>> footballMatches;
+
+  const MatchDetailPage({
+    super.key,
+    this.event,
+    this.fixtureMatch,
+    this.yacineEvents = const [],
+    this.footballMatches = const [],
+  }) : assert(event != null || fixtureMatch != null);
+
+  @override
+  State<MatchDetailPage> createState() => _MatchDetailPageState();
+}
+
+class _MatchDetailPageState extends State<MatchDetailPage> {
+  List<Map<String, dynamic>> _streams = [];
+  bool _loadingStreams = true;
+  String? _errorStreams;
+  String? _playingUrl;
+
+  // ── resolved match metadata ──
+  String _team1Name = '';
+  String _team2Name = '';
+  String _team1Logo = '';
+  String _team2Logo = '';
+  String _league = '';
+  String _channel = '';
+  String _commentary = '';
+  String _kickoffTime = '';
+  String _matchState = '';
+  String _homeScore = '';
+  String _awayScore = '';
+  String _eventId = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _resolveMetadata();
+    _loadStreams();
+  }
+
+  // ── Resolve all display metadata from event or fixture ──────────────────
+  void _resolveMetadata() {
+    final e = widget.event;
+    final f = widget.fixtureMatch;
+
+    if (e != null) {
+      final t1 = e['team1'] as Map? ?? {};
+      final t2 = e['team2'] as Map? ?? {};
+      _team1Name = _t(t1['name']);
+      _team2Name = _t(t2['name']);
+      _team1Logo = _t(t1['logo']);
+      _team2Logo = _t(t2['logo']);
+      _league = _t(e['champions']);
+      _channel = _t(e['channel']);
+      _commentary = _t(e['commentary']);
+      _eventId = _t(e['id']);
+
+      final start = int.tryParse(_t(e['startTime'])) ?? 0;
+      if (start > 0) {
+        final dt = DateTime.fromMillisecondsSinceEpoch(start * 1000).toLocal();
+        final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+        final period = dt.hour >= 12 ? 'م' : 'ص';
+        final min = dt.minute.toString().padLeft(2, '0');
+        _kickoffTime = '$h:$min $period';
+      }
+
+      // Try to find live score from footballMatches
+      final score = _findScore(_team1Name, _team2Name);
+      if (score != null) {
+        _matchState = _t(score['state']);
+        _homeScore = _t(score['homeScore']);
+        _awayScore = _t(score['awayScore']);
+      } else {
+        final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final end = int.tryParse(_t(e['endTime'])) ?? 0;
+        final startSec = int.tryParse(_t(e['startTime'])) ?? 0;
+        _matchState = startSec > 0 && startSec <= now && (end <= 0 || end >= now)
+            ? 'in'
+            : 'pre';
+      }
+    } else if (f != null) {
+      _team1Name = _t(f['homeTeamArabic']).ifEmpty(_t(f['homeTeam']));
+      _team2Name = _t(f['awayTeamArabic']).ifEmpty(_t(f['awayTeam']));
+      _team1Logo = _t(f['homeLogo']);
+      _team2Logo = _t(f['awayLogo']);
+      _league = _t(f['leagueName']);
+      _matchState = _t(f['state']);
+      _homeScore = _t(f['homeScore']);
+      _awayScore = _t(f['awayScore']);
+
+      // Find matching yacine event for channel/commentary
+      final ye = _findYacineEvent(_team1Name, _team2Name);
+      _channel = ye != null ? _t(ye['channel']) : _channelGuessFromLeague(_league);
+      _commentary = ye != null ? _t(ye['commentary']) : '';
+      _eventId = ye != null ? _t(ye['id']) : 'fixture_${_team1Name}_$_team2Name';
+
+      final kickoffMs = (f['kickoffEpochMs'] as num?)?.toInt() ?? 0;
+      if (kickoffMs > 0) {
+        final dt = DateTime.fromMillisecondsSinceEpoch(kickoffMs).toLocal();
+        final h = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
+        final period = dt.hour >= 12 ? 'م' : 'ص';
+        final min = dt.minute.toString().padLeft(2, '0');
+        _kickoffTime = '$h:$min $period';
+      }
+    }
+  }
+
+  Map<String, dynamic>? _findScore(String t1, String t2) {
+    for (final m in widget.footballMatches) {
+      final home = _t(m['homeTeamArabic']).ifEmpty(_t(m['homeTeam']));
+      final away = _t(m['awayTeamArabic']).ifEmpty(_t(m['awayTeam']));
+      if (_nameMatch(t1, home) && _nameMatch(t2, away)) return m;
+      if (_nameMatch(t1, away) && _nameMatch(t2, home)) return m;
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _findYacineEvent(String t1, String t2) {
+    for (final e in widget.yacineEvents) {
+      final et1 = _t((e['team1'] as Map?)?['name']);
+      final et2 = _t((e['team2'] as Map?)?['name']);
+      if (_nameMatch(t1, et1) && _nameMatch(t2, et2)) return e;
+      if (_nameMatch(t1, et2) && _nameMatch(t2, et1)) return e;
+    }
+    return null;
+  }
+
+  bool _nameMatch(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return false;
+    final ka = _teamKey(a), kb = _teamKey(b);
+    if (ka.length < 4 || kb.length < 4) return false;
+    return ka == kb || (ka.length >= 6 && kb.contains(ka)) || (kb.length >= 6 && ka.contains(kb));
+  }
+
+  String _teamKey(String v) => v
+      .toLowerCase()
+      .replaceAll(RegExp(r'[\u064B-\u065F\u0670\u0640]'), '')
+      .replaceAll(RegExp(r'\b(fc|cf|afc|sc|club)\b'), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  String _channelGuessFromLeague(String league) {
+    final l = league.toLowerCase();
+    if (l.contains('إنجليزي') || l.contains('premier')) return 'beIN SPORTS 1';
+    if (l.contains('إسباني') || l.contains('la liga')) return 'beIN SPORTS 3';
+    if (l.contains('فرنسي') || l.contains('ligue')) return 'beIN SPORTS 2';
+    if (l.contains('ألماني') || l.contains('bundesliga')) return 'beIN SPORTS 5';
+    if (l.contains('أبطال') || l.contains('champions')) return 'beIN SPORTS 1';
+    if (l.contains('تركي') || l.contains('turkish')) return 'beIN SPORTS 7';
+    return 'beIN SPORTS HD';
+  }
+
+  Future<void> _loadStreams() async {
+    setState(() { _loadingStreams = true; _errorStreams = null; });
+    try {
+      final streams = await NativeBridge.list(
+        'live.matchStreams',
+        {'id': _eventId, 'channel': _channel, 'league': _league},
+      );
+      if (mounted) setState(() { _streams = streams; _loadingStreams = false; });
+    } catch (e) {
+      if (mounted) setState(() { _errorStreams = '$e'; _loadingStreams = false; });
+    }
+  }
+
+  String _t(dynamic v) => v?.toString().trim() ?? '';
+
+  // ─────────────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final isLive = _matchState == 'in';
+    final isFinished = _matchState == 'post';
+    final hasScore = (isLive || isFinished) && _homeScore.isNotEmpty && _awayScore.isNotEmpty;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F4F0),
+      body: CustomScrollView(
+        slivers: [
+          // ── App Bar with gradient ──────────────────────────────────────
+          SliverAppBar(
+            expandedHeight: 260,
+            pinned: true,
+            backgroundColor: const Color(0xFF1A0A2E),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white),
+              onPressed: () => Navigator.pop(context),
+            ),
+            flexibleSpace: FlexibleSpaceBar(
+              background: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF1A0A2E), Color(0xFF3D1557), Color(0xFF580F8B)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 60, 20, 16),
+                    child: Column(
+                      children: [
+                        // League + Status
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_league.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  _league,
+                                  style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            const SizedBox(width: 8),
+                            if (isLive)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF16856D),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.circle, color: Colors.white, size: 7),
+                                    SizedBox(width: 4),
+                                    Text('مباشر الآن', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                                  ],
+                                ),
+                              )
+                            else if (isFinished)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: const Text('انتهت', style: TextStyle(color: Colors.white60, fontSize: 11, fontWeight: FontWeight.w700)),
+                              )
+                            else if (_kickoffTime.isNotEmpty)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.schedule_rounded, color: Colors.white70, size: 12),
+                                    const SizedBox(width: 4),
+                                    Text('الساعة $_kickoffTime', style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w700)),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        // Teams Row
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            // Team 1
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  _teamLogo(_team1Logo, 56),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _team1Name.ifEmpty('الفريق الأول'),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // Score or VS
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: hasScore
+                                  ? Text(
+                                      '$_homeScore  -  $_awayScore',
+                                      style: TextStyle(
+                                        color: isLive ? const Color(0xFF4AFFD5) : Colors.white,
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 32,
+                                      ),
+                                    )
+                                  : const Text(
+                                      'VS',
+                                      style: TextStyle(
+                                        color: Colors.white38,
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 28,
+                                      ),
+                                    ),
+                            ),
+                            // Team 2
+                            Expanded(
+                              child: Column(
+                                children: [
+                                  _teamLogo(_team2Logo, 56),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _team2Name.ifEmpty('الفريق الثاني'),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        // Channel + Commentary
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_channel.isNotEmpty) ...[
+                              const Icon(Icons.tv_rounded, color: Colors.white54, size: 14),
+                              const SizedBox(width: 5),
+                              Text(
+                                _channel,
+                                style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                            if (_commentary.isNotEmpty) ...[
+                              const SizedBox(width: 12),
+                              const Icon(Icons.mic_rounded, color: Colors.white54, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                _commentary,
+                                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Streams section ────────────────────────────────────────────
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'سيرفرات البث المباشر',
+                        style: TextStyle(color: _ink, fontSize: 17, fontWeight: FontWeight.w900),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _loadStreams,
+                        icon: const Icon(Icons.refresh_rounded, size: 16, color: _brick),
+                        label: const Text('تحديث', style: TextStyle(color: _brick, fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                  const Text(
+                    'اختر سيرفراً للمشاهدة المباشرة — سيرفرات فائقة السرعة',
+                    style: TextStyle(color: _muted, fontSize: 12),
+                  ),
+                  const SizedBox(height: 14),
+                  if (_loadingStreams)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32),
+                        child: CircularProgressIndicator(color: _brick, strokeWidth: 2.5),
+                      ),
+                    )
+                  else if (_errorStreams != null)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 24),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.wifi_off_rounded, color: _muted, size: 40),
+                            const SizedBox(height: 10),
+                            Text(_errorStreams!, style: const TextStyle(color: _muted, fontSize: 13)),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              onPressed: _loadStreams,
+                              style: ElevatedButton.styleFrom(backgroundColor: _brick),
+                              child: const Text('إعادة المحاولة', style: TextStyle(color: Colors.white)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else if (_streams.isEmpty)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Text('لا توجد سيرفرات متاحة الآن', style: TextStyle(color: _muted, fontSize: 14)),
+                      ),
+                    )
+                  else
+                    ..._streams.map((stream) => _streamTile(stream)).toList(),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _teamLogo(String url, double size) {
+    if (url.isEmpty) {
+      return Container(
+        width: size, height: size,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.1),
+          shape: BoxShape.circle,
+        ),
+        child: const Icon(Icons.sports_soccer, color: Colors.white38, size: 28),
+      );
+    }
+    return ClipOval(
+      child: Image.network(
+        url, width: size, height: size, fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => Container(
+          width: size, height: size,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.sports_soccer, color: Colors.white38, size: 28),
+        ),
+      ),
+    );
+  }
+
+  Widget _streamTile(Map<String, dynamic> stream) {
+    final streamName = stream['name']?.toString().trim() ?? 'سيرفر بث مباشر';
+    final url = stream['url']?.toString().trim() ?? '';
+    final isPlaying = _playingUrl == url;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () async {
+            setState(() => _playingUrl = url);
+            final headers = stream['headers'] is Map
+                ? Map<String, String>.from((stream['headers'] as Map).map((k, v) => MapEntry('$k', '$v')))
+                : <String, String>{};
+            final backups = _streams
+                .where((s) => (s['url']?.toString().trim() ?? '') != url && (s['url']?.toString().trim() ?? '').isNotEmpty)
+                .map((s) => <String, dynamic>{
+                      'url': s['url']?.toString().trim() ?? '',
+                      'userAgent': s['userAgent']?.toString() ?? '',
+                      'referer': s['referer']?.toString() ?? '',
+                      'headers': s['headers'] is Map
+                          ? Map<String, String>.from((s['headers'] as Map).map((k, v) => MapEntry('$k', '$v')))
+                          : <String, String>{},
+                    })
+                .toList(growable: false);
+
+            await _launchPlayer(
+              context,
+              url,
+              '$_team1Name × $_team2Name',
+              userAgent: stream['userAgent']?.toString() ?? '',
+              referer: stream['referer']?.toString() ?? '',
+              headers: headers,
+              backupSources: backups,
+              isLive: true,
+            );
+            if (mounted) setState(() => _playingUrl = null);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: isPlaying ? _brick.withOpacity(0.08) : Colors.white,
+              border: Border.all(
+                color: isPlaying ? _brick : _line,
+                width: isPlaying ? 1.5 : 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(
+                    color: _brick.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.play_circle_fill_rounded, color: _brick, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        streamName,
+                        style: const TextStyle(color: _ink, fontWeight: FontWeight.w700, fontSize: 14),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        isPlaying ? 'جاري التشغيل...' : 'اضغط للمشاهدة المباشرة',
+                        style: TextStyle(
+                          color: isPlaying ? _brick : _muted,
+                          fontSize: 11,
+                          fontWeight: isPlaying ? FontWeight.w700 : FontWeight.normal,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: _muted),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

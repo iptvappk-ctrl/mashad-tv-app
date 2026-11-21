@@ -413,40 +413,121 @@ object YacineRepository {
 
     fun getStreamsForChannelName(channelName: String): List<YacineStream> {
         val name = channelName.trim().ifBlank { "beIN SPORTS HD" }
-        return listOf(
-            YacineStream(
-                name = "$name · سيرفر رئيسي 1 فائق السرعة CDN",
-                url = "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8",
-                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                referer = "https://yacinelive.com/",
-                urlType = 3,
-                headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            ),
-            YacineStream(
-                name = "$name · سيرفر مباشر 2 CDN",
-                url = "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8",
-                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                referer = "https://yacinelive.com/",
-                urlType = 3,
-                headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            ),
-            YacineStream(
-                name = "$name · سيرفر بديل 3 CDN",
-                url = "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
-                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                referer = "https://yacinelive.com/",
-                urlType = 3,
-                headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            ),
-            YacineStream(
-                name = "$name · سيرفر احتياطي 4",
-                url = "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8",
-                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                referer = "https://yacinelive.com/",
-                urlType = 3,
-                headers = mapOf("User-Agent" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        val n = name.lowercase()
+        val ch = extractChannelNumber(name)
+        val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        val ref = "https://yacinelive.com/"
+
+        // ─── Per-channel dedicated CDN streams ─────────────────────────
+        val streams: List<Triple<String, String, String>> = when {
+            // beIN SPORTS 1 — Premier League / Champions League primary
+            ch == 1 || (n.contains("bein") && n.contains("1") && !n.contains("xtra")) -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports1/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://bein1-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
             )
-        )
+            // beIN SPORTS 2 — Turkish League / Ligue 1 secondary
+            ch == 2 -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports2/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein2-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN SPORTS 3 — Championship / La Liga
+            ch == 3 -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports3/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein3-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN SPORTS 4 — Premier League second / Ligue 1
+            ch == 4 -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports4/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein4-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN SPORTS 5 — Premier League / Bundesliga
+            ch == 5 -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports5/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein5-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN SPORTS 6
+            ch == 6 -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports6/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein6-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN SPORTS 7 — Turkish League primary
+            ch == 7 -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports7/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein7-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN SPORTS 8
+            ch == 8 -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports8/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein8-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN SPORTS 9 — La Liga / Türk Liga secondary
+            ch == 9 -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://tvsen6.aynaott.com/beinsports9/index.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein9-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN XTRA 1-3
+            n.contains("xtra") -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+            )
+            // beIN France 1-3
+            n.contains("france") || n.contains("french") -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://bein-beinsports1french-samsungau.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+            )
+            // beIN English 1-3
+            n.contains("english") -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://bein-beinsports1english-samsungau.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+            )
+            // Fallback
+            else -> listOf(
+                Triple("$name · سيرفر رئيسي CDN", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://tvsen6.aynaott.com/beinsports/index.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 4 احتياطي", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+            )
+        }
+
+        return streams.map { (streamName, url, referer) ->
+            YacineStream(
+                name = streamName,
+                url = url,
+                userAgent = ua,
+                referer = referer,
+                urlType = 3,
+                headers = mapOf("User-Agent" to ua, "Referer" to referer),
+            )
+        }
+    }
+
+    private fun extractChannelNumber(channelName: String): Int {
+        val m = Regex("\\b(\\d+)\\b").find(channelName.substringAfter("SPORTS").substringAfter("Sports").substringAfter("بي إن"))
+        return m?.groupValues?.get(1)?.toIntOrNull() ?: 0
     }
 
     suspend fun getMatchStreams(
