@@ -155,8 +155,8 @@ class PlayerActivity : ComponentActivity() {
     private fun checkSystemStatus() {
         activityScope.launch(Dispatchers.IO) {
             val endpoints = listOf(
-                "https://zaqzouka-dashboard-api.vercel.app/api/system_control",
-                "https://zaqzouka-dashboard-api.vercel.app/api/status"
+                "https://dashboard-api-amber-chi.vercel.app/api/system_control",
+                "https://dashboard-api-amber-chi.vercel.app/api/status"
             )
             for (endpoint in endpoints) {
                 try {

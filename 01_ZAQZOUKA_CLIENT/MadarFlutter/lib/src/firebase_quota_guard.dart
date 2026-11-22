@@ -19,10 +19,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _Cfg {
   // Live Endpoints (Dashboard API is where Master Control writes directly)
   static const vercelStatusUrls = [
-    'https://zaqzouka-dashboard-api.vercel.app/api/system_control',
-    'https://zaqzouka-dashboard-api.vercel.app/api/status',
-    'https://web-nu-teal-29.vercel.app/api/status',
-    'https://zaqzouka-vercel-hub.vercel.app/api/status',
+    'https://dashboard-api-amber-chi.vercel.app/api/system_control',
+    'https://dashboard-api-amber-chi.vercel.app/api/status',
   ];
 
   // Static fallback JSON on Vercel CDN edge (ultimate fallback)

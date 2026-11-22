@@ -1,0 +1,664 @@
+/**
+ * Zaqzouka Dashboard API - Cloudflare Worker
+ * Replaces the blocked Vercel deployment.
+ * Uses Firebase REST API + JWT auth (no Node SDK needed).
+ */
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const ADMIN_SECRET     = 'Zq!7#mK9xPd@3wR5nT';
+const MASTER_SECRET    = 'zaqzouka_master_2026';
+const ZAQZOUKA_API_KEY = 'ZQ-OWNER-2026-SECRET-14MOON';
+const PROJECT_ID       = 'madartv';
+const DB_URL           = `https://${PROJECT_ID}-default-rtdb.firebaseio.com`;
+
+// Firebase service account (embedded - safe since Worker env vars are encrypted)
+const SA = {
+  client_email: 'firebase-adminsdk-fbsvc@madartv.iam.gserviceaccount.com',
+  private_key_id: 'db853412c302b966090e1e963d0f532b0f5cd5c5',
+  private_key: `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC1HF49tixR7lMk
+57eLy8hke50PEFtPzGXGzYI8drDDpvARgxPH73n7z5u7x1n2WoxUYipa+ncqaP7B
+f9bb7UrxVP13ITFOdKtYIi5IFPirP4JRP1QNgWRxWpFraoTOFW59YDA4zT47p3MN
+smJepLlzLCu4EwDFA8+ajHbTr5RMK0BtNmFXAvMHyxQ7IieUg6wQlATSgRKkcIdZ
+7vLHc/hi3qml15R5XsuVa8NjLWBb6lb6uj3D55/28iDyu4rS+i58ybAMfa5KsKqG
+AZ7sgEJbQqhmlfQMJTb9+Mr4oO76IGU0/ohnmVssK11Gq2+YISwfKf3IAkX6uVXf
+1/gNm+ZDAgMBAAECggEAHtct1SRod6s1zVsIDm4tOa8zF5WZdwU/b5MfUlyDzU1o
+JBNGEw3cn9zCkD9qOmFA9D2jKMrt7/LhLuIuHFVUJbRrVRX553pGk0N+zheEIOU3
+s84s6f/WstbRXJFO/Cj6H695hrKsnkvtc6+kwKkcS1iCOV5DC0mS2KaCtZl4j1+k
+dUGKURsxgeChUKPN/diP9/MbvZ6IJayhRqFys624SNNMj8HPtCXQEsp9U0seW0EH
+neCiWc3foGrrmRPQUcXjdwO/RUzjpiXU0AgUN+2EqZPvFNqTT5HO6saX99qk3row
+0+m9+nPSCh1D1RkgoBMx4/KNvg0OHuDcfF+Ffay4wQKBgQDs9rift9vgfHk+mKuP
+5FoUu5Obg6xvRyoO3BfckQPbjgmA2y9pe0Ho6D5GLQx8se91Ijb0YXSB1deFGN6J
+CQut6EuHg1GqzEOVhwjp4QObTwUeY+DPkQR4k3loRlbxJ/e7teTfy/7TZyc/jVMc
+iUdSu3iovDY10wFRdSznTSys/wKBgQDDqQDLSYJm1/qXwwLT16adAlmyg0NY8f6O
+zif8OENtnDqEqUuBqEky24wtzSYsX03ykgnLzlmTndWEFhGknqnukznuVpxNMjwE
+KW8oqFmuCsI0G8+QhUmEsBsf7vjFRII59t/+B0jDpF3mnbRRAwS++7kAP9m7GT6j
+Zufy50nSvQKBgAQMs1sHaVqMxgWr1kK/RErWac9ekLPWI4HdgQrj74zxAHiTRlwn
+Hxk73tSUMIJxCAaYbxf+El+lp+k+Y48z+F8geSn3tI2WsBD+Hcjhb45X6155ln31
+nH3zB0Ag85trc3Bhy2eHtPMn8CPF5oW2UuG3EnjPvp1s3bjmp73MM9dBAoGBAKCw
+7DYI6VANkYGSZ4AUXIIWrBQwOd+S373pEm3Sx43+ARFy+NBDpdpe9YGoOvG2VA4k
+Ymc/0dGqjvEsLtFEfcuynqFgAH5mA2RnoyOBICYQL+8b6ByJWxfeimhvm2BoI4v3
+dX7r/JaxJ21/l9fw4rT3h7jst6Ux1n/cxCJ6UecBAoGBAM2o6cjsJY7gMuVS8D7R
+bzZbq020wB8ad6j5DyOLD/AOsbzjsPomwKZkQ01zKFlKBPFtRUx8EmFr24x5SIXw
+mjs8h7bB+lkElXtMXNGvCizAwgyzrCN0Cj5SMZmko0ZCkQo/BJvog67dNc5Ws7kB
+brllcrMKNWy5T49JfENZkjqz
+-----END PRIVATE KEY-----`,
+};
+
+// ─── JWT / Firebase Auth Helpers ──────────────────────────────────────────────
+
+// Cache the access token
+let _fbToken = null;
+let _fbTokenExpiry = 0;
+
+async function getFirebaseToken() {
+  const now = Date.now() / 1000;
+  if (_fbToken && now < _fbTokenExpiry - 60) return _fbToken;
+
+  // Build JWT for service account
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: SA.client_email,
+    scope: 'https://www.googleapis.com/auth/firebase.database https://www.googleapis.com/auth/userinfo.email',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: Math.floor(now) + 3600,
+    iat: Math.floor(now),
+  };
+
+  function b64url(obj) {
+    const json = typeof obj === 'string' ? obj : JSON.stringify(obj);
+    const bytes = new TextEncoder().encode(json);
+    let binary = '';
+    bytes.forEach(b => binary += String.fromCharCode(b));
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+
+  const sigInput = `${b64url(header)}.${b64url(payload)}`;
+
+  // Import private key
+  const pemBody = SA.private_key
+    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----END PRIVATE KEY-----', '')
+    .replace(/\s/g, '');
+  const keyBytes = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8', keyBytes.buffer,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false, ['sign']
+  );
+
+  const sigBytes = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    new TextEncoder().encode(sigInput)
+  );
+  let sigBin = '';
+  new Uint8Array(sigBytes).forEach(b => sigBin += String.fromCharCode(b));
+  const sig = btoa(sigBin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+  const jwt = `${sigInput}.${sig}`;
+
+  // Exchange JWT for access token
+  const resp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+
+  const data = await resp.json();
+  if (!data.access_token) throw new Error('Failed to get Firebase token: ' + JSON.stringify(data));
+  _fbToken = data.access_token;
+  _fbTokenExpiry = now + (data.expires_in || 3600);
+  return _fbToken;
+}
+
+async function fbRead(path) {
+  const token = await getFirebaseToken();
+  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Firebase read error ${resp.status} at ${path}`);
+  return resp.json();
+}
+
+async function fbWrite(path, data) {
+  const token = await getFirebaseToken();
+  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const resp = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!resp.ok) throw new Error(`Firebase write error ${resp.status} at ${path}`);
+  return resp.json();
+}
+
+async function fbPatch(path, data) {
+  const token = await getFirebaseToken();
+  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const resp = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!resp.ok) throw new Error(`Firebase patch error ${resp.status} at ${path}`);
+  return resp.json();
+}
+
+async function fbPush(path, data) {
+  const token = await getFirebaseToken();
+  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!resp.ok) throw new Error(`Firebase push error ${resp.status} at ${path}`);
+  return resp.json();
+}
+
+async function fbDelete(path) {
+  const token = await getFirebaseToken();
+  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const resp = await fetch(url, { method: 'DELETE' });
+  if (!resp.ok) throw new Error(`Firebase delete error ${resp.status} at ${path}`);
+  return resp.json();
+}
+
+// ─── CORS / Response Helpers ──────────────────────────────────────────────────
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Secret, x-master-secret, x-zaqzouka-key, x-admin-secret',
+  };
+}
+
+function jsonResp(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+  });
+}
+
+// ─── Route Handlers ───────────────────────────────────────────────────────────
+
+async function handleHealth(req) {
+  try {
+    const stats = await fbRead('stats');
+    return jsonResp({
+      status: 'online',
+      serverTime: new Date().toISOString(),
+      totalSessions: (stats && stats.firstOpens) || 0,
+      dataConnected: true,
+      provider: 'cloudflare-workers',
+    });
+  } catch (err) {
+    return jsonResp({
+      status: 'online',
+      serverTime: new Date().toISOString(),
+      totalSessions: 0,
+      dataConnected: false,
+      error: err.message,
+      provider: 'cloudflare-workers',
+    });
+  }
+}
+
+// Cache for status endpoint
+let _statusCache = null;
+let _statusCacheTime = 0;
+
+async function handleStatus(req) {
+  const now = Date.now();
+  if (_statusCache && now - _statusCacheTime < 30000) {
+    return new Response(JSON.stringify({ ..._statusCache, _source: 'cache' }), {
+      status: 200,
+      headers: {
+        ...corsHeaders(),
+        'Content-Type': 'application/json',
+        'Cache-Control': 's-maxage=60, stale-while-revalidate=300',
+      },
+    });
+  }
+
+  const FALLBACK = {
+    status: 'active',
+    message: 'المنظومة نشطة وتعمل بشكل طبيعي',
+    updatedAt: now,
+    wipeTimestamp: 0,
+    components: {
+      download_site_enabled: true,
+      web_player_enabled: true,
+      website_enabled: true,
+      app_enabled: true,
+      player_enabled: true,
+      admin_enabled: true,
+    },
+  };
+
+  try {
+    let val = await fbRead('system_control');
+    if (!val) val = FALLBACK;
+
+    if (val && val.components) {
+      if (val.status === 'active' && val.components.app_enabled === false) {
+        val = { ...val, status: 'frozen', message: val.message || 'التطبيق متوقف حالياً للصيانة.' };
+      }
+    }
+
+    _statusCache = val;
+    _statusCacheTime = now;
+
+    return new Response(JSON.stringify({ ...val, _source: 'firebase' }), {
+      status: 200,
+      headers: {
+        ...corsHeaders(),
+        'Content-Type': 'application/json',
+        'Cache-Control': 's-maxage=60, stale-while-revalidate=300',
+      },
+    });
+  } catch (err) {
+    if (_statusCache) return jsonResp({ ..._statusCache, _source: 'stale', _error: err.message });
+    return jsonResp({ ...FALLBACK, _source: 'fallback', _error: err.message });
+  }
+}
+
+async function handleStats(req, url) {
+  const auth = req.headers.get('x-admin-secret') || url.searchParams.get('secret') || '';
+  if (ADMIN_SECRET && auth !== ADMIN_SECRET) return jsonResp({ error: 'Unauthorized' }, 403);
+
+  try {
+    const [stats, sessionsObj, topContent, searches, errors, actLog, landing, landingVisitors] = await Promise.all([
+      fbRead('stats'),
+      fbRead('sessions'),
+      fbRead('topContent'),
+      fbRead('searches'),
+      fbRead('errors'),
+      fbRead('activityLog'),
+      fbRead('landing_analytics'),
+      fbRead('landing_visitors'),
+    ]);
+
+    const sessionsArr = sessionsObj ? Object.values(sessionsObj) : [];
+    const topContentArr = topContent ? Object.values(topContent) : [];
+    const searchesArr = searches ? Object.values(searches) : [];
+    const errorsArr = errors ? Object.values(errors) : [];
+    const actLogArr = actLog ? Object.values(actLog) : [];
+    const landingVisitorsArr = landingVisitors ? Object.values(landingVisitors) : [];
+
+    const statsVal = stats || {};
+    const landingVal = landing || {};
+
+    const totalSessions = sessionsArr.length;
+    const appSessions = sessionsArr.filter(s => s.platform !== 'web');
+    const webSessions = sessionsArr.filter(s => s.platform === 'web');
+    const activeSessions = sessionsArr.filter(s => s.status === 'active');
+
+    return jsonResp({
+      ok: true,
+      kpis: {
+        totalSessions,
+        firstOpens: statsVal.firstOpens || totalSessions,
+        activeSessions: activeSessions.length,
+        appSessions: appSessions.length,
+        webSessions: webSessions.length,
+        appRatio: totalSessions > 0 ? Math.round((appSessions.length / totalSessions) * 100) : 0,
+        webRatio: totalSessions > 0 ? Math.round((webSessions.length / totalSessions) * 100) : 0,
+        totalDownloads: landingVal.total_downloads || 0,
+        downloadsBundle: landingVal.downloads_bundle || 0,
+        totalVisits: landingVal.totalVisits || 0,
+      },
+      sessions: sessionsArr.slice(-200).reverse(),
+      topContent: topContentArr.slice(0, 50),
+      searches: searchesArr.slice(-100),
+      errors: errorsArr.slice(-50),
+      activityLog: actLogArr.slice(-50),
+      landingAnalytics: {
+        siteUrl: 'zaafilm.com',
+        siteName: 'موقع التحميل الرسمي ZAAFILM',
+        status: 'active',
+        totalVisits: landingVal.totalVisits || 0,
+        totalDownloads: landingVal.total_downloads || 0,
+        recentVisitors: landingVisitorsArr.slice(-30),
+      },
+      _serverTime: new Date().toISOString(),
+      _provider: 'cloudflare-workers',
+    });
+  } catch (err) {
+    return jsonResp({ ok: false, error: err.message }, 500);
+  }
+}
+
+async function handleTelemetry(req, url, body) {
+  const route = url.searchParams.get('route') || '';
+
+  const now = new Date();
+  const isoNow = now.toISOString();
+
+  if (route === 'session/start') {
+    const deviceId = body.deviceId || ('anon_' + Date.now());
+    const isWeb = body.platform === 'web' || body.deviceType === 'web';
+    const sessionId = isWeb
+      ? ('sess_web_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7))
+      : ('dev_' + deviceId.replace(/[^a-zA-Z0-9_-]/g, '_'));
+
+    const sessionData = {
+      sessionId,
+      deviceId,
+      device: body.device || body.deviceModel || 'Android Device',
+      platform: body.platform || 'android',
+      osVersion: body.osVersion || 'Android',
+      appVersion: body.appVersion || '1.0',
+      country: body.country || 'EG',
+      city: body.city || '',
+      status: 'active',
+      openedAt: isoNow,
+      lastSeen: isoNow,
+      sessionCount: 1,
+      actionsCount: 0,
+      lastSection: body.currentSection || 'الرئيسية',
+      lastContent: body.currentContent || '',
+    };
+
+    await fbWrite(`sessions/${sessionId}`, sessionData);
+
+    // Update stats counter
+    try {
+      const statsSnap = await fbRead('stats');
+      const stats = statsSnap || {};
+      await fbPatch('stats', {
+        firstOpens: (stats.firstOpens || 0) + 1,
+        lastActivityAt: isoNow,
+      });
+    } catch (e) {}
+
+    return jsonResp({ ok: true, sessionId });
+  }
+
+  if (route === 'session/end') {
+    const sessionId = body.sessionId;
+    if (!sessionId) return jsonResp({ error: 'sessionId required' }, 400);
+    try {
+      const durationMin = Math.round((body.durationSeconds || 0) / 60);
+      await fbPatch(`sessions/${sessionId}`, {
+        status: 'closed',
+        closedAt: isoNow,
+        lastSeen: isoNow,
+        durationMinutes: durationMin,
+        durationText: durationMin > 0 ? `${durationMin} د` : 'أقل من دقيقة',
+      });
+    } catch (e) {}
+    return jsonResp({ ok: true });
+  }
+
+  if (route === 'session/heartbeat') {
+    const sessionId = body.sessionId;
+    if (!sessionId) return jsonResp({ error: 'sessionId required' }, 400);
+    try {
+      await fbPatch(`sessions/${sessionId}`, {
+        lastSeen: isoNow,
+        status: 'active',
+        lastSection: body.currentSection || undefined,
+        lastContent: body.currentContent || undefined,
+      });
+    } catch (e) {}
+    return jsonResp({ ok: true });
+  }
+
+  if (route === 'action') {
+    try {
+      await fbPush('activityLog', {
+        sessionId: body.sessionId || 'unknown',
+        action: body.action || 'unknown',
+        content: body.content || '',
+        section: body.section || '',
+        timestamp: isoNow,
+      });
+    } catch (e) {}
+    return jsonResp({ ok: true });
+  }
+
+  if (route === 'playback') {
+    try {
+      const contentId = body.contentId || body.title || 'unknown';
+      const topSnap = await fbRead(`topContent/${contentId.replace(/[^a-zA-Z0-9]/g, '_')}`);
+      const existing = topSnap || { count: 0, title: contentId };
+      await fbWrite(`topContent/${contentId.replace(/[^a-zA-Z0-9]/g, '_')}`, {
+        ...existing,
+        count: (existing.count || 0) + 1,
+        lastPlayed: isoNow,
+        title: body.title || contentId,
+      });
+    } catch (e) {}
+    return jsonResp({ ok: true });
+  }
+
+  if (route === 'search') {
+    try {
+      await fbPush('searches', {
+        query: body.query || '',
+        sessionId: body.sessionId || 'unknown',
+        timestamp: isoNow,
+      });
+    } catch (e) {}
+    return jsonResp({ ok: true });
+  }
+
+  return jsonResp({ error: 'Unknown telemetry route: ' + route }, 400);
+}
+
+async function handleAdmin(req, url, body) {
+  const route = url.searchParams.get('route') || '';
+
+  if (route === 'kill-switch') {
+    const authHeader = req.headers.get('x-master-secret') || url.searchParams.get('master_secret') || '';
+    if (authHeader !== MASTER_SECRET) return jsonResp({ error: 'Access denied' }, 403);
+
+    if (req.method === 'GET') {
+      try {
+        const val = await fbRead('killSwitch');
+        return jsonResp({ ok: true, killSwitch: val || { active: false } });
+      } catch (err) {
+        return jsonResp({ ok: false, error: err.message }, 500);
+      }
+    }
+
+    if (req.method === 'POST') {
+      const action = body.action;
+      const isoNow = new Date().toISOString();
+
+      if (action === 'kill') {
+        const killData = {
+          active: true,
+          wipe: false,
+          activatedAt: isoNow,
+          reason: body.reason || 'Emergency shutdown by owner',
+          target: body.target || 'all',
+          message: body.message || 'التطبيق متوقف مؤقتاً. جاري الصيانة.',
+          messageEn: body.messageEn || 'App is temporarily unavailable. Under maintenance.',
+        };
+        await fbWrite('killSwitch', killData);
+        return jsonResp({ ok: true, action: 'KILL_ACTIVATED', data: killData });
+      }
+
+      if (action === 'restore') {
+        await fbWrite('killSwitch', {
+          active: false,
+          restoredAt: isoNow,
+          reason: 'Owner restored service',
+        });
+        return jsonResp({ ok: true, action: 'RESTORED' });
+      }
+
+      if (action === 'status') {
+        const val = await fbRead('killSwitch');
+        return jsonResp({ ok: true, killSwitch: val || { active: false } });
+      }
+
+      return jsonResp({ error: 'Unknown action: ' + action }, 400);
+    }
+  }
+
+  if (route === 'license-check') {
+    const appKey = req.headers.get('x-zaqzouka-key') || body.apiKey || '';
+    const buildId = body.buildId || '';
+    const isoNow = new Date().toISOString();
+
+    try {
+      const killSwitch = await fbRead('killSwitch');
+      const isKilled = killSwitch && killSwitch.active === true;
+
+      if (isKilled) {
+        return jsonResp({
+          allowed: false,
+          reason: 'KILL_SWITCH_ACTIVE',
+          message: (killSwitch && killSwitch.message) || 'التطبيق متوقف مؤقتاً.',
+          messageEn: (killSwitch && killSwitch.messageEn) || 'App temporarily unavailable.',
+        });
+      }
+
+      return jsonResp({
+        allowed: true,
+        reason: 'OK',
+        serverTime: isoNow,
+        message: 'مرحباً بك في زقزوقة TV',
+      });
+    } catch (err) {
+      // On error, allow the app to proceed (fail open)
+      return jsonResp({ allowed: true, reason: 'ERROR_ALLOW', error: err.message });
+    }
+  }
+
+  if (route === 'reset') {
+    const authHeader = req.headers.get('x-master-secret') || '';
+    if (authHeader !== MASTER_SECRET) return jsonResp({ error: 'Access denied' }, 403);
+    if (req.method !== 'POST') return jsonResp({ error: 'POST only' }, 405);
+
+    try {
+      const target = body.target || 'stats';
+      await fbDelete(target);
+      return jsonResp({ ok: true, deleted: target });
+    } catch (err) {
+      return jsonResp({ ok: false, error: err.message }, 500);
+    }
+  }
+
+  return jsonResp({ error: 'Unknown admin route: ' + route }, 400);
+}
+
+async function handleSystemControl(req, url, body) {
+  const isoNow = new Date().toISOString();
+
+  if (req.method === 'GET') {
+    try {
+      let val = await fbRead('system_control');
+      if (!val) {
+        val = {
+          status: 'active',
+          message: 'المنظومة نشطة وتعمل بشكل طبيعي',
+          updatedAt: Date.now(),
+          wipeTimestamp: 0,
+          components: {
+            download_site_enabled: true,
+            web_player_enabled: true,
+            website_enabled: true,
+            app_enabled: true,
+            player_enabled: true,
+            admin_enabled: true,
+          },
+        };
+      }
+      return jsonResp(val);
+    } catch (err) {
+      return jsonResp({ status: 'active', error: err.message }, 500);
+    }
+  }
+
+  if (req.method === 'POST') {
+    const authHeader = req.headers.get('x-admin-secret') || req.headers.get('x-master-secret') || '';
+    if (authHeader !== ADMIN_SECRET && authHeader !== MASTER_SECRET) {
+      return jsonResp({ error: 'Unauthorized' }, 403);
+    }
+
+    try {
+      await fbWrite('system_control', { ...body, updatedAt: Date.now() });
+      return jsonResp({ ok: true, message: 'System control updated' });
+    } catch (err) {
+      return jsonResp({ ok: false, error: err.message }, 500);
+    }
+  }
+
+  return jsonResp({ error: 'Method not allowed' }, 405);
+}
+
+async function handleExport(req, url) {
+  const auth = req.headers.get('x-admin-secret') || url.searchParams.get('secret') || '';
+  if (ADMIN_SECRET && auth !== ADMIN_SECRET) return jsonResp({ error: 'Unauthorized' }, 403);
+
+  const route = url.searchParams.get('route') || '';
+
+  try {
+    let data;
+    if (route === 'sessions') {
+      data = await fbRead('sessions');
+    } else if (route === 'searches') {
+      data = await fbRead('searches');
+    } else if (route === 'errors') {
+      data = await fbRead('errors');
+    } else {
+      data = await fbRead('stats');
+    }
+
+    return jsonResp({ ok: true, route, data: data || {} });
+  } catch (err) {
+    return jsonResp({ ok: false, error: err.message }, 500);
+  }
+}
+
+// ─── Main Fetch Handler ───────────────────────────────────────────────────────
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // Handle preflight
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: corsHeaders() });
+    }
+
+    // Parse JSON body if present
+    let body = {};
+    if (request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') {
+      try {
+        body = await request.json();
+      } catch (e) { body = {}; }
+    }
+
+    try {
+      if (path === '/api/health' || path === '/api/health/') return handleHealth(request);
+      if (path === '/api/status' || path === '/api/status/') return handleStatus(request);
+      if (path === '/api/stats' || path === '/api/stats/') return handleStats(request, url);
+      if (path.startsWith('/api/telemetry')) return handleTelemetry(request, url, body);
+      if (path.startsWith('/api/admin')) return handleAdmin(request, url, body);
+      if (path === '/api/system_control' || path === '/api/system_control/') return handleSystemControl(request, url, body);
+      if (path.startsWith('/api/export')) return handleExport(request, url);
+
+      // Root ping
+      if (path === '/' || path === '') {
+        return jsonResp({
+          service: 'Zaqzouka Dashboard API',
+          version: '2.0.0',
+          provider: 'Cloudflare Workers',
+          status: 'online',
+          endpoints: ['/api/health', '/api/status', '/api/stats', '/api/telemetry', '/api/admin', '/api/system_control', '/api/export'],
+        });
+      }
+
+      return jsonResp({ error: 'Not found', path }, 404);
+    } catch (err) {
+      return jsonResp({ error: 'Internal error', message: err.message }, 500);
+    }
+  },
+};

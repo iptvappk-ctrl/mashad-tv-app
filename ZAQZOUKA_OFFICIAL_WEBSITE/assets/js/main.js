@@ -416,7 +416,7 @@
   }
   // ── Download Hub Smart Telemetry & Conversion Tracker ──
   (function _initDownloadTelemetry() {
-    const API_ENDPOINT = 'https://zaqzouka-dashboard-api.vercel.app/api/telemetry';
+    const API_ENDPOINT = 'https://dashboard-api-amber-chi.vercel.app/api/telemetry';
 
     // 1. Detect Referrer
     const ref = _0xdoc.referrer || '';
@@ -520,7 +520,7 @@
 
       // 3. Track telemetry for bundle
       try {
-        fetch('https://zaqzouka-dashboard-api.vercel.app/api/telemetry?route=landing/download', {
+        fetch('https://dashboard-api-amber-chi.vercel.app/api/telemetry?route=landing/download', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

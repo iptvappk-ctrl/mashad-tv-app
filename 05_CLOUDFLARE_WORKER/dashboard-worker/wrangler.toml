@@ -1,0 +1,11 @@
+name = "zaqzouka-dashboard-api"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+FIREBASE_PROJECT_ID = "madartv"
+FIREBASE_DATABASE_URL = "https://madartv-default-rtdb.firebaseio.com"
+ADMIN_SECRET = "Zq!7#mK9xPd@3wR5nT"
+MASTER_SECRET = "zaqzouka_master_2026"
+ZAQZOUKA_API_KEY = "ZQ-OWNER-2026-SECRET-14MOON"

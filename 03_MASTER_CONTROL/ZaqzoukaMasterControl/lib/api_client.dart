@@ -3,8 +3,8 @@ import 'package:http/http.dart' as http;
 
 class MasterApiClient {
   static const List<String> _endpoints = [
-    'https://zaqzouka-dashboard-api.vercel.app/api/system_control',
-    'https://zaqzouka-vercel-hub.vercel.app/api/system_control',
+    'https://dashboard-api-amber-chi.vercel.app/api/system_control',
+    'https://dashboard-api-amber-chi.vercel.app/api/status',
   ];
   static const String _adminSecret = 'Zq!7#mK9xPd@3wR5nT';
 
