@@ -166,7 +166,7 @@ class FlutterMediaBridge(context: Context) {
                 parentSeriesPageUrl = seriesItem.pageUrl,
                 latestEpisodeLabel = "",
             )
-            val bundle = if (isArabseed) {
+            val rawBundle = if (isArabseed) {
                 ArabseedRepository.fetchSeasonsAndEpisodes(
                     seasonItem,
                     forceRefresh = true,
@@ -179,6 +179,11 @@ class FlutterMediaBridge(context: Context) {
                     seasonNumbersOnly = setOf(seasonNumber),
                 )
             }
+            val bundle = MultiProviderRepository.fetchSeasonBundleAcrossProviders(
+                seriesItem,
+                rawBundle,
+                forceRefresh = false,
+            )
             MultiProviderRepository.cacheSeasonPageEnrichment(seriesItem, seasonItem, bundle)
             bundle.toMap()
         }

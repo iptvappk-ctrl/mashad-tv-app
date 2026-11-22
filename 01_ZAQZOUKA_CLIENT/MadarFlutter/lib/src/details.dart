@@ -192,7 +192,8 @@ class _DetailPageState extends State<DetailPage> {
         _serverRows = _maps(cached[0]?['servers']);
         _loading = _detail == null;
         _serversLoading = _serverRows.isEmpty;
-        _seasonsLoading = _bundle == null;
+        final initialSeasonEpisodes = _maps(_maps(_bundle?['seasons']).firstOrNull?['episodes']);
+        _seasonsLoading = _bundle == null || _seasonNeedsEnrichment(initialSeasonEpisodes);
         if (_bundle != null) {
           _seasonIndex = _seasonIndexFor(
             _bundle!,
@@ -772,11 +773,18 @@ class _DetailPageState extends State<DetailPage> {
     final seasonNumber = _integer(selected?['number']);
     final visibleCount = _visibleEpisodeCountBySeason[seasonNumber] ?? 60;
     final visibleEpisodes = episodes.take(visibleCount).toList(growable: false);
+    // hasLoadedMore: هناك حلقات في الذاكرة أكثر مما هو معروض (تحتاج "عرض المزيد")
     final hasLoadedMore = episodes.length > visibleEpisodes.length;
+    // canRequestMore: فقط لو لسه مش كل الحلقات اتجابت من السيرفر، مش لو احنا بس ماشغلناهاش
+    // وده يمنع زر "تحميل باقي الحلقات" ميظهرش لما كل الحلقات موجودة بالفعل
+    final allEpisodesShown = !hasLoadedMore;
     final canRequestMore =
-        selected != null &&
-        seasonNumber > 0 &&
-        !_episodeSeasonsExhausted.contains(seasonNumber);
+        !allEpisodesShown ||
+        (selected != null &&
+         seasonNumber > 0 &&
+         !_episodeSeasonsExhausted.contains(seasonNumber) &&
+         !_seasonsLoading &&
+         _maps(selected['episodes']).length < 3);
     return _SectionCard(
       title: 'حلقات هذا الجزء / الموسم',
       icon: '📺',
@@ -889,7 +897,7 @@ class _DetailPageState extends State<DetailPage> {
                 );
               }),
             ),
-            if (hasLoadedMore || canRequestMore) ...[
+            if (hasLoadedMore || (canRequestMore && !_seasonsLoading)) ...[
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed:

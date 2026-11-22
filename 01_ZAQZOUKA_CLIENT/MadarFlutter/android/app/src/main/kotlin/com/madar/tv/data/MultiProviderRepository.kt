@@ -287,6 +287,7 @@ object MultiProviderRepository {
         val qualitySelectors: List<String> = listOf(".quality", ".ribbon", ".__quality", ".qlty"),
         val yearSelectors: List<String> = listOf(".year", ".date"),
         val enabled: Boolean = true,
+        val isPrimary: Boolean = false,
     )
 
     // Remember a domain only after its actual listing route returned parseable data.
@@ -367,10 +368,11 @@ object MultiProviderRepository {
                 "article a", ".GridItem a",
             ),
             titleSelectors = listOf("h3", "h2", ".title", "img[alt]", "[title]"),
+            isPrimary = true,
         ),
 
         // ── 2. عرب سيد الأصلي (ArabSeed Here) ──────────────────────────
-        // PRIMARY #2: https://arabseed.here (سيرفرات سريعة Earnvids / Vinovo / Uqload)
+        // Disabled because .here is an unresolvable test domain
         ProviderConfig(
             id = "arabseed_here",
             name = "عرب سيد الأصلي",
@@ -384,6 +386,7 @@ object MultiProviderRepository {
                 "article a", ".post-item a", ".item-details a",
             ),
             titleSelectors = listOf("h2.title", "h2", "h3", ".title", "[title]"),
+            enabled = false,
         ),
 
         // ── 3. وي سيما (WeCima) ────────────────────────────────────────
@@ -401,6 +404,7 @@ object MultiProviderRepository {
                 "div.Block--Item a", "article a",
             ),
             titleSelectors = listOf("strong.hasyear", "h3", "h2", ".Title", "[title]"),
+            isPrimary = true,
         ),
 
         // ── 4. أكوام (Akwam - احتياطي) ─────────────────────────────────
@@ -422,6 +426,7 @@ object MultiProviderRepository {
                 ".br-card a",
             ),
             titleSelectors = listOf("h3.br-card-title", "h3", "h2", ".title"),
+            isPrimary = true,
         ),
 
         // ── 3. فاصل إعلاني (FaselHD) ──────────────────────────────────
@@ -438,6 +443,7 @@ object MultiProviderRepository {
                 "a[href*='/movie/']", "a[href*='/serie/']", "article a",
             ),
             titleSelectors = listOf(".list-title", ".post__title", "h2", "h3"),
+            isPrimary = true,
         ),
 
         // ── 4. إيجي بست (EgyBest) ──────────────────────────────────────
@@ -3509,73 +3515,85 @@ object MultiProviderRepository {
 
         val directDiscoveredEpisodes = java.util.concurrent.ConcurrentLinkedQueue<ArabseedEpisode>()
         val year = releaseYear(item)
-        val searchTasks = PROVIDERS.filter { it.enabled }.map { provider ->
-            {
-                try {
-                    var providerCandidates = emptyList<ArabseedItem>()
-                    for (query in candidateSearchQueries) {
-                        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-                        val results = fetchProviderListing(
-                            provider,
-                            provider.searchPath.replace("{q}", encoded),
-                            ArabseedType.SERIES,
-                        )
-                        val seriesPages = mutableListOf<ArabseedItem>()
-                        for (candidate in results) {
-                            val titleMatch = targetIdentityKeys.any { key -> matchesSeriesTitle(key, candidate) }
-                            if (!titleMatch) continue
-                            val isEp = SeriesCatalogParser.isEpisode(candidate.title, candidate.pageUrl)
-                            if (isEp) {
-                                val strictlyMatches = titlesStrictlyMatch(item.title, candidate.title) ||
-                                    (!item.parentSeriesTitle.isNullOrBlank() && titlesStrictlyMatch(item.parentSeriesTitle!!, candidate.title))
-                                if (!strictlyMatches) continue
-                                val epNum = SeriesCatalogParser.episodeNumber(candidate.title, candidate.pageUrl)
-                                if (epNum != null && epNum > 0) {
-                                    val sNum = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl)
-                                        ?: SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
-                                        ?: 1
-                                    directDiscoveredEpisodes.add(
-                                        ArabseedEpisode(
-                                            number = epNum,
-                                            title = "الحلقة $epNum",
-                                            pageUrl = candidate.pageUrl,
-                                            seasonNumber = sNum,
-                                            providerName = provider.name,
-                                        )
+        val allEnabledProviders = PROVIDERS.filter { it.enabled }
+        val primaryProviders = allEnabledProviders.filter { it.isPrimary }
+        val backupProviders = allEnabledProviders.filter { !it.isPrimary }
+
+        fun makeSearchTask(provider: ProviderConfig): () -> List<ArabseedItem> = {
+            try {
+                var providerCandidates = emptyList<ArabseedItem>()
+                for (query in candidateSearchQueries) {
+                    val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+                    val results = fetchProviderListing(
+                        provider,
+                        provider.searchPath.replace("{q}", encoded),
+                        ArabseedType.SERIES,
+                    )
+                    val seriesPages = mutableListOf<ArabseedItem>()
+                    for (candidate in results) {
+                        val titleMatch = targetIdentityKeys.any { key -> matchesSeriesTitle(key, candidate) }
+                        if (!titleMatch) continue
+                        val isEp = SeriesCatalogParser.isEpisode(candidate.title, candidate.pageUrl)
+                        if (isEp) {
+                            val strictlyMatches = titlesStrictlyMatch(item.title, candidate.title) ||
+                                (!item.parentSeriesTitle.isNullOrBlank() && titlesStrictlyMatch(item.parentSeriesTitle!!, candidate.title))
+                            if (!strictlyMatches) continue
+                            val epNum = SeriesCatalogParser.episodeNumber(candidate.title, candidate.pageUrl)
+                            if (epNum != null && epNum > 0) {
+                                val sNum = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl)
+                                    ?: SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                                    ?: 1
+                                directDiscoveredEpisodes.add(
+                                    ArabseedEpisode(
+                                        number = epNum,
+                                        title = "الحلقة $epNum",
+                                        pageUrl = candidate.pageUrl,
+                                        seasonNumber = sNum,
+                                        providerName = provider.name,
                                     )
-                                }
-                            } else {
-                                val candidateYear = releaseYear(candidate)
-                                val isSeasonPage = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl) != null
-                                val compatibleYear = year.isBlank() || year == candidateYear ||
-                                    (candidateYear.isBlank() && isSeasonPage)
-                                if (candidate.type == ArabseedType.SERIES && compatibleYear) {
-                                    seriesPages.add(candidate)
-                                }
+                                )
+                            }
+                        } else {
+                            val candidateYear = releaseYear(candidate)
+                            val isSeasonPage = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl) != null
+                            val compatibleYear = year.isBlank() || year == candidateYear ||
+                                (candidateYear.isBlank() && isSeasonPage)
+                            if (candidate.type == ArabseedType.SERIES && compatibleYear) {
+                                seriesPages.add(candidate)
                             }
                         }
-                        val foundDirect = directDiscoveredEpisodes.any { it.providerName == provider.name }
-                        if (seriesPages.isNotEmpty() || foundDirect) {
-                            android.util.Log.i(
-                                TAG,
-                                "Season search provider=${provider.id} matched ${seriesPages.size} series pages and ${directDiscoveredEpisodes.count { it.providerName == provider.name }} direct episodes with query='$query'",
-                            )
-                            providerCandidates = seriesPages.distinctBy { SeriesCatalogParser.normalizedUrl(it.pageUrl) }
-                            break
-                        }
                     }
-                    providerCandidates
-                } catch (error: Exception) {
-                    android.util.Log.w(
-                        TAG,
-                        "Season search skipped provider=${provider.id} error=${error.javaClass.simpleName}",
-                    )
-                    emptyList()
+                    val foundDirect = directDiscoveredEpisodes.any { it.providerName == provider.name }
+                    if (seriesPages.isNotEmpty() || foundDirect) {
+                        android.util.Log.i(
+                            TAG,
+                            "Season search provider=${provider.id} matched ${seriesPages.size} series pages and ${directDiscoveredEpisodes.count { it.providerName == provider.name }} direct episodes with query='$query'",
+                        )
+                        providerCandidates = seriesPages.distinctBy { SeriesCatalogParser.normalizedUrl(it.pageUrl) }
+                        break
+                    }
                 }
+                providerCandidates
+            } catch (error: Exception) {
+                android.util.Log.w(
+                    TAG,
+                    "Season search skipped provider=${provider.id} error=${error.javaClass.simpleName}",
+                )
+                emptyList()
             }
         }
 
-        val discovered = collectParallel(searchTasks, timeoutSeconds = 20)
+        // Fast Stage 1: Priority search on the 4 primary providers (Arabseed, Akwam, WeCima, FaselHD)
+        val primaryTasks = primaryProviders.map { makeSearchTask(it) }
+        val primaryDiscovered = collectParallel(primaryTasks, timeoutSeconds = 5)
+
+        // Stage 2: Only fallback to backup providers if primary providers returned zero results
+        val discovered = if (primaryDiscovered.isNotEmpty() || directDiscoveredEpisodes.isNotEmpty()) {
+            primaryDiscovered
+        } else {
+            val backupTasks = backupProviders.map { makeSearchTask(it) }
+            collectParallel(backupTasks, timeoutSeconds = 6)
+        }
         val primaryUrl = SeriesCatalogParser.normalizedUrl(item.pageUrl)
         val candidates = selectSeriesPages(discovered)
             .filter { SeriesCatalogParser.normalizedUrl(it.pageUrl) != primaryUrl }
@@ -3617,14 +3635,18 @@ object MultiProviderRepository {
             .mapNotNull { rows -> rows.maxByOrNull(::catalogMetadataScore) }
             .take(PROVIDERS.count { it.enabled })
             .map { it to null }
-        // Probe every configured provider's canonical page first, then the
-        // selected source's season pages, then cross-provider season mirrors.
-        // This avoids truncating a configured provider when a show has several
-        // seasons while keeping total background fan-out bounded.
-        val mirrorLimit = (PROVIDERS.count { it.enabled } + knownSeasonNumbers.size * 3)
-            .coerceIn(16, 48)
+        // Prioritize primary providers first, bounded to 8 mirrors max for lightning fast load
+        val mirrorLimit = 8
         val mirrors = (canonicalMirrors + localSeasonMirrors + seasonPageMirrors)
             .distinctBy { SeriesCatalogParser.normalizedUrl(it.first.pageUrl) }
+            .sortedWith(
+                compareByDescending<Pair<ArabseedItem, Set<Int>?>> { (mirror, _) ->
+                    val provider = getProviderForUrl(mirror.pageUrl)
+                    if (provider?.isPrimary == true) 2 else 0
+                }.thenByDescending { (mirror, _) ->
+                    catalogMetadataScore(mirror)
+                }
+            )
             .take(mirrorLimit)
 
         val discoveredProviders = discovered
@@ -3673,7 +3695,7 @@ object MultiProviderRepository {
                 )
             })
         }
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
         repeat(futures.size) {
             val remaining = deadline - System.nanoTime()
             if (remaining <= 0L) return@repeat
@@ -3703,6 +3725,11 @@ object MultiProviderRepository {
             val partial = mergeProviderSeasonBundles(partialBundles)
             if (partial.seasons.isNotEmpty() || partial.relatedParts.isNotEmpty()) {
                 CatalogDiskCache.saveSeasonBundle(cacheKey, partial)
+            }
+            val allSeasonsGood = partial.seasons.isNotEmpty() && partial.seasons.all { it.episodes.size >= 5 }
+            if (allSeasonsGood && System.nanoTime() > (deadline - TimeUnit.SECONDS.toNanos(4))) {
+                android.util.Log.i(TAG, "Early break in season enrichment: all seasons have 5+ episodes")
+                return@repeat
             }
         }
         futures.filterNot { it.isDone }.forEach { it.cancel(true) }

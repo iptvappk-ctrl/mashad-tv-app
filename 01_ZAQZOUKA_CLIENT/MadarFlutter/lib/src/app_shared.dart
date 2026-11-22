@@ -700,9 +700,13 @@ Map<String, dynamic> _mergeSeasonBundles(
       final episodeNumber = _episodeNumber(episode);
       final url = _normalizedMediaUrl(_text(episode['pageUrl']));
       if (episodeNumber > 0) {
+        final existingEp = episodesByNumber[episodeNumber];
+        final curUrl = _text(episode['pageUrl']).trim();
+        final oldUrl = _text(existingEp?['pageUrl']).trim();
         episodesByNumber[episodeNumber] = {
-          ...?episodesByNumber[episodeNumber],
+          ...?existingEp,
           ...episode,
+          if (curUrl.isEmpty && oldUrl.isNotEmpty) 'pageUrl': oldUrl,
         };
       } else if (url.isNotEmpty) {
         unnumberedByUrl[url] = {...?unnumberedByUrl[url], ...episode};
@@ -719,6 +723,7 @@ Map<String, dynamic> _mergeSeasonBundles(
       ...?freshSeason,
       'number': number,
       'title': _text(freshSeason?['title']).ifEmpty(_text(old?['title'])),
+      'pageUrl': _text(freshSeason?['pageUrl']).ifEmpty(_text(old?['pageUrl'])),
       'episodes': episodes,
     };
   }
