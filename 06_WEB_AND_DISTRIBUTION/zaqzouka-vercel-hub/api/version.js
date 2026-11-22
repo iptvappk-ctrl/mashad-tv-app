@@ -12,11 +12,11 @@ export default function handler(req, res) {
 
   const updateData = {
     packageName: "com.madar.madar_flutter",
-    versionCode: 76,
-    versionName: "1.0.71",
-    releaseNotes: "تحديث جديد لتطبيق زقزوقة: إصلاحات شاملة لملخصات المباريات، إلغاء النوافذ الخارجية، دعم كامل لمشغل ZAG Player ومزامنة أسرع للقنوات والأفلام.",
+    versionCode: 83,
+    versionName: "1.0.76",
+    releaseNotes: "تحديث زقزوقة الشامل: استعراض كامل للحلقات والمواسم من المصادر الرئيسية الأربعة، فتح فوري لمباريات الكورة في ZAG Player، ومزامنة فائقة السرعة.",
     apkUrl: `${host}/downloads/zaqzouka-app.apk`,
-    sha256: "772194c0cde15d35ee8d1775a57bdcc05a4dc4fde7e874123cbaa4d15ad16ece",
+    sha256: "d32cead74d8ac8a193c44787e14e14b33c2a2d8d8b16ccd0b74ddc5ab671ea7f",
     player: {
       versionCode: 28,
       versionName: "1.1.28",
