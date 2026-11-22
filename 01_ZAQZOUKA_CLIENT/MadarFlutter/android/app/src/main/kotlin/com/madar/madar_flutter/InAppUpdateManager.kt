@@ -28,9 +28,9 @@ import com.madar.tv.notifications.NotificationCenter
 /** Public Android updater using Firebase metadata and public GitHub APK assets. */
 class InAppUpdateManager(private val activity: MainActivity) {
     private val client = OkHttpClient.Builder()
-        .connectTimeout(7, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .callTimeout(3, TimeUnit.MINUTES)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.MINUTES)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
@@ -658,7 +658,9 @@ class InAppUpdateManager(private val activity: MainActivity) {
                 val checksum = json.optString("sha256")
                 val uri = Uri.parse(apkUrl)
                 val expectedAssetName = "zaqzouka-$versionName-$versionCode.apk"
-                val trustedPath = uri.path.orEmpty().startsWith(GITHUB_RELEASE_PATH) &&
+                val trustedPath = (uri.path.orEmpty().startsWith(GITHUB_RELEASE_PATH) ||
+                    uri.path.orEmpty().startsWith("/iptvappk-ctrl/mashad-tv-app/releases/download/") ||
+                    uri.path.orEmpty().startsWith("/hassanIssa00/madartv-updates/releases/download/")) &&
                     uri.path.orEmpty().endsWith("/$expectedAssetName")
                 if (packageName != APP_PACKAGE || versionCode <= 0L ||
                     versionName.isBlank() || versionName.length > MAX_VERSION_NAME_CHARS ||
@@ -697,7 +699,9 @@ class InAppUpdateManager(private val activity: MainActivity) {
                 val apkUrl = asset.optString("browser_download_url")
                 val checksum = asset.optString("digest").removePrefix("sha256:")
                 val uri = Uri.parse(apkUrl)
-                val trustedPath = uri.path.orEmpty().startsWith(GITHUB_RELEASE_PATH) &&
+                val trustedPath = (uri.path.orEmpty().startsWith(GITHUB_RELEASE_PATH) ||
+                    uri.path.orEmpty().startsWith("/iptvappk-ctrl/mashad-tv-app/releases/download/") ||
+                    uri.path.orEmpty().startsWith("/hassanIssa00/madartv-updates/releases/download/")) &&
                     uri.path.orEmpty().endsWith("/$expectedAssetName")
                 if (versionCode <= 0L || versionName.isBlank() ||
                     checksum.matches(Regex("[a-fA-F0-9]{64}")).not() || uri.scheme != "https" ||
