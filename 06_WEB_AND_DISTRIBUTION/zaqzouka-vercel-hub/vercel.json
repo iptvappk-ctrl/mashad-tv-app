@@ -6,26 +6,31 @@
       "dest": "/api/status.js",
       "headers": {
         "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "s-maxage=60, stale-while-revalidate=300"
+        "Cache-Control": "s-maxage=300, stale-while-revalidate=3600"
       }
     },
     {
       "src": "/api/system_control",
       "dest": "/api/system_control.js",
       "headers": {
-        "Access-Control-Allow-Origin": "*"
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store"
       }
     },
     {
       "src": "/api/version",
-      "dest": "/api/version.js"
+      "dest": "/api/version.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "s-maxage=3600, stale-while-revalidate=86400"
+      }
     },
     {
       "src": "/status/system.json",
       "dest": "/public/status/system.json",
       "headers": {
         "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "s-maxage=120, stale-while-revalidate=600",
+        "Cache-Control": "s-maxage=300, stale-while-revalidate=1800",
         "Content-Type": "application/json"
       }
     },
@@ -34,21 +39,32 @@
       "dest": "/public/updates/android/latest.json",
       "headers": {
         "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "no-cache, no-store, must-revalidate"
+        "Cache-Control": "s-maxage=300, stale-while-revalidate=1800"
       }
     },
     {
-      "src": "/downloads/(.*)",
-      "dest": "/public/downloads/$1",
+      "src": "/downloads/(.*)\\.apk",
+      "dest": "/public/downloads/$1.apk",
       "headers": {
         "Access-Control-Allow-Origin": "*",
         "Content-Type": "application/vnd.android.package-archive",
-        "Content-Disposition": "attachment"
+        "Content-Disposition": "attachment",
+        "Cache-Control": "public, s-maxage=86400, max-age=86400, stale-while-revalidate=604800"
+      }
+    },
+    {
+      "src": "/(.*\\.(js|css|png|jpg|jpeg|ico|svg|woff2|woff|ttf))",
+      "dest": "/public/$1",
+      "headers": {
+        "Cache-Control": "public, s-maxage=604800, max-age=604800, immutable"
       }
     },
     {
       "src": "/(.*)",
-      "dest": "/public/$1"
+      "dest": "/public/$1",
+      "headers": {
+        "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400"
+      }
     }
   ]
 }

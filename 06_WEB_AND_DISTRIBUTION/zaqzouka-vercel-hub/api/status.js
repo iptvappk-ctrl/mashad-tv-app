@@ -5,12 +5,12 @@
 
 let _cache = null;
 let _cacheTime = 0;
-const MEMORY_TTL = 30000;
+const MEMORY_TTL = 180000; // 3 minutes in-process cache (↑ from 30s to save Vercel invocations)
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=3600');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
