@@ -222,6 +222,8 @@ class _SportsPageState extends State<SportsPage> {
       _section = value;
       if (value == 'channels' && _channels.isEmpty) {
         _loadChannels(_categoryId ?? 'bein_sports');
+      } else if (value == 'highlights') {
+        unawaited(_fetchBeInHighlights());
       }
     }),
   );
@@ -517,15 +519,7 @@ class _SportsPageState extends State<SportsPage> {
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => MatchDetailPage(
-              fixtureMatch: match,
-              yacineEvents: _events,
-              footballMatches: _footballMatches,
-            ),
-          ),
-        ),
+        onTap: () => _chooseStreamsForFixture(match),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -859,13 +853,12 @@ class _SportsPageState extends State<SportsPage> {
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => MatchDetailPage(
-              event: event,
-              footballMatches: _footballMatches,
-            ),
-          ),
+        onTap: () => _chooseStreams(
+          id,
+          _matchTitle(event),
+          true,
+          channelOverride: _text(event['channel']),
+          leagueOverride: _text(event['champions']),
         ),
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -1036,138 +1029,48 @@ class _SportsPageState extends State<SportsPage> {
         return;
       }
 
-      await showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        backgroundColor: _card,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (sheet) => SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
-            shrinkWrap: true,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        color: _ink,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 17,
-                      ),
-                    ),
-                  ),
-                  if (channelName.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: _brick.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        channelName,
-                        style: const TextStyle(
-                          color: _brick,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                ],
+      final primaryStream = streams.first;
+      final primaryUrl = _text(primaryStream['url']).trim();
+      final headers = primaryStream['headers'] is Map
+          ? Map<String, String>.from(
+              (primaryStream['headers'] as Map).map(
+                (k, v) => MapEntry('$k', '$v'),
               ),
-              const SizedBox(height: 6),
-              const Text(
-                'اختر سيرفر أو قناة المشاهدة المباشرة (سيرفرات فائقة السرعة)',
-                style: TextStyle(color: _muted, fontSize: 13),
-              ),
-              const SizedBox(height: 12),
-              ...streams.map(
-                (stream) {
-                  final streamName = _text(stream['name']).ifEmpty('سيرفر بث مباشر');
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(13),
-                        onTap: () async {
-                          Navigator.pop(sheet);
-                          final headers = stream['headers'] is Map
-                              ? Map<String, String>.from(
-                                  (stream['headers'] as Map).map(
-                                    (k, v) => MapEntry('$k', '$v'),
-                                  ),
-                                )
-                              : <String, String>{};
-                          final backupSources = streams
-                              .where(
-                                (candidate) =>
-                                    _text(candidate['url']).trim().isNotEmpty &&
-                                    _text(candidate['url']).trim() !=
-                                        _text(stream['url']).trim(),
-                              )
-                              .map((candidate) {
-                                final candidateHeaders = candidate['headers'] is Map
-                                    ? Map<String, String>.from(
-                                        (candidate['headers'] as Map).map(
-                                          (key, value) => MapEntry('$key', '$value'),
-                                        ),
-                                      )
-                                    : <String, String>{};
-                                return <String, dynamic>{
-                                  'url': _text(candidate['url']).trim(),
-                                  'userAgent': _text(candidate['userAgent']),
-                                  'referer': _text(candidate['referer']),
-                                  'headers': candidateHeaders,
-                                };
-                              })
-                              .toList(growable: false);
-                          await _launchPlayer(
-                            context,
-                            _text(stream['url']),
-                            title,
-                            userAgent: _text(stream['userAgent']),
-                            referer: _text(stream['referer']),
-                            headers: headers,
-                            backupSources: backupSources,
-                            isLive: true,
-                          );
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(13),
-                            border: Border.all(color: _line),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.play_circle_fill_rounded, color: _brick, size: 22),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  streamName,
-                                  style: const TextStyle(
-                                    color: _ink,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ),
-                              const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: _muted),
-                            ],
-                          ),
-                        ),
-                      ),
+            )
+          : <String, String>{};
+
+      final backupSources = streams
+          .where(
+            (candidate) =>
+                _text(candidate['url']).trim().isNotEmpty &&
+                _text(candidate['url']).trim() != primaryUrl,
+          )
+          .map((candidate) {
+            final candidateHeaders = candidate['headers'] is Map
+                ? Map<String, String>.from(
+                    (candidate['headers'] as Map).map(
+                      (key, value) => MapEntry('$key', '$value'),
                     ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
+                  )
+                : <String, String>{};
+            return <String, dynamic>{
+              'url': _text(candidate['url']).trim(),
+              'userAgent': _text(candidate['userAgent']),
+              'referer': _text(candidate['referer']),
+              'headers': candidateHeaders,
+            };
+          })
+          .toList(growable: false);
+
+      await _launchPlayer(
+        context,
+        primaryUrl,
+        title,
+        userAgent: _text(primaryStream['userAgent']),
+        referer: _text(primaryStream['referer']),
+        headers: headers,
+        backupSources: backupSources,
+        isLive: true,
       );
     } catch (error) {
       if (mounted) _message(context, 'تعذر جلب سيرفرات البث: $error');
@@ -1301,11 +1204,11 @@ Widget _highlightsPromoCard() {
       if (fresh.isNotEmpty) {
         if (query.trim().isEmpty) {
           final Map<String, MatchHighlight> unique = {};
-          for (final h in _kStarterHighlights) {
-            unique[h.id] = h;
-          }
           for (final h in fresh) {
             unique[h.id] = h;
+          }
+          for (final h in _kStarterHighlights) {
+            if (!unique.containsKey(h.id)) unique[h.id] = h;
           }
           _allHighlights = unique.values.toList();
           _highlights = _filterHighlights();
@@ -2085,11 +1988,95 @@ class MatchHighlight {
 
 const List<MatchHighlight> _kStarterHighlights = [
   MatchHighlight(
+    id: 'f1T_xl4iDxE',
+    title: 'ملخص مباراة ريال مدريد وسيلتا فيغو | الدوري الإسباني - الجولة 13',
+    channel: 'beIN SPORTS',
+    duration: '12:40',
+    timeAgo: 'منذ ساعة',
+    views: '450 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/f1T_xl4iDxE/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=f1T_xl4iDxE',
+    embedUrl: 'https://www.youtube.com/embed/f1T_xl4iDxE?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الإسباني',
+  ),
+  MatchHighlight(
+    id: 'DtCLmQtiE5c',
+    title: 'ملخص مباراة نيوكاسل وأرسنال | الدوري الإنجليزي الممتاز - الجولة 11',
+    channel: 'beIN SPORTS',
+    duration: '11:15',
+    timeAgo: 'منذ ساعتين',
+    views: '890 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/DtCLmQtiE5c/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=DtCLmQtiE5c',
+    embedUrl: 'https://www.youtube.com/embed/DtCLmQtiE5c?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الإنجليزي',
+  ),
+  MatchHighlight(
+    id: '2_ho_YYCn6Q',
+    title: 'ملخص مباراة نيس وباريس سان جيرمان | الدوري الفرنسي - الجولة 11',
+    channel: 'beIN SPORTS',
+    duration: '10:20',
+    timeAgo: 'منذ 3 ساعات',
+    views: '320 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/2_ho_YYCn6Q/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=2_ho_YYCn6Q',
+    embedUrl: 'https://www.youtube.com/embed/2_ho_YYCn6Q?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الفرنسي',
+  ),
+  MatchHighlight(
+    id: '-2g1uIj_IbE',
+    title: 'ملخص مباراة تشيلسي وليدز يونايتد | الدوري الإنجليزي الممتاز - الجولة 11',
+    channel: 'beIN SPORTS',
+    duration: '13:05',
+    timeAgo: 'منذ 5 ساعات',
+    views: '610 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/-2g1uIj_IbE/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=-2g1uIj_IbE',
+    embedUrl: 'https://www.youtube.com/embed/-2g1uIj_IbE?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الإنجليزي',
+  ),
+  MatchHighlight(
+    id: 'oLhKKNEKSmE',
+    title: 'ملخص مباراة مانشستر سيتي وفولهام | الدوري الإنجليزي الممتاز - الجولة 11',
+    channel: 'beIN SPORTS',
+    duration: '11:50',
+    timeAgo: 'منذ 8 ساعات',
+    views: '1.1 مليون مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/oLhKKNEKSmE/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=oLhKKNEKSmE',
+    embedUrl: 'https://www.youtube.com/embed/oLhKKNEKSmE?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الإنجليزي',
+  ),
+  MatchHighlight(
+    id: 'o3c98pVZBKY',
+    title: 'من قلب انفيلد .. قمة ليفربول ومانشستر يونايتيد',
+    channel: 'beIN SPORTS',
+    duration: '14:10',
+    timeAgo: 'أمس',
+    views: '1.4 مليون مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/o3c98pVZBKY/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=o3c98pVZBKY',
+    embedUrl: 'https://www.youtube.com/embed/o3c98pVZBKY?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الإنجليزي',
+  ),
+  MatchHighlight(
+    id: 'bFLlQsLXkSU',
+    title: 'ملخص مباراة آرسنال وتشلسي | الدوري الإنجليزي - الجولة 3',
+    channel: 'beIN SPORTS',
+    duration: '10:15',
+    timeAgo: 'قبل يومين',
+    views: '980 ألف مشاهدة',
+    thumbnail: 'https://i.ytimg.com/vi/bFLlQsLXkSU/hqdefault.jpg',
+    videoUrl: 'https://www.youtube.com/watch?v=bFLlQsLXkSU',
+    embedUrl: 'https://www.youtube.com/embed/bFLlQsLXkSU?autoplay=1&controls=1&playsinline=1',
+    tournament: 'الدوري الإنجليزي',
+  ),
+  MatchHighlight(
     id: 'd5B3UyUeOGM',
     title: 'ملخص مباراة إسبانيا وإنجلترا | دوري الأمم الأوروبية - الجولة السادسة',
     channel: 'beIN SPORTS',
     duration: '11:57',
-    timeAgo: 'قبل 4 ساعات',
+    timeAgo: 'قبل 4 أيام',
     views: '821 ألف مشاهدة',
     thumbnail: 'https://i.ytimg.com/vi/d5B3UyUeOGM/hqdefault.jpg',
     videoUrl: 'https://www.youtube.com/watch?v=d5B3UyUeOGM',
@@ -2101,35 +2088,11 @@ const List<MatchHighlight> _kStarterHighlights = [
     title: 'ملخص مباراة فرنسا وتركيا | دوري الأمم الأوروبية - الجولة السادسة',
     channel: 'beIN SPORTS',
     duration: '8:44',
-    timeAgo: 'قبل 4 ساعات',
+    timeAgo: 'قبل 4 أيام',
     views: '540 ألف مشاهدة',
     thumbnail: 'https://i.ytimg.com/vi/h5eCgxrtmUk/hqdefault.jpg',
     videoUrl: 'https://www.youtube.com/watch?v=h5eCgxrtmUk',
     embedUrl: 'https://www.youtube.com/embed/h5eCgxrtmUk?autoplay=1&controls=1&playsinline=1',
-    tournament: 'دوري الأمم الأوروبية',
-  ),
-  MatchHighlight(
-    id: 'Q1dhBbciRpQ',
-    title: 'ملخص مباراة جمهورية التشيك وإسبانيا | دوري الأمم الأوروبية - الجولة الخامسة',
-    channel: 'beIN SPORTS',
-    duration: '11:54',
-    timeAgo: 'قبل يومين',
-    views: '690 ألف مشاهدة',
-    thumbnail: 'https://i.ytimg.com/vi/Q1dhBbciRpQ/hqdefault.jpg',
-    videoUrl: 'https://www.youtube.com/watch?v=Q1dhBbciRpQ',
-    embedUrl: 'https://www.youtube.com/embed/Q1dhBbciRpQ?autoplay=1&controls=1&playsinline=1',
-    tournament: 'دوري الأمم الأوروبية',
-  ),
-  MatchHighlight(
-    id: 'k8F2o_L9wQs',
-    title: 'ملخص مباراة إيطاليا وفرنسا | دوري الأمم الأوروبية - الجولة الخامسة',
-    channel: 'beIN SPORTS',
-    duration: '9:54',
-    timeAgo: 'قبل 3 أيام',
-    views: '1.2 مليون مشاهدة',
-    thumbnail: 'https://i.ytimg.com/vi/k8F2o_L9wQs/hqdefault.jpg',
-    videoUrl: 'https://www.youtube.com/watch?v=k8F2o_L9wQs',
-    embedUrl: 'https://www.youtube.com/embed/k8F2o_L9wQs?autoplay=1&controls=1&playsinline=1',
     tournament: 'دوري الأمم الأوروبية',
   ),
   MatchHighlight(
@@ -2144,84 +2107,137 @@ const List<MatchHighlight> _kStarterHighlights = [
     embedUrl: 'https://www.youtube.com/embed/9vYgRkF-qXw?autoplay=1&controls=1&playsinline=1',
     tournament: 'الدوري الإسباني',
   ),
-  MatchHighlight(
-    id: 'mQe2nZ8yW0g',
-    title: 'ملخص مباراة ليفربول ومانشستر سيتي | قمة الدوري الإنجليزي الممتاز',
-    channel: 'beIN SPORTS',
-    duration: '13:15',
-    timeAgo: 'قبل أسبوع',
-    views: '2.8 مليون مشاهدة',
-    thumbnail: 'https://i.ytimg.com/vi/mQe2nZ8yW0g/hqdefault.jpg',
-    videoUrl: 'https://www.youtube.com/watch?v=mQe2nZ8yW0g',
-    embedUrl: 'https://www.youtube.com/embed/mQe2nZ8yW0g?autoplay=1&controls=1&playsinline=1',
-    tournament: 'الدوري الإنجليزي',
-  ),
-  MatchHighlight(
-    id: 'b8L2w_P0qZs',
-    title: 'ملخص مباراة بايرن ميونخ وباريس سان جيرمان | دوري أبطال أوروبا',
-    channel: 'beIN SPORTS',
-    duration: '12:30',
-    timeAgo: 'قبل أسبوعين',
-    views: '1.9 مليون مشاهدة',
-    thumbnail: 'https://i.ytimg.com/vi/b8L2w_P0qZs/hqdefault.jpg',
-    videoUrl: 'https://www.youtube.com/watch?v=b8L2w_P0qZs',
-    embedUrl: 'https://www.youtube.com/embed/b8L2w_P0qZs?autoplay=1&controls=1&playsinline=1',
-    tournament: 'دوري أبطال أوروبا',
-  ),
-  MatchHighlight(
-    id: 'x7N3q_K1vYs',
-    title: 'ملخص مباراة مصر ومالاوي | تصفيات كأس أمم إفريقيا 2027',
-    channel: 'beIN SPORTS',
-    duration: '10:53',
-    timeAgo: 'قبل يومين',
-    views: '950 ألف مشاهدة',
-    thumbnail: 'https://i.ytimg.com/vi/x7N3q_K1vYs/hqdefault.jpg',
-    videoUrl: 'https://www.youtube.com/watch?v=x7N3q_K1vYs',
-    embedUrl: 'https://www.youtube.com/embed/x7N3q_K1vYs?autoplay=1&controls=1&playsinline=1',
-    tournament: 'كأس أمم إفريقيا',
-  ),
 ];
 
 class MatchHighlightsService {
   MatchHighlightsService._();
 
+  static const String _beinChannelId = 'UCJUCcJUeh0Cz2xyKwkw5Q1w';
+
   static Future<List<MatchHighlight>> fetchHighlights({String query = ''}) async {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    final List<MatchHighlight> results = [];
+    final Set<String> seenIds = {};
+
     try {
-      final List<Uri> endpoints = [];
+      // 1. Fetch live RSS feed from official beIN SPORTS YouTube channel
       if (query.trim().isEmpty) {
-        endpoints.add(Uri.parse('https://www.youtube.com/@beINSPORTS/videos'));
-        endpoints.add(Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent("ملخص مباراة beIN SPORTS")}'));
-      } else {
-        endpoints.add(Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent("ملخص ${query.trim()} beIN SPORTS")}'));
+        final rssItems = await _fetchFromAtomFeed(client, _beinChannelId);
+        for (final item in rssItems) {
+          if (seenIds.add(item.id)) results.add(item);
+        }
       }
 
-      for (final uri in endpoints) {
-        try {
-          final req = await client.getUrl(uri);
-          req.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-          req.headers.set('Accept-Language', 'ar,en;q=0.9');
-          final res = await req.close().timeout(const Duration(seconds: 8));
-          if (res.statusCode == 200) {
-            final html = await res.transform(utf8.decoder).join();
-            final match = RegExp(r'var ytInitialData = ({.*?});<\/script>').firstMatch(html);
-            if (match != null) {
-              final jsonStr = match.group(1);
-              if (jsonStr != null) {
-                final data = jsonDecode(jsonStr);
-                final List<MatchHighlight> results = [];
-                _extractFromYt(data, results);
-                if (results.isNotEmpty) return results;
-              }
-            }
-          }
-        } catch (_) {}
+      // 2. Fetch search results (sorted by date)
+      final searchItems = await _fetchFromYouTubeSearch(client, query.trim());
+      for (final item in searchItems) {
+        if (seenIds.add(item.id)) results.add(item);
       }
     } catch (_) {
     } finally {
       client.close();
     }
-    return [];
+
+    return results;
+  }
+
+  static Future<List<MatchHighlight>> _fetchFromAtomFeed(HttpClient client, String channelId) async {
+    final List<MatchHighlight> items = [];
+    try {
+      final feedUri = Uri.parse('https://www.youtube.com/feeds/videos.xml?channel_id=$channelId');
+      final req = await client.getUrl(feedUri);
+      req.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+      final res = await req.close().timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final xml = await res.transform(utf8.decoder).join();
+        final entryPattern = RegExp(r'<entry>(.*?)</entry>', dotAll: true);
+        final idPattern = RegExp(r'<yt:videoId>(.*?)</yt:videoId>');
+        final titlePattern = RegExp(r'<title>(.*?)</title>');
+        final pubPattern = RegExp(r'<published>(.*?)</published>');
+
+        final now = DateTime.now().toUtc();
+        for (final match in entryPattern.allMatches(xml)) {
+          final block = match.group(1) ?? '';
+          final vidMatch = idPattern.firstMatch(block);
+          final titleMatch = titlePattern.firstMatch(block);
+          final pubMatch = pubPattern.firstMatch(block);
+
+          final vid = vidMatch?.group(1)?.trim() ?? '';
+          final title = titleMatch?.group(1)?.trim() ?? '';
+          final pubStr = pubMatch?.group(1)?.trim() ?? '';
+
+          if (vid.isEmpty || title.isEmpty) continue;
+
+          // Filter: only sports/match-related highlights
+          final isMatchVideo = title.contains('ملخص') ||
+              title.contains('مباراة') ||
+              title.contains('أهداف') ||
+              title.contains('دوري') ||
+              title.contains('كأس') ||
+              title.contains('قمة') ||
+              title.contains('هدف');
+          if (!isMatchVideo) continue;
+
+          // Compute relative Arabic time
+          String timeAgo = 'اليوم';
+          if (pubStr.isNotEmpty) {
+            final pubDt = DateTime.tryParse(pubStr)?.toUtc() ?? now;
+            final diffHours = now.difference(pubDt).inMinutes / 60.0;
+            if (diffHours < 1) {
+              timeAgo = 'منذ لحظات';
+            } else if (diffHours < 2) {
+              timeAgo = 'منذ ساعة';
+            } else if (diffHours < 24) {
+              timeAgo = 'منذ ${diffHours.toInt()} ساعات';
+            } else if (diffHours < 48) {
+              timeAgo = 'أمس';
+            } else {
+              timeAgo = 'قبل ${(diffHours / 24).toInt()} أيام';
+            }
+          }
+
+          final tour = _detectTournament(title);
+          items.add(MatchHighlight(
+            id: vid,
+            title: title,
+            channel: 'beIN SPORTS',
+            duration: '10:00',
+            timeAgo: timeAgo,
+            views: 'beIN حصري',
+            thumbnail: 'https://i.ytimg.com/vi/$vid/hqdefault.jpg',
+            videoUrl: 'https://www.youtube.com/watch?v=$vid',
+            embedUrl: 'https://www.youtube.com/embed/$vid?autoplay=1&controls=1&playsinline=1',
+            tournament: tour,
+          ));
+        }
+      }
+    } catch (_) {}
+    return items;
+  }
+
+  static Future<List<MatchHighlight>> _fetchFromYouTubeSearch(HttpClient client, String query) async {
+    final List<MatchHighlight> items = [];
+    try {
+      final q = query.isEmpty ? 'ملخص مباراة beIN SPORTS' : 'ملخص $query beIN SPORTS';
+      final searchUri = Uri.parse('https://www.youtube.com/results?search_query=${Uri.encodeQueryComponent(q)}&sp=CAI%253D');
+      final req = await client.getUrl(searchUri);
+      req.headers.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+      req.headers.set('Accept-Language', 'ar,en;q=0.9');
+      req.headers.set('Cookie', 'SOCS=CAESEwgDEgk2OTU4Nzg5MjQaAmFyIAEaBgiA_K2uBg');
+      final res = await req.close().timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final html = await res.transform(utf8.decoder).join();
+        final match = RegExp(r'var ytInitialData = ({.*?});<\/script>').firstMatch(html);
+        if (match != null) {
+          final jsonStr = match.group(1);
+          if (jsonStr != null) {
+            final data = jsonDecode(jsonStr);
+            _extractFromYt(data, items);
+          }
+        }
+      }
+    } catch (_) {}
+    return items;
   }
 
   static void _extractFromYt(dynamic obj, List<MatchHighlight> out) {
