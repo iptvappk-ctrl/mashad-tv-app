@@ -63,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -565,11 +566,35 @@ private val AD_HOST_MARKERS = listOf(
     "redirect", "affiliate", "landing", "mostbet", "linebet", "winline", "bet"
 )
 
+private fun isYouTubeAd(url: String): Boolean {
+    val lower = url.lowercase(Locale.ROOT)
+    // Never block essential playback chunks, player base scripts, or fonts
+    if (lower.contains("videoplayback") || lower.contains("/s/player/") || lower.contains("base.js")) {
+        return false
+    }
+    return lower.contains("doubleclick") ||
+           lower.contains("googleads") ||
+           lower.contains("googlesyndication") ||
+           lower.contains("/pagead/") ||
+           lower.contains("/api/stats/ads") ||
+           lower.contains("youtubei/v1/player/ad_break") ||
+           lower.contains("/get_midroll_info") ||
+           lower.contains("/ptracking") ||
+           lower.contains("ad_type=") ||
+           lower.contains("adformat=") ||
+           lower.contains("adunit=") ||
+           lower.contains("ad_break") ||
+           lower.contains("pubads") ||
+           lower.contains("safeframe") ||
+           lower.contains("amazon-adsystem")
+}
+
 private fun isBlockedAd(url: String): Boolean {
+    if (isYouTubeAd(url)) return true
     val parsed = runCatching { URI.create(url) }.getOrNull() ?: return false
     val host = parsed.host.orEmpty().lowercase(Locale.ROOT)
     val path = parsed.path.orEmpty()
-    // Do not block legitimate YouTube requests
+    // YouTube host check: only non-ad YouTube requests pass through (ads caught above by isYouTubeAd)
     if (host.contains("youtube.com") || host.contains("googlevideo.com") || host.contains("ytimg.com")) {
         return false
     }
@@ -767,6 +792,154 @@ private fun extractDirectStream(urlStr: String, referer: String, ua: String): St
     return null
 }
 
+@Composable
+private fun CreativeLoadingScreen(
+    title: String,
+    elapsedSeconds: Long,
+    backupCount: Int,
+    onSwitchBackup: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "creative-loader")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "loader-rotation"
+    )
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.90f,
+        targetValue = 1.08f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "loader-pulse"
+    )
+
+    val statusText = when {
+        elapsedSeconds < 3L -> "جاري الاتصال بأسرع سيرفر متوفر... ⚡"
+        elapsedSeconds < 7L -> "جاري تهيئة البث وتخطي الإعلانات تلقائياً... 🎬"
+        elapsedSeconds < 12L -> "جاري فك تشفير وتجهيز أول مشهد بجودة فائقة... 🍿"
+        else -> "لحظات ويبدأ العرض بأعلى جودة... ✨"
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF1E1428),
+                        Color(0xFF0F0B17),
+                        Color(0xFF06040A)
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 24.dp)
+        ) {
+            Box(
+                modifier = Modifier.size(110.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(105.dp)
+                        .scale(pulse)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(Color(0x40D4AF37), Color(0x10D4AF37), Color.Transparent)
+                            )
+                        )
+                )
+
+                CircularProgressIndicator(
+                    progress = { 0.75f },
+                    modifier = Modifier
+                        .size(80.dp)
+                        .rotate(rotation),
+                    color = Color(0xFFD4AF37),
+                    trackColor = Color(0x22D4AF37),
+                    strokeWidth = 3.5.dp
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF191224))
+                        .border(1.dp, Color(0x66D4AF37), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🎬", fontSize = 24.sp)
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            if (title.isNotBlank()) {
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0x33D4AF37))
+                    .border(1.dp, Color(0x44D4AF37), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = statusText,
+                    color = Color(0xFFFFE082),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+
+            Text(
+                text = "جاري التحضير: ${formatTime(elapsedSeconds)}",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Normal
+            )
+
+            if (backupCount > 0 && elapsedSeconds >= 4L) {
+                Spacer(Modifier.height(14.dp))
+                Button(
+                    onClick = onSwitchBackup,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27AE60)),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Text("⚡ جرب سيرفر آخر ($backupCount)", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun PlayerScreen(
@@ -819,10 +992,19 @@ private fun PlayerScreen(
         } else ""
         """
             (function() {
+                var adCss = '.video-ads, .ytp-ad-module, .ytp-ad-overlay-container, .ytp-ad-player-overlay, ' +
+                    '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-text, .ytp-ad-preview-container, ' +
+                    '.ad-showing, .ad-container, .ytp-ad-button, .ytm-promoted-sparkles-web-renderer, ' +
+                    'ytm-companion-ad-renderer, .ytp-suggested-action, ytd-promoted-video-renderer, ' +
+                    'ytd-display-ad-renderer, .ytp-ad-action-interstitial, ytd-action-companion-ad-renderer, ' +
+                    '.ytp-ad-image-overlay, .ytp-paid-content-overlay, .ytp-ad-progress, .ytp-ad-progress-list, ' +
+                    '.ytm-skip-ad-button, [id*="ad-text"], .ytp-ad-message-container, .ytp-ad-duration-remaining { ' +
+                    'display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; width: 0 !important; height: 0 !important; } ';
+
                 var css = 'html, body { overflow: hidden !important; background: #000 !important; margin: 0 !important; padding: 0 !important; width: 100vw !important; height: 100vh !important; direction: ltr !important; } ' +
                     '.ytp-unmute, .ytm-unmute, [class*="unmute" i], .ytp-volume-area, .ytp-mute-button, ytm-mobile-topbar-renderer, ytm-pivot-bar-renderer, ytm-item-section-renderer, ytm-comment-section-renderer, .watch-below-the-player, ytm-reel-shelf-renderer, #related, #comments, .ytm-cinema, ytm-engagement-panel-section-list-renderer, ytm-single-column-watch-next-results-renderer, .fullscreen-icon, .player-controls-bottom { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; width: 0 !important; height: 0 !important; } ' +
                     '.player-container, #player-container-id, .html5-video-player, #player { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 999999 !important; background: #000 !important; margin: auto !important; } ' +
-                    'video { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; margin: auto !important; width: 100vw !important; height: 100vh !important; object-fit: contain !important; }' + '$hideSubsCss';
+                    'video { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; margin: auto !important; width: 100vw !important; height: 100vh !important; object-fit: contain !important; } ' + adCss + '$hideSubsCss';
                 var style = document.getElementById('zag-yt-cinema-css');
                 if (!style) {
                     style = document.createElement('style');
@@ -830,15 +1012,101 @@ private fun PlayerScreen(
                     (document.head || document.documentElement).appendChild(style);
                 }
                 style.textContent = css;
+
+                // ── Fast Player Getter & Seek Function ──
+                window.__zagGetPlayer = function() {
+                    var p = document.getElementById('movie_player');
+                    if (p && typeof p.seekTo === 'function') return p;
+                    var f = document.querySelector('.html5-video-player');
+                    if (f && typeof f.seekTo === 'function') return f;
+                    return null;
+                };
+
+                window.__zagSeekTo = function(sec) {
+                    try {
+                        var p = window.__zagGetPlayer();
+                        if (p && typeof p.seekTo === 'function') {
+                            p.seekTo(sec, true);
+                            if (typeof p.playVideo === 'function') p.playVideo();
+                            return;
+                        }
+                    } catch(e) {}
+                    var v = document.querySelector('video');
+                    if (v) {
+                        try {
+                            v.currentTime = sec;
+                            v.play();
+                        } catch(e2) {}
+                    }
+                };
+
+                // ── Aggressive Ad Killer & Auto-Skipper ──
+                function purgeYouTubeAds() {
+                    var skipButtons = document.querySelectorAll(
+                        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .videoAdUiSkipButton, button.ytp-ad-skip-button-text, .ytp-ad-overlay-close-button, .ytm-skip-ad-button, [id^="skip-button"]'
+                    );
+                    for (var i = 0; i < skipButtons.length; i++) {
+                        try { skipButtons[i].click(); } catch(e) {}
+                    }
+
+                    var p = window.__zagGetPlayer();
+                    var isAd = false;
+                    if (p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'))) {
+                        isAd = true;
+                    }
+                    if (document.querySelector('.ad-showing, .ad-container, .ytp-ad-player-overlay, .video-ads')) {
+                        isAd = true;
+                    }
+
+                    var v = document.querySelector('video');
+                    if (isAd && v) {
+                        try {
+                            v.muted = true;
+                            if (isFinite(v.duration) && v.duration > 0) {
+                                v.currentTime = v.duration;
+                            }
+                            v.playbackRate = 16.0;
+                        } catch(e) {}
+                    } else if (v && v.playbackRate > 2.0) {
+                        v.playbackRate = 1.0;
+                        v.muted = false;
+                    }
+
+                    var adEls = document.querySelectorAll(
+                        '.ad-showing, .ad-container, .video-ads, .ytp-ad-module, .ytp-ad-overlay-container, ' +
+                        '.ytp-ad-player-overlay, ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer, ' +
+                        '.ytp-ad-progress, .ytp-ad-progress-list, .ytp-ad-image-overlay, ytd-display-ad-renderer, ' +
+                        'ytd-promoted-video-renderer, .ytp-ad-action-interstitial, ytd-action-companion-ad-renderer, ' +
+                        '.ytp-ad-text, .ytp-ad-preview-container'
+                    );
+                    for (var j = 0; j < adEls.length; j++) {
+                        try {
+                            adEls[j].style.display = 'none';
+                            adEls[j].style.visibility = 'hidden';
+                            adEls[j].style.opacity = '0';
+                        } catch(e) {}
+                    }
+                }
+
+                purgeYouTubeAds();
+                if (!window.__zagAdKillerRunning) {
+                    window.__zagAdKillerRunning = true;
+                    setInterval(purgeYouTubeAds, 120);
+                    try {
+                        var obs = new MutationObserver(purgeYouTubeAds);
+                        obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+                    } catch(e) {}
+                }
+
                 var v = document.querySelector('video');
                 if (v) {
                     v.muted = false;
                     v.volume = 1.0;
                     if (v.paused) {
                         try {
-                            var p = v.play();
-                            if (p !== undefined) {
-                                p.catch(function() {
+                            var pl = v.play();
+                            if (pl !== undefined) {
+                                pl.catch(function() {
                                     v.muted = false;
                                     v.play();
                                 });
@@ -856,6 +1124,15 @@ private fun PlayerScreen(
                         v.__madar_hooked = true;
                         v.addEventListener('playing', function() {
                             if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
+                        });
+                        v.addEventListener('canplay', function() {
+                            if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
+                        });
+                        v.addEventListener('seeked', function() {
+                            if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
+                        });
+                        v.addEventListener('seeking', function() {
+                            if (window.MadarBridge) window.MadarBridge.onStateChange('buffering');
                         });
                         v.addEventListener('pause', function() {
                             if (window.MadarBridge) window.MadarBridge.onStateChange('paused');
@@ -956,16 +1233,23 @@ private fun PlayerScreen(
         { deltaSeconds ->
             val js = """
                 (function() {
-                    if (typeof player !== 'undefined' && player.seekTo && player.getCurrentTime) {
-                        var cur = player.getCurrentTime() || 0;
-                        var dur = player.getDuration() || 999999;
+                    var p = window.__zagGetPlayer ? window.__zagGetPlayer() : (document.getElementById('movie_player') || document.querySelector('.html5-video-player'));
+                    if (p && typeof p.seekTo === 'function') {
+                        var cur = (typeof p.getCurrentTime === 'function' ? p.getCurrentTime() : 0) || 0;
+                        var dur = (typeof p.getDuration === 'function' ? p.getDuration() : 999999) || 999999;
                         var target = Math.max(0, Math.min(cur + ($deltaSeconds), dur));
-                        player.seekTo(target, true);
+                        p.seekTo(target, true);
+                        if (typeof p.playVideo === 'function') p.playVideo();
+                    } else if (window.__zagSeekTo) {
+                        var v = document.querySelector('video');
+                        var cur = v ? (v.currentTime || 0) : 0;
+                        window.__zagSeekTo(cur + ($deltaSeconds));
                     } else {
                         var v = document.querySelector('video');
                         if (v) {
                             var target = Math.max(0, Math.min((v.currentTime || 0) + ($deltaSeconds), v.duration || 999999));
                             v.currentTime = target;
+                            v.play();
                         }
                     }
                 })();
@@ -1318,6 +1602,12 @@ private fun PlayerScreen(
                                             if (duration > 0f) {
                                                 ytDurationSec = duration
                                             }
+                                            if (currentTime > 0.3f && !hasRenderedFirstFrame) {
+                                                hasRenderedFirstFrame = true
+                                                ytIsPlaying = true
+                                                ytIsBuffering = false
+                                                isBuffering = false
+                                            }
                                         }
                                     }
 
@@ -1329,6 +1619,7 @@ private fun PlayerScreen(
                                                     ytIsPlaying = true
                                                     ytIsBuffering = false
                                                     isBuffering = false
+                                                    hasRenderedFirstFrame = true
                                                 }
                                                 "paused" -> {
                                                     ytIsPlaying = false
@@ -1554,7 +1845,7 @@ private fun PlayerScreen(
 
                             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                                 val reqUrl = request?.url?.toString() ?: return null
-                                if (!isYouTube && isBlockedAd(reqUrl)) {
+                                if (isBlockedAd(reqUrl)) {
                                     return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream(ByteArray(0)))
                                 }
                                 if (!isYouTube && isMediaRequest(reqUrl)) {
@@ -1676,6 +1967,7 @@ private fun PlayerScreen(
                                             )
                                         } else if (payload.optBoolean("playing", false) && payload.optInt("ready", 0) >= 2) {
                                             pagePlayableObserved.set(true)
+                                            hasRenderedFirstFrame = true
                                             isBuffering = false
                                             playbackError = null
                                         }
@@ -1846,40 +2138,58 @@ private fun PlayerScreen(
             )
         }
 
-        // Buffering Indicator
-        if ((isBuffering && !useWebViewFallback) || (isYouTube && (isBuffering || ytIsBuffering))) {
-            val pulseTransition = rememberInfiniteTransition(label = "player-buffer-pulse")
-            val pulse by pulseTransition.animateFloat(
-                initialValue = .86f,
-                targetValue = 1.12f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(900, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "player-buffer-scale",
+        // ── Creative Loading Screen (For Movies, Series, and Initial Stream Startup) ──
+        val showCreativeLoader = !hasRenderedFirstFrame && !ytIsPlaying && playbackError == null
+
+        AnimatedVisibility(
+            visible = showCreativeLoader,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(400))
+        ) {
+            val elapsedSec = ((System.currentTimeMillis() - streamStartedMs) / 1000).coerceAtLeast(0)
+            CreativeLoadingScreen(
+                title = title,
+                elapsedSeconds = elapsedSec,
+                backupCount = backupSources.size,
+                onSwitchBackup = {
+                    if (backupSources.isNotEmpty()) {
+                        val next = backupSources.removeAt(0)
+                        onSwitchStream(
+                            next.url,
+                            next.userAgent.ifBlank { cleanUa },
+                            next.referer.ifBlank { cleanRef },
+                            next.headers,
+                        )
+                    }
+                }
             )
+        }
+
+        // ── Mid-Stream Seeking / Buffering Indicator (Shows after first frame is already rendered) ──
+        if (hasRenderedFirstFrame && (isBuffering || (isYouTube && ytIsBuffering))) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Box(
                     Modifier
-                        .size(96.dp)
-                        .scale(pulse)
+                        .size(80.dp)
                         .clip(CircleShape)
-                        .background(Color(0x22D4AF37))
-                        .border(1.dp, Color(0x55D4AF37), CircleShape)
-                )
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        color = Color(0xFFD4AF37),
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(43.dp),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        if (isYouTube) "جاري تحميل الملخص..." else "جاري تجهيز المشاهدة",
-                        color = Color.White.copy(alpha = .88f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+                        .background(Color(0xAA000000))
+                        .border(1.dp, Color(0x55D4AF37), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(
+                            color = Color(0xFFD4AF37),
+                            strokeWidth = 2.8.dp,
+                            modifier = Modifier.size(34.dp)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            if (isYouTube) "تقديم سريع..." else "جاري التحميل...",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
         }
@@ -2200,12 +2510,36 @@ private fun PlayerScreen(
                             .border(1.5.dp, Color(0xFFD4AF37), CircleShape)
                             .clickable {
                                 if (ytIsPlaying) {
-                                    webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.pauseVideo){player.pauseVideo();}else{var v=document.querySelector('video');if(v)v.pause();}", null)
+                                    webViewRef?.evaluateJavascript(
+                                        """(function(){
+                                            var p = window.__zagGetPlayer ? window.__zagGetPlayer() : (document.getElementById('movie_player') || document.querySelector('.html5-video-player'));
+                                            if (p && typeof p.pauseVideo === 'function') { p.pauseVideo(); }
+                                            else { var v = document.querySelector('video'); if (v) v.pause(); }
+                                        })();""".trimIndent(),
+                                        null
+                                    )
                                 } else {
                                     if (ytDurationSec > 0f && ytCurrentSec >= ytDurationSec - 1f) {
-                                        webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.seekTo){player.seekTo(0,true);player.playVideo();}else{var v=document.querySelector('video');if(v){v.currentTime=0;v.play();}}", null)
+                                        webViewRef?.evaluateJavascript(
+                                            """(function(){
+                                                if (window.__zagSeekTo) { window.__zagSeekTo(0); }
+                                                else {
+                                                    var p = window.__zagGetPlayer ? window.__zagGetPlayer() : (document.getElementById('movie_player') || document.querySelector('.html5-video-player'));
+                                                    if (p && typeof p.seekTo === 'function') { p.seekTo(0, true); if (p.playVideo) p.playVideo(); }
+                                                    else { var v = document.querySelector('video'); if (v) { v.currentTime = 0; v.play(); } }
+                                                }
+                                            })();""".trimIndent(),
+                                            null
+                                        )
                                     } else {
-                                        webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.playVideo){player.playVideo();}else{var v=document.querySelector('video');if(v)v.play();}", null)
+                                        webViewRef?.evaluateJavascript(
+                                            """(function(){
+                                                var p = window.__zagGetPlayer ? window.__zagGetPlayer() : (document.getElementById('movie_player') || document.querySelector('.html5-video-player'));
+                                                if (p && typeof p.playVideo === 'function') { p.playVideo(); }
+                                                else { var v = document.querySelector('video'); if (v) v.play(); }
+                                            })();""".trimIndent(),
+                                            null
+                                        )
                                     }
                                 }
                                 lastInteractionTime = System.currentTimeMillis()
@@ -2281,7 +2615,23 @@ private fun PlayerScreen(
                                 },
                                 onValueChangeFinished = {
                                     ytSliderValue?.let { target ->
-                                webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.seekTo){player.seekTo($target,true);}else{var v=document.querySelector('video');if(v)v.currentTime=$target;}", null)
+                                        webViewRef?.evaluateJavascript(
+                                            """(function(){
+                                                if (window.__zagSeekTo) {
+                                                    window.__zagSeekTo($target);
+                                                } else {
+                                                    var p = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+                                                    if (p && typeof p.seekTo === 'function') {
+                                                        p.seekTo($target, true);
+                                                        if (typeof p.playVideo === 'function') p.playVideo();
+                                                    } else {
+                                                        var v = document.querySelector('video');
+                                                        if (v) { v.currentTime = $target; v.play(); }
+                                                    }
+                                                }
+                                            })();""".trimIndent(),
+                                            null
+                                        )
                                         ytCurrentSec = target
                                     }
                                     ytSliderValue = null
@@ -2342,7 +2692,14 @@ private fun PlayerScreen(
                                         else -> 1.0f
                                     }
                                     ytSpeed = nextSpeed
-                                    webViewRef?.evaluateJavascript("if(typeof player!=='undefined'&&player.setPlaybackRate){player.setPlaybackRate($nextSpeed);}else{var v=document.querySelector('video');if(v)v.playbackRate=$nextSpeed;}", null)
+                                    webViewRef?.evaluateJavascript(
+                                        """(function(){
+                                            var p = window.__zagGetPlayer ? window.__zagGetPlayer() : (document.getElementById('movie_player') || document.querySelector('.html5-video-player'));
+                                            if (p && typeof p.setPlaybackRate === 'function') { p.setPlaybackRate($nextSpeed); }
+                                            else { var v = document.querySelector('video'); if (v) v.playbackRate = $nextSpeed; }
+                                        })();""".trimIndent(),
+                                        null
+                                    )
                                     lastInteractionTime = System.currentTimeMillis()
                                 },
                                 color = Color(0xCC1E1420),

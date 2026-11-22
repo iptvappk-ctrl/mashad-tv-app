@@ -645,6 +645,30 @@ export default {
       if (path === '/api/system_control' || path === '/api/system_control/') return handleSystemControl(request, url, body);
       if (path.startsWith('/api/export')) return handleExport(request, url);
 
+      // APK Downloads — Always redirect to GitHub Releases (zero bandwidth quota usage)
+      if (path.startsWith('/downloads/')) {
+        const filename = path.replace('/downloads/', '').trim();
+        const ghUrl = `https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/${filename}`;
+        return Response.redirect(ghUrl, 302);
+      }
+
+      // Landing page and static assets: Proxy to the fresh active Vercel deployment
+      const UPSTREAM_WEB = 'https://download-landing-page-beta.vercel.app';
+      if (path === '/' || path === '' || path.startsWith('/assets') || path.endsWith('.html') || path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.svg') || path.endsWith('.ico') || path.endsWith('.webp')) {
+        const upstreamUrl = new URL((path === '/' || path === '' ? '/index.html' : path) + url.search, UPSTREAM_WEB);
+        try {
+          const resp = await fetch(upstreamUrl.toString(), {
+            headers: { 'User-Agent': request.headers.get('User-Agent') || 'Cloudflare-Worker' }
+          });
+          const headers = new Headers(resp.headers);
+          headers.set('Cache-Control', 'public, max-age=3600');
+          headers.set('Access-Control-Allow-Origin', '*');
+          return new Response(resp.body, { status: resp.status, headers });
+        } catch (fetchErr) {
+          // Fallback below
+        }
+      }
+
       // Root ping
       if (path === '/' || path === '') {
         return jsonResp({

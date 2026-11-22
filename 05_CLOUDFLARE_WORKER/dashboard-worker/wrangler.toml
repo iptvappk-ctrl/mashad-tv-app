@@ -2,6 +2,12 @@ name = "zaqzouka-dashboard-api"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+routes = [
+  { pattern = "zaafilm.com/*", zone_name = "zaafilm.com" },
+  { pattern = "www.zaafilm.com/*", zone_name = "zaafilm.com" }
+]
 
 [vars]
 FIREBASE_PROJECT_ID = "madartv"
