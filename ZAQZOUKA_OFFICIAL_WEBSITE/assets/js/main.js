@@ -190,6 +190,13 @@
       heroBadge: 'الإصدار المعتمد 2026 — آمن 100% وخالٍ من الإعلانات',
       heroTitle: 'عالمك الترفيهي بدون حدود مع <span class="highlight-brick">تطبيق زقزوقة</span> ومحرك <span class="highlight-gold">زاغ بلاير</span>',
       heroDesc: 'منظومة متكاملة لمشاهدة آلاف الأفلام والمسلسلات الحصرية والقنوات التلفزيونية والرياضية الحية بأعلى جودة وسيرفرات فائقة السرعة بدون أي تقطيع أو اشتراكات.',
+      heroBtnBundle: 'تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل)',
+      heroBtnBundleSub: 'نقرة واحدة لتحميل تطبيق زقزوقة + مشغل زاغ معاً (58 MB)',
+      bundleDownloading: 'جاري تنزيل التطبيق والمشغل معاً... بعد اكتمال التنزيل قم بتثبيت كلا الملفين ⚡',
+      separateDownload: 'أو تحميل منفصل:',
+      appOnly: 'تطبيق زقزوقة فقط',
+      playerOnly: 'مشغل زاغ فقط',
+      mobileBtnBundle: 'تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل) ⚡',
       heroBtnApp: 'تحميل تطبيق زقزوقة TV',
       heroBtnAppSub: 'v1.0.74 · حزمة APK مباشرة (53.4 MB)',
       heroBtnPlayer: 'تحميل مشغل زاغ ZAG Player',
@@ -273,6 +280,13 @@
       heroBadge: 'Verified 2026 Edition — 100% Safe & Ad-Free',
       heroTitle: 'Limitless Entertainment with <span class="highlight-brick">Zaqzouka TV</span> & <span class="highlight-gold">ZAG Player</span> Engine',
       heroDesc: 'All-in-one ecosystem for thousands of exclusive movies, TV shows, and live sports in pristine 4K streaming with zero lag or subscriptions.',
+      heroBtnBundle: 'Download & Install Full Ecosystem (App + Player)',
+      heroBtnBundleSub: 'One-click download for Zaqzouka TV + ZAG Player together (58 MB)',
+      bundleDownloading: 'Downloading both apps simultaneously... Please install both files after download ⚡',
+      separateDownload: 'Or individual download:',
+      appOnly: 'Zaqzouka TV Only',
+      playerOnly: 'ZAG Player Only',
+      mobileBtnBundle: 'Download Full Ecosystem (App + Player) ⚡',
       heroBtnApp: 'Download Zaqzouka TV App',
       heroBtnAppSub: 'v1.0.74 · Direct APK (53.4 MB)',
       heroBtnPlayer: 'Download ZAG Player Engine',
@@ -400,4 +414,131 @@
       if (e.target === _0xm) _0xm.classList.remove('open');
     });
   }
+  // ── Download Hub Smart Telemetry & Conversion Tracker ──
+  (function _initDownloadTelemetry() {
+    const API_ENDPOINT = 'https://zaqzouka-dashboard-api.vercel.app/api/telemetry';
+
+    // 1. Detect Referrer
+    const ref = _0xdoc.referrer || '';
+    let cleanRef = 'مباشر (Direct)';
+    if (ref) {
+      try {
+        const u = new URL(ref);
+        const host = u.hostname.toLowerCase();
+        if (host.includes('google')) cleanRef = 'جوجل (Google Search)';
+        else if (host.includes('t.me') || host.includes('telegram')) cleanRef = 'تيليجرام (Telegram)';
+        else if (host.includes('facebook') || host.includes('fb.com')) cleanRef = 'فيسبوك (Facebook)';
+        else if (host.includes('instagram')) cleanRef = 'إنستغرام (Instagram)';
+        else if (host.includes('tiktok')) cleanRef = 'تيك توك (TikTok)';
+        else if (host.includes('youtube') || host.includes('youtu.be')) cleanRef = 'يوتيوب (YouTube)';
+        else if (host.includes('twitter') || host.includes('x.com')) cleanRef = 'تويتر (X / Twitter)';
+        else if (host.includes('whatsapp') || host.includes('wa.me')) cleanRef = 'واتساب (WhatsApp)';
+        else cleanRef = host;
+      } catch (_) {
+        cleanRef = ref.substring(0, 40);
+      }
+    }
+
+    // 2. Detect Device & Browser
+    const ua = navigator.userAgent;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    const deviceType = isMobile ? 'موبايل' : 'كمبيوتر / مكتبي';
+    let browser = 'Chrome';
+    if (ua.includes('Firefox')) browser = 'Firefox';
+    else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
+    else if (ua.includes('Edge')) browser = 'Edge';
+
+    // 3. Send Visit Beacon
+    const visitPayload = {
+      referrer: cleanRef,
+      rawReferrer: ref,
+      device: deviceType,
+      browser: browser,
+      screen: `${_0xroot.screen.width}x${_0xroot.screen.height}`,
+      language: navigator.language || 'ar',
+      url: _0xroot.location.href,
+    };
+
+    fetch(`${API_ENDPOINT}?route=landing/visit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(visitPayload),
+      keepalive: true,
+    }).catch(() => {});
+
+    // 4. Track Download Button Clicks
+    _0xdoc.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href*=".apk"]');
+      if (!link) return;
+      const href = link.getAttribute('href') || '';
+      const isPlayer = href.includes('zag-player') || href.includes('player');
+      const target = isPlayer ? 'player' : 'app';
+
+      fetch(`${API_ENDPOINT}?route=landing/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: target,
+          referrer: cleanRef,
+          href: href,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    });
+  })();
+
+  // ── Unified Master Bundle Downloader (Downloads both App & Player together) ──
+  (function initBundleDownloader() {
+    function triggerDownload(url, filename) {
+      const a = _0xdoc.createElement('a');
+      a.href = url;
+      a.setAttribute('download', filename);
+      a.style.display = 'none';
+      _0xdoc.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { _0xdoc.body.removeChild(a); } catch (_) {}
+      }, 400);
+    }
+
+    function handleBundleClick(e) {
+      if (e) e.preventDefault();
+
+      // Show status feedback
+      const msg = _0xdoc.getElementById('bundleStatusMsg');
+      if (msg) {
+        msg.style.display = 'flex';
+      }
+
+      // 1. Download App APK
+      triggerDownload('downloads/zaqzouka-app.apk', 'zaqzouka-app.apk');
+
+      // 2. Download Player APK with 600ms delay to ensure browsers allow both downloads
+      setTimeout(() => {
+        triggerDownload('downloads/zag-player.apk', 'zag-player.apk');
+      }, 600);
+
+      // 3. Track telemetry for bundle
+      try {
+        fetch('https://zaqzouka-dashboard-api.vercel.app/api/telemetry?route=landing/download', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target: 'bundle',
+            referrer: _0xdoc.referrer || 'direct',
+            href: 'downloads/bundle',
+          }),
+          keepalive: true,
+        }).catch(() => {});
+      } catch (_) {}
+    }
+
+    const heroBtn = _0xdoc.getElementById('heroBundleBtn');
+    const mobileBtn = _0xdoc.getElementById('mobileBundleBtn');
+    const navBtn = _0xdoc.getElementById('navBundleBtn');
+
+    if (heroBtn) heroBtn.addEventListener('click', handleBundleClick);
+    if (mobileBtn) mobileBtn.addEventListener('click', handleBundleClick);
+    if (navBtn) navBtn.addEventListener('click', handleBundleClick);
+  })();
 })(window, document);
