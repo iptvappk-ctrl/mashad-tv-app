@@ -593,13 +593,22 @@ object YacineRepository {
                 .ifBlank { browserUa }
             val ua = if (rawUa.startsWith("okhttp", ignoreCase = true)) browserUa else rawUa
             val rawRef = obj.optString("referer", "").ifBlank { "https://yacinelive.com/" }
-            // Filter non-ASCII characters from referer to avoid OkHttp header validation exceptions
-            val referer = rawRef.filter { it.code in 32..126 }.ifBlank { "https://yacinelive.com/" }
+            // Yacine embeds zero-width UTF-8 security tokens in referer headers.
+            // Converting UTF-8 bytes to ISO-8859-1 preserves the exact byte sequence over HttpURLConnection.
+            val referer = try {
+                String(rawRef.toByteArray(Charsets.UTF_8), Charsets.ISO_8859_1)
+            } catch (_: Exception) {
+                rawRef
+            }.ifBlank { "https://yacinelive.com/" }
             val playbackHeaderNames = setOf("user-agent", "referer", "origin", "accept", "accept-language")
             val requestHeaders = buildMap {
                 headersObj?.keys()?.forEach { key ->
                     val rawVal = headersObj.optString(key).trim()
-                    val safeVal = rawVal.filter { it.code in 32..126 }
+                    val safeVal = try {
+                        String(rawVal.toByteArray(Charsets.UTF_8), Charsets.ISO_8859_1)
+                    } catch (_: Exception) {
+                        rawVal
+                    }
                     if (key.lowercase() in playbackHeaderNames && safeVal.isNotBlank() && !key.contains("\r") && !key.contains("\n")
                         && !safeVal.contains("\r") && !safeVal.contains("\n")
                     ) put(key, safeVal)
