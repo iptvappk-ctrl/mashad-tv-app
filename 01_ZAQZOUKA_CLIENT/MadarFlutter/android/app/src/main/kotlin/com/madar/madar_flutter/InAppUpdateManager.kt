@@ -268,7 +268,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
     fun downloadAndInstallPlayer(apkUrl: String?, sha256Expected: String?, result: MethodChannel.Result) {
         val targetUrl = apkUrl?.takeIf { it.isNotBlank() }
             ?: latestRelease?.playerRelease?.apkUrl
-            ?: "https://zaafilm.com/downloads/zag-player.apk"
+            ?: "https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.76/zag-player.apk"
         val expectedHash = sha256Expected?.takeIf { it.isNotBlank() }
             ?: latestRelease?.playerRelease?.sha256
             ?: ""

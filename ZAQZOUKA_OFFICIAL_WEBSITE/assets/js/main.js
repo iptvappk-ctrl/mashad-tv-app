@@ -1,4 +1,4 @@
-/**
+﻿/**
  * (c) 2026 Zaqzouka Network Architecture - All Rights Reserved.
  * Protected under International Copyright & Digital Rights Protection Treaties.
  * Unauthorized copying, reverse engineering, tampering, or distribution is strictly prohibited.
@@ -393,7 +393,7 @@
     if (!_0xm || !_0xwrap) return;
 
     function _0xrender(_0xfname) {
-      const _0xfurl = _0xroot.location.origin + _0xroot.location.pathname.replace(/\/+$/, '') + '/downloads/' + _0xfname;
+      const _0xfurl = _0xfname.includes('zag-player') ? 'https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/zag-player.apk' : 'https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/zaqzouka-app.apk';
       const _0xapi = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(_0xfurl) + '&color=181216&bgcolor=FFFFFF';
       _0xwrap.innerHTML = '<img src="' + _0xapi + '" alt="QR Code" width="180" height="180" style="display:block; border-radius: 8px;">';
     }
@@ -511,11 +511,11 @@
       }
 
       // 1. Download App APK
-      triggerDownload('downloads/zaqzouka-app.apk', 'zaqzouka-app.apk');
+      triggerDownload('https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/zaqzouka-app.apk', 'zaqzouka-app.apk');
 
       // 2. Download Player APK with 600ms delay to ensure browsers allow both downloads
       setTimeout(() => {
-        triggerDownload('downloads/zag-player.apk', 'zag-player.apk');
+        triggerDownload('https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/zag-player.apk', 'zag-player.apk');
       }, 600);
 
       // 3. Track telemetry for bundle

@@ -622,7 +622,7 @@ class _SportsPageState extends State<SportsPage> {
         final id = _text(channel['id']);
         return Card(
           child: ListTile(
-            onTap: () => _chooseStreams(id, _text(channel['name']), false),
+            onTap: () => _chooseStreams(id, _text(channel['name']), false, channelOverride: _text(channel['name'])),
             leading: _roundImage(_text(channel['logo'])),
             title: Text(
               _text(channel['name']),

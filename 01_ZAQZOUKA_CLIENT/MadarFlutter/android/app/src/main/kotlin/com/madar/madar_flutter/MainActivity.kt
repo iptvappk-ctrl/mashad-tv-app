@@ -384,7 +384,7 @@ class MainActivity : FlutterActivity() {
     }
     private fun openPlayerStore(result: MethodChannel.Result) {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://zaafilm.com/downloads/zag-player.apk")).apply {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.76/zag-player.apk")).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
             result.success(true)
