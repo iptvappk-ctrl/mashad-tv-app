@@ -2176,7 +2176,9 @@ object MultiProviderRepository {
         val allServers = java.util.concurrent.ConcurrentHashMap<String, ArabseedServer>()
         val serverOrder = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
-        val tasks = PROVIDERS.filter { it.enabled && it.id != originalProvider?.id }.map { provider ->
+        val enabledProviders = PROVIDERS.filter { it.enabled && it.id != originalProvider?.id }
+        val sortedProviders = enabledProviders.sortedByDescending { if (it.isPrimary) 1 else 0 }
+        val tasks = sortedProviders.map { provider ->
             {
                 try {
                     var match: ArabseedItem? = null
@@ -2289,7 +2291,7 @@ object MultiProviderRepository {
 
         val completion = ExecutorCompletionService<Unit>(backupServerPool)
         val futures = lookupTasks.map { task -> completion.submit(Callable { task() }) }
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(14)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
         var completedTasks = 0
         for (ignored in lookupTasks.indices) {
             val remaining = deadline - System.nanoTime()
@@ -2302,6 +2304,10 @@ object MultiProviderRepository {
             }
             completedTasks++
             try { finished.get() } catch (_: Exception) {}
+            if (allServers.size >= 4 && System.nanoTime() > (deadline - TimeUnit.SECONDS.toNanos(6))) {
+                // If primary providers already provided ample backup servers, return fast
+                break
+            }
         }
         futures.filterNot { it.isDone }.forEach { it.cancel(true) }
 
@@ -3898,10 +3904,16 @@ object MultiProviderRepository {
 
     private fun needsSeasonEnrichment(item: ArabseedItem, bundle: ArabseedSeasonBundle): Boolean {
         if (item.type != ArabseedType.SERIES) return false
-        // A contiguous list can still be truncated at the end (for example,
-        // episodes 1..13 while the source has 24). Never cache a permanent
-        // "complete" result based only on sequence gaps; retry periodically.
-        return true
+        val allEpisodes = bundle.seasons.flatMap { it.episodes }
+        if (allEpisodes.isEmpty()) return true
+        for (season in bundle.seasons) {
+            val epNumbers = season.episodes.map { it.number }.filter { it > 0 }.distinct().sorted()
+            if (epNumbers.size < 3) return true
+            for (i in 1 until epNumbers.size) {
+                if (epNumbers[i] - epNumbers[i - 1] > 1) return true
+            }
+        }
+        return false
     }
 
     private fun matchesSeriesTitle(targetTitle: String, candidate: ArabseedItem): Boolean {

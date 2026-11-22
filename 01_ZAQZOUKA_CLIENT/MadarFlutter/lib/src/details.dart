@@ -775,16 +775,12 @@ class _DetailPageState extends State<DetailPage> {
     final visibleEpisodes = episodes.take(visibleCount).toList(growable: false);
     // hasLoadedMore: هناك حلقات في الذاكرة أكثر مما هو معروض (تحتاج "عرض المزيد")
     final hasLoadedMore = episodes.length > visibleEpisodes.length;
-    // canRequestMore: فقط لو لسه مش كل الحلقات اتجابت من السيرفر، مش لو احنا بس ماشغلناهاش
-    // وده يمنع زر "تحميل باقي الحلقات" ميظهرش لما كل الحلقات موجودة بالفعل
-    final allEpisodesShown = !hasLoadedMore;
-    final canRequestMore =
-        !allEpisodesShown ||
-        (selected != null &&
-         seasonNumber > 0 &&
-         !_episodeSeasonsExhausted.contains(seasonNumber) &&
-         !_seasonsLoading &&
-         _maps(selected['episodes']).length < 3);
+    // hasNextPageCursor: المصدر نفسه أرجع رابط صريح لصفحة تالية
+    final hasNextPageCursor = _episodePageCursorBySeason[seasonNumber] != null &&
+        _episodePageCursorBySeason[seasonNumber]!.isNotEmpty &&
+        _episodePageCursorBySeason[seasonNumber] != _text(selected?['pageUrl']) &&
+        !_episodeSeasonsExhausted.contains(seasonNumber);
+    final canRequestMore = hasLoadedMore || (hasNextPageCursor && !_seasonsLoading);
     return _SectionCard(
       title: 'حلقات هذا الجزء / الموسم',
       icon: '📺',
@@ -836,27 +832,33 @@ class _DetailPageState extends State<DetailPage> {
           if ((_seasonsLoading && episodes.isNotEmpty) ||
               (_refreshingSeasonPages.contains(_text(selected?['pageUrl'])) &&
                   episodes.isNotEmpty))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _brick.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _brick.withOpacity(0.2)),
+              ),
+              child: const Row(
                 children: [
-                  const SizedBox(
-                    width: 14,
-                    height: 14,
+                  SizedBox(
+                    width: 16,
+                    height: 16,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
                       color: _brick,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      _refreshingSeasonPages.contains(
-                            _text(selected?['pageUrl']),
-                          )
-                          ? 'بنجلب حلقات هذا الموسم من صفحته مباشرة…'
-                          : 'بنكمّل البحث عن المواسم والحلقات من المصادر الأخرى…',
-                      style: const TextStyle(color: _muted, fontSize: 12),
+                      'جاري مزامنة باقي الحلقات والمواسم من السيرفرات السريعة…',
+                      style: TextStyle(
+                        color: _ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -897,7 +899,7 @@ class _DetailPageState extends State<DetailPage> {
                 );
               }),
             ),
-            if (hasLoadedMore || (canRequestMore && !_seasonsLoading)) ...[
+            if (canRequestMore) ...[
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed:
@@ -917,8 +919,8 @@ class _DetailPageState extends State<DetailPage> {
                     : const Icon(Icons.expand_more_rounded),
                 label: Text(
                   hasLoadedMore
-                      ? 'عرض المزيد من الحلقات'
-                      : 'تحميل باقي الحلقات',
+                      ? 'عرض المزيد من الحلقات (${episodes.length - visibleEpisodes.length} إضافية)'
+                      : 'تحميل باقي الحلقات من المصدر',
                 ),
               ),
             ],
