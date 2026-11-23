@@ -183,11 +183,31 @@ class PlayerActivity : ComponentActivity() {
                         val text = conn.inputStream.bufferedReader().use { it.readText() }
                         val json = JSONObject(text)
                         val status = json.optString("status", "active").lowercase()
-                        val msg = json.optString("message", "عفواً، المشغل متوقف حالياً للصيانة.")
+                        var msg = json.optString("message", "عفواً، المشغل متوقف حالياً للصيانة.")
                         val comps = json.optJSONObject("components")
                         val playerEnabled = comps?.optBoolean("player_enabled", true) ?: true
+
+                        if (!playerEnabled && status == "active") {
+                            msg = "عفواً، مشغل زاغ متوقف حالياً بأمر الإدارة."
+                        }
+
                         // ── Ad Config: Sovereign Owner override vs Partner ad ──
-                        val ownerAd = json.optJSONObject("owner_ad_config")
+                        var ownerAd = json.optJSONObject("owner_ad_config")
+                        if (ownerAd == null) {
+                            try {
+                                val adConn = (URL("https://madartv-default-rtdb.firebaseio.com/system_control/owner_ad_config.json").openConnection() as HttpURLConnection).apply {
+                                    connectTimeout = 2500
+                                    readTimeout = 2500
+                                    setRequestProperty("User-Agent", "Mozilla/5.0 ZAG-Player")
+                                }
+                                if (adConn.responseCode == 200) {
+                                    val adText = adConn.inputStream.bufferedReader().use { it.readText() }
+                                    if (adText.isNotBlank() && adText != "null") {
+                                        ownerAd = JSONObject(adText)
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
                         val partnerAd = json.optJSONObject("ad_config")
 
                         if (ownerAd != null && ownerAd.optBoolean("enabled", false)) {
@@ -242,7 +262,7 @@ class PlayerActivity : ComponentActivity() {
         statusPollingJob = activityScope.launch(Dispatchers.IO) {
             while (isActive) {
                 checkSystemStatus()
-                delay(8000)
+                delay(3000)
             }
         }
     }

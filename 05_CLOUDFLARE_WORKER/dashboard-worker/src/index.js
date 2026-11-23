@@ -808,8 +808,54 @@ export default {
       if (path === '/api/broadcast_notification' || path === '/api/broadcast_notification/') return handleBroadcastNotification(request, url, body);
       if (path.startsWith('/api/export')) return handleExport(request, url);
 
-      // APK Downloads — Always redirect to GitHub Releases (zero bandwidth quota usage)
+function renderBlockedHtml(title, message, isWiped = false) {
+  const accentColor = isWiped ? '#E50914' : '#D4AF37';
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui, -apple-system, sans-serif; }
+    body { background-color:#0A0D14; color:#F1F5F9; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .card { max-width:480px; width:100%; background:#141A29; border:1px solid ${accentColor}44; border-radius:24px; padding:36px 28px; text-align:center; box-shadow:0 20px 40px rgba(0,0,0,0.6); }
+    .icon { width:72px; height:72px; border-radius:50%; background:${accentColor}18; color:${accentColor}; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; font-size:32px; border:2px solid ${accentColor}55; }
+    h1 { font-size:22px; font-weight:800; color:${accentColor}; margin-bottom:12px; }
+    p { font-size:15px; color:#94A3B8; line-height:1.6; margin-bottom:24px; }
+    .badge { display:inline-block; padding:6px 16px; border-radius:99px; background:#0F131E; border:1px solid #2A334B; font-size:12px; color:#64748B; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${isWiped ? '⚠️' : '🔒'}</div>
+    <h1>${title}</h1>
+    <p>${message}</p>
+    <div class="badge">منظومة زقزوقة TV • الحماية المركزية</div>
+  </div>
+</body>
+</html>`;
+}
+
+      // APK Downloads — Check kill switch before redirecting
       if (path.startsWith('/downloads/')) {
+        try {
+          const sys = await fbRead('system_control');
+          if (sys) {
+            const isFrozen = sys.status === 'frozen';
+            const isWiped = sys.status === 'wiped';
+            const isDownloadDisabled = sys.components && (sys.components.download_site_enabled === false || sys.components.website_enabled === false);
+            if (isFrozen || isWiped || isDownloadDisabled) {
+              const title = isWiped ? 'التحميل مغلق نهائياً' : 'التحميل متوقف مؤقتاً';
+              const msg = sys.message || 'خدمة التنزيل متوقفة حالياً بقرار من إدارة المنظومة.';
+              return new Response(renderBlockedHtml(title, msg, isWiped), {
+                status: 503,
+                headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+              });
+            }
+          }
+        } catch (_) {}
+
         const filename = path.replace('/downloads/', '').trim();
         const ghUrl = `https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/${filename}`;
         return Response.redirect(ghUrl, 302);
@@ -818,13 +864,35 @@ export default {
       // Landing page and static assets: Proxy to the fresh active Vercel deployment
       const UPSTREAM_WEB = 'https://download-landing-page-beta.vercel.app';
       if (path === '/' || path === '' || path.startsWith('/assets') || path.endsWith('.html') || path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.svg') || path.endsWith('.ico') || path.endsWith('.webp')) {
+        // Check kill switch and component status for website / download hub
+        try {
+          const sys = await fbRead('system_control');
+          if (sys) {
+            const isFrozen = sys.status === 'frozen';
+            const isWiped = sys.status === 'wiped';
+            const isDownloadSiteDisabled = sys.components && (sys.components.download_site_enabled === false || sys.components.website_enabled === false);
+            if (isFrozen || isWiped || isDownloadSiteDisabled) {
+              const title = isWiped ? 'تم إيقاف المنظومة نهائياً' : 'موقع التحميل متوقف حالياً للصيانة';
+              const msg = sys.message || 'الموقع متوقف حالياً للصيانة والتحديث بأمر الإدارة.';
+              return new Response(renderBlockedHtml(title, msg, isWiped), {
+                status: 503,
+                headers: {
+                  'Content-Type': 'text/html; charset=utf-8',
+                  'Cache-Control': 'no-cache, no-store, must-revalidate',
+                  ...corsHeaders(),
+                },
+              });
+            }
+          }
+        } catch (_) {}
+
         const upstreamUrl = new URL((path === '/' || path === '' ? '/index.html' : path) + url.search, UPSTREAM_WEB);
         try {
           const resp = await fetch(upstreamUrl.toString(), {
             headers: { 'User-Agent': request.headers.get('User-Agent') || 'Cloudflare-Worker' }
           });
           const headers = new Headers(resp.headers);
-          headers.set('Cache-Control', 'public, max-age=3600');
+          headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
           headers.set('Access-Control-Allow-Origin', '*');
           return new Response(resp.body, { status: resp.status, headers });
         } catch (fetchErr) {

@@ -11,15 +11,14 @@ interface SystemState {
 }
 
 const STATUS_ENDPOINTS = [
-  "https://zaqzouka-dashboard-api.vercel.app/api/system_control",
-  "/api/status",
-  "/status/system.json",
-  "https://zaqzouka-dashboard-api.vercel.app/api/status",
-  "https://zaqzouka-vercel-hub.vercel.app/api/status",
+  "https://zaafilm.com/api/system_control",
+  "https://dashboard-api-indol-eight.vercel.app/api/system_control",
+  "https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control",
+  "https://madartv-default-rtdb.firebaseio.com/system_control.json",
 ];
 
 const STORAGE_KEY = "zaq_sys_state_v2";
-const CACHE_TTL_MS = 45000; // 45 seconds client cache
+const CACHE_TTL_MS = 5000; // 5 seconds client cache for fast reactivity
 
 export default function KillSwitchProvider({ children }: { children: React.ReactNode }) {
   // Read initial cache to avoid blocking UI for returning users
@@ -74,7 +73,7 @@ export default function KillSwitchProvider({ children }: { children: React.React
   const checkStatus = useCallback(async (force = false) => {
     const now = Date.now();
     // Throttle checks if not forced
-    if (!force && now - lastCheckTimeRef.current < 20000) {
+    if (!force && now - lastCheckTimeRef.current < 5000) {
       setChecking(false);
       return;
     }

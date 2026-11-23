@@ -198,7 +198,7 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     {
       'key': 'web_player_enabled',
       'label': 'موقع زقزوقة ويب (Web Player)',
-      'subtitle': 'web-nu-teal-29.vercel.app',
+      'subtitle': 'web-player-beta.vercel.app',
       'icon': Icons.public_rounded,
       'color': Color(0xFF9B51E0),
     },
