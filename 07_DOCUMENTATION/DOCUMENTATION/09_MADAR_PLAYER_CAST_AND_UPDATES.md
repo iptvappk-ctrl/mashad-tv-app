@@ -39,7 +39,7 @@
 ## البناء
 
 ```powershell
-Set-Location "C:\Users\hassa\Desktop\all project\iptv app\MadarTV"
+Set-Location "<project_root>\MadarTV"
 .\gradlew.bat :app:assembleDebug :madar-player:assembleDebug
 ```
 

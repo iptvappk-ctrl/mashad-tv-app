@@ -660,7 +660,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
                 val expectedAssetName = "zaqzouka-$versionName-$versionCode.apk"
                 val trustedPath = (uri.path.orEmpty().startsWith(GITHUB_RELEASE_PATH) ||
                     uri.path.orEmpty().startsWith("/iptvappk-ctrl/mashad-tv-app/releases/download/") ||
-                    uri.path.orEmpty().startsWith("/hassanIssa00/madartv-updates/releases/download/")) &&
+                    uri.path.orEmpty().startsWith("/iptvappk-ctrl/madartv-updates/releases/download/")) &&
                     uri.path.orEmpty().endsWith("/$expectedAssetName")
                 if (packageName != APP_PACKAGE || versionCode <= 0L ||
                     versionName.isBlank() || versionName.length > MAX_VERSION_NAME_CHARS ||
@@ -701,7 +701,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
                 val uri = Uri.parse(apkUrl)
                 val trustedPath = (uri.path.orEmpty().startsWith(GITHUB_RELEASE_PATH) ||
                     uri.path.orEmpty().startsWith("/iptvappk-ctrl/mashad-tv-app/releases/download/") ||
-                    uri.path.orEmpty().startsWith("/hassanIssa00/madartv-updates/releases/download/")) &&
+                    uri.path.orEmpty().startsWith("/iptvappk-ctrl/madartv-updates/releases/download/")) &&
                     uri.path.orEmpty().endsWith("/$expectedAssetName")
                 if (versionCode <= 0L || versionName.isBlank() ||
                     checksum.matches(Regex("[a-fA-F0-9]{64}")).not() || uri.scheme != "https" ||

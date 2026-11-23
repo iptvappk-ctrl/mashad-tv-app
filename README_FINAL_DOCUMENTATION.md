@@ -10,7 +10,7 @@
 ## 📱 حزم التطبيقات (APKs)
 1. `zaqzouka-app.apk`: تطبيق زقزوقة TV لمشاهدة الأفلام والمسلسلات والمباريات.
 2. `zag-player.apk`: مشغل زاغ بلاير المخصص فائق السرعة لدعم بث 4K.
-3. `zaqzouka-master-control.apk`: لوحة التحكم السيادية للمالك (PIN: `yomnaeid`).
+3. `zaqzouka-master-control.apk`: لوحة التحكم السيادية للمالك (PIN: `[PIN_REDACTED]`).
 4. `zaqzouka-admin.apk`: لوحة تحليلات الشريك وإدارة المحتوى والإعلانات (`admin` / `zaqzouka2026`).
 
 ---
@@ -19,4 +19,4 @@
 - **موقع التحميل الرسمي**: [zaafilm.com](https://zaafilm.com)
 - **بوابة السحابة (Cloudflare)**: `https://zaafilm.com/api/system_control`
 - **قاعدة البيانات (Firebase RTDB)**: `https://madartv-default-rtdb.firebaseio.com`
-- **المفتاح السري (Admin Secret)**: `Zq!7#mK9xPd@3wR5nT`
+- **المفتاح السري (Admin Secret)**: `[ADMIN_SECRET_REDACTED]`

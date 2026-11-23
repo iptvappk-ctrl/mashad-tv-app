@@ -7,7 +7,7 @@
 الموقع موجود في `web/` ويستخدم Next.js App Router وReact وTypeScript وTailwind CSS. شغّله محلياً:
 
 ```powershell
-Set-Location "C:\Users\hassa\Desktop\all project\iptv app\web"
+Set-Location "<project_root>\web"
 npm install
 npm run dev
 ```
@@ -23,7 +23,7 @@ npm run dev
 يتطلب الخادم Node.js 22 أو أحدث.
 
 ```powershell
-Set-Location "C:\Users\hassa\Desktop\all project\iptv app\dashboard"
+Set-Location "<project_root>\dashboard"
 npm install
 Copy-Item .env.example .env
 npm start
@@ -46,7 +46,7 @@ npm start
 من مجلد `MadarTV`:
 
 ```powershell
-Set-Location "C:\Users\hassa\Desktop\all project\iptv app\MadarTV"
+Set-Location "<project_root>\MadarTV"
 .\gradlew.bat :app:assembleDebug
 ```
 

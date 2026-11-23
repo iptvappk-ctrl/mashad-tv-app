@@ -1,6 +1,6 @@
 import json, urllib.request, urllib.error
 
-with open(r'C:\Users\hassa\AppData\Roaming\xdg.data\com.vercel.cli\auth.json', 'r') as f:
+with open(r'<user_home>\AppData\Roaming\xdg.data\com.vercel.cli\auth.json', 'r') as f:
     token = json.load(f)['token']
 
 team = 'team_0ub00L1M1LpPB0cXAubBayxK'

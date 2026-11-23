@@ -1,6 +1,6 @@
 import re
 
-hud_path = r'C:\Users\hassa\.gemini\antigravity\brain\a8e22ead-f41c-4390-aaed-352345d72ecc\browser_sandbox\outputs\step_28_hud.txt'
+hud_path = r'<user_home>\.gemini\antigravity\brain\a8e22ead-f41c-4390-aaed-352345d72ecc\browser_sandbox\outputs\step_28_hud.txt'
 
 with open(hud_path, 'r', encoding='utf-8', errors='ignore') as f:
     text = f.read()

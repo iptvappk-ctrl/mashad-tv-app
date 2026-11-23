@@ -3,7 +3,7 @@
 **الإصدار:** Zaqzouka Master Control v2.0 (Ecosystem Edition)  
 **الحالة العامة:** ✅ **اجتياز كامل بنسبة 100% (All Tests Passed)**  
 **المحاكي المستخدم:** Google Pixel (Artemis_Pixel_API_35)  
-**نسخة الـ APK المختبرة:** `C:\Users\hassa\Desktop\zaqzouka-master-control.apk` (48.8 MB)  
+**نسخة الـ APK المختبرة:** `<desktop>\zaqzouka-master-control.apk` (48.8 MB)  
 
 ---
 
@@ -26,7 +26,7 @@
 
 | المكون | التفاصيل | الرابط / المسار |
 | :--- | :--- | :--- |
-| **تطبيق التحكم (APK)** | Flutter Release Build v2.0 | `C:\Users\hassa\Desktop\zaqzouka-master-control.apk` |
+| **تطبيق التحكم (APK)** | Flutter Release Build v2.0 | `<desktop>\zaqzouka-master-control.apk` |
 | **جهاز المحاكاة** | Android Emulator (API 35) | `Artemis_Pixel_API_35` (Resolution: 1080x2400) |
 | **الـ Backend الأساسي** | Vercel Edge API | `https://zaqzouka-dashboard-api.vercel.app/api/system_control` |
 | **الـ Backend الاحتياطي (Failover)** | Vercel Hub API | `https://zaqzouka-vercel-hub.vercel.app/api/system_control` |
@@ -42,7 +42,7 @@
 | :---: | :--- | :--- | :--- | :--- | :---: | :---: |
 | **TC-01** | شاشة التحقق الأمني (Auth) | تشغيل التطبيق على المحاكي | ظهور شاشة القفل بطلب Master Key | ظهرت الشاشة بالشيلد الذهبي وحقل الباسورد | ✅ PASS | `01_auth_screen.png` |
 | **TC-02** | رفض كلمة المرور الخاطئة | إدخال رمز خاطئ والضغط تأكيد | إظهار خطأ أحمر ورفض الدخول | ظهر باللون الأحمر "كلمة المرور غير صحيحة" | ✅ PASS | `02_pin_rejected.png` |
-| **TC-03** | الدخول بالرمز الصحيح | كتابة `yomnaeid` والضغط تأكيد | فتح لوحة التحكم الرئيسية فوراً | فتحت لوحة التحكم بكافة الأزرار فوراً | ✅ PASS | `03_dashboard_live.png` |
+| **TC-03** | الدخول بالرمز الصحيح | كتابة `[PIN_REDACTED]` والضغط تأكيد | فتح لوحة التحكم الرئيسية فوراً | فتحت لوحة التحكم بكافة الأزرار فوراً | ✅ PASS | `03_dashboard_live.png` |
 | **TC-04** | موقع التحميل OFF من الـ UI | الضغط على سويتش موقع التحميل | إيقاف موقع التحميل بالـ API والواجهة | السويتش تحول رمادي، والـ API أرجع `False` | ✅ PASS | `04_toggle_download_off.png` |
 | **TC-05** | موقع التحميل ON من الـ UI | إعادة الضغط على سويتش التحميل | إعادة تفعيل موقع التحميل | السويتش تحول للأزرق، والـ API أرجع `True` | ✅ PASS | تم التحقق بالـ API |
 | **TC-06** | موقع البث ويب OFF من الـ UI | الضغط على سويتش Web Player | إيقاف مشغل الويب في Firebase | السويتش تحول رمادي، والـ API أرجع `False` | ✅ PASS | تم التحقق بالـ API |
@@ -123,6 +123,6 @@
 
 نقر نحن فريق التطوير والاختبار بأن منظومة **Zaqzouka Master Control** بكافة مكوناتها البرمجية والسحابية قد خضعت للاختبار التشغيلي والتكاملي الحي، وأنها:
 - ✅ **جاهزة تماماً للاستخدام الإداري المباشر**.
-- ✅ **الملف التنفيذي النهائي موجود على سطح المكتب:** `C:\Users\hassa\Desktop\zaqzouka-master-control.apk`.
+- ✅ **الملف التنفيذي النهائي موجود على سطح المكتب:** `<desktop>\zaqzouka-master-control.apk`.
 - ✅ **تكامل السحابة (Firebase + Vercel) يعمل بكفاءة واستجابة فائقة السرعة**.
 - ✅ **حواجز الأمان ضد المسح الخاطئ تعمل بدقة 100%**.

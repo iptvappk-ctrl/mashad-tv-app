@@ -104,7 +104,7 @@ ZAQZOUKA_OFFICIAL_WEBSITE/
 ## 🌐 7. ربط دومين خاص مخصص (Custom Domain Setup)
 إذا اشتريت دومين خاص (مثلاً: `zaqzouka.com` أو `zaq-tv.com`)، خطوات ربطه بـ Vercel كالتالي:
 1. ادخل على لوحة تحكم مشروعك في Vercel:  
-   `https://vercel.com/hassans-projects-ff23176e/zaqzouka-tv/settings/domains`
+   `https://vercel.com/[VERCEL_TEAM]/zaqzouka-tv/settings/domains`
 2. اكتب اسم الدومين واضغط **Add**.
 3. في لوحة تحكم الدومين (Namecheap / Cloudflare / GoDaddy)، أضف الـ DNS التالي:
    - **Type A**: `@` بالقيمة `76.76.21.21`

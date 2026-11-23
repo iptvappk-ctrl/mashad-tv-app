@@ -383,7 +383,7 @@ class FastMediaDownloader {
 ## 🛠️ 5. كيف يتم تشغيل النظام في مشروعك الحالي؟
 
 الملفات كاملة ومستقلة تماماً داخل فولدر:
-`C:\Users\hassa\Desktop\all project\iptv app\social`
+`<project_root>\social`
 
 1. **الـ Providers:** موجودة داخل `social/src/lib/providers/` وتغطي كل الفئات.
 2. **محرك فك تشفير السيرفرات:** في `social/src/lib/extractors/stream-extractor.ts`.

@@ -5,7 +5,7 @@
 # شغّله بس لما تكون جاهز للدمج الحقيقي
 # 
 # تشغيل:
-#   cd "C:\Users\hassa\Desktop\all project\iptv app"
+#   cd "<project_root>"
 #   .\social\integrate.ps1
 ################################################################################
 

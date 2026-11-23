@@ -12,7 +12,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ReleaseNotes,
 
-    [string]$Repository = "hassanIssa00/madartv-updates",
+    [string]$Repository = "iptvappk-ctrl/mashad-tv-app",
 
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA "MadarTV\public-updates")
 )
@@ -84,7 +84,7 @@ if ($releaseExists) {
 if ($LASTEXITCODE -ne 0) { throw "GitHub Release upload failed." }
 
 # Also upload the companion ZAG Player APK if available
-$playerApk = "C:\Users\hassa\Desktop\zag-player-latest.apk"
+$playerApk = "<project_root>\realses\zag-player.apk"
 $hasPlayer = Test-Path -LiteralPath $playerApk
 $playerObj = $null
 if ($hasPlayer) {

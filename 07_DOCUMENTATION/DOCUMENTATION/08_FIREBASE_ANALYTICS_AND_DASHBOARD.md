@@ -26,7 +26,7 @@
 - البُعد المخصص `Content title` بنطاق Event ومفتاح `content_title` مسجل لعرض أكثر الأعمال مشاهدة.
 - حساب الخدمة `madartv-analytics-reader@madartv.iam.gserviceaccount.com` لديه دور Viewer على خاصية GA4، مع تقييد مقاييس التكلفة والإيراد. لا يملك أدواراً على موارد المشروع، ولا تُرسل له رسائل بريد.
 - يوجد مفتاحان نشطان لحساب الخدمة، وكلاهما أنشئ في 28 أكتوبر 2026: المعرّف `5cb809462ade9bf097fd9629f8b6ebb7f0fb3c50` واسم التنزيل `madartv-5cb809462ade.json`؛ والمعرّف `377cd71bfd8bc3e83acd1d88d7dbf0bea634ffe5` واسم التنزيل `madartv-377cd71bfd8b.json`. أبقى مالك المشروع المفتاحين فعالين.
-- قالت Google Cloud إن ملفي JSON حُفظا على الكمبيوتر، لكنهما لم يظهرا لفحص مساحة العمل ولم يُعثر عليهما في مجلد التنزيلات أو `%TEMP%` أو المسار الآمن. لذلك لا يوجد اعتماد محلي يمكن للوحة استخدامه حالياً. المسار المحلي المقصود `C:/Users/hassa/.config/madartv/analytics-reader.json`.
+- قالت Google Cloud إن ملفي JSON حُفظا على الكمبيوتر، لكنهما لم يظهرا لفحص مساحة العمل ولم يُعثر عليهما في مجلد التنزيلات أو `%TEMP%` أو المسار الآمن. لذلك لا يوجد اعتماد محلي يمكن للوحة استخدامه حالياً. المسار المحلي المقصود `<user_home>/.config/madartv/analytics-reader.json`.
 - معرّفات المفاتيح وأسماء ملفات التنزيل أعلاه بيانات توثيقية فقط. لا تضع محتوى JSON أو قيمة `private_key` في هذا الملف أو المستودع؛ احفظ الملف خارج المشروع بصلاحيات مقيدة.
 - لم تكن هناك أحداث تاريخية أو مستخدمون نشطون في الخاصية عند الفحص. تبدأ الأرقام بعد تشغيل نسخة مهيأة من الويب أو Android وجمع أحداث فعلية.
 
@@ -52,13 +52,13 @@
 الخادم موجود في `dashboard/` ويستخدم Google Analytics Data API. ابدأ من القالب:
 
 ```powershell
-Set-Location "C:\Users\hassa\Desktop\all project\iptv app\dashboard"
+Set-Location "<project_root>\dashboard"
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 npm install
 npm start
 ```
 
-رقم الخاصية مضبوط في `dashboard/.env` كـ `561118297`، وData API مفعّلة. حساب الخدمة للقراءة فقط مضاف إلى الخاصية بدور Viewer مع حجب مقاييس التكلفة والإيراد. ضع ملف JSON الذي نزّلته من Google Cloud Console في `C:/Users/hassa/.config/madartv/analytics-reader.json`؛ متغير `GOOGLE_APPLICATION_CREDENTIALS` يشير إلى هذا المسار. لا تنسخ الملف إلى مجلد المشروع أو GitHub. تبقى لوحة الإدارة مربوطة افتراضياً بـ `127.0.0.1`.
+رقم الخاصية مضبوط في `dashboard/.env` كـ `561118297`، وData API مفعّلة. حساب الخدمة للقراءة فقط مضاف إلى الخاصية بدور Viewer مع حجب مقاييس التكلفة والإيراد. ضع ملف JSON الذي نزّلته من Google Cloud Console في `<user_home>/.config/madartv/analytics-reader.json`؛ متغير `GOOGLE_APPLICATION_CREDENTIALS` يشير إلى هذا المسار. لا تنسخ الملف إلى مجلد المشروع أو GitHub. تبقى لوحة الإدارة مربوطة افتراضياً بـ `127.0.0.1`.
 
 أُضيف فحص لوجود ملف الاعتماد قبل طلب التقارير. عند غيابه يعيد `/api/health` القيمة `credentialsConfigured: false`، ويعرض `/api/stats` الحالة `missing_credentials` ورسالة إعداد واضحة بدلاً من محاولة اتصال تنهي عملية الخادم. فُحصت الحالة محلياً: خاصية GA4 مضبوطة، لكن الاعتماد غير موجود؛ لذلك تظل البطاقات بلا أرقام إلى أن يوضع ملف الاعتماد.
 

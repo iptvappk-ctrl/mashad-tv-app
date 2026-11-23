@@ -9,7 +9,7 @@
 
 1. **تدوير المفتاح السري (Secret Key Rotation):**
    * إبطال المفتاح القديم `zaqzouka_secret_2026` فوراً من كافة المنظومات.
-   * توليد واعتماد مفتاح أمان مشفر جديد عالي التعقيد: `Zq!7#mK9xPd@3wR5nT`.
+   * توليد واعتماد مفتاح أمان مشفر جديد عالي التعقيد: `[ADMIN_SECRET_REDACTED]`.
    * تحديث متغير البيئة `ADMIN_SECRET` في مشروع Vercel السحابي وإعادة النشر بالكامل.
 
 2. **تطهير واجهة المستخدم (UI Sanitization):**
@@ -27,7 +27,7 @@
 
 | العنصر | القيمة القديمة (ملغاة ومحظورة) | القيمة الجديدة المعتمدة (نشطة الآن) | مكان الاستخدام |
 |---|---|---|---|
-| **Admin Secret** | `zaqzouka_secret_2026` | `Zq!7#mK9xPd@3wR5nT` | Vercel API / Admin App / Master Control |
+| **Admin Secret** | `zaqzouka_secret_2026` | `[ADMIN_SECRET_REDACTED]` | Vercel API / Admin App / Master Control |
 | **Master Secret** | — | `zaqzouka_master_2026` | Emergency Reset Endpoints |
 | **API Client Key** | — | `ZQ-OWNER-2026-SECRET-14MOON` | ترخيص تطبيقات العملاء |
 | **Firebase RTDB** | — | `https://madartv-default-rtdb.firebaseio.com` | قاعدة البيانات الحية والتحكم اللحظي |
@@ -62,7 +62,7 @@
      * حذف كود `_showSettingsDialog` بالكامل.
 2. **تطبيق التحكم الماستر (`ZaqzoukaMasterControl`):**
    * `03_MASTER_CONTROL/ZaqzoukaMasterControl/lib/api_client.dart`
-     * تحديث `_adminSecret = 'Zq!7#mK9xPd@3wR5nT'`.
+     * تحديث `_adminSecret = '[ADMIN_SECRET_REDACTED]'`.
 
 ### ب. الخدمات الخلفية والسحابية (Cloud Backend & Functions):
 1. `04_ADMIN_DASHBOARD/dashboard-api/api/admin.js`: تحديث التحقق من الـ `ADMIN_SECRET`.

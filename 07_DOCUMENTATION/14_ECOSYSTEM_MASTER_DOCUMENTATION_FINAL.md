@@ -110,7 +110,7 @@
 ## 5. لوحة التحكم السيادية للمالك (ZaqzoukaMasterControl)
 
 * **المسار**: `03_MASTER_CONTROL/ZaqzoukaMasterControl`
-* **كلمة المرور الرئيسية (Master PIN)**: `yomnaeid`
+* **كلمة المرور الرئيسية (Master PIN)**: `[PIN_REDACTED]`
 * **المسؤوليات والمميزات الفريدة**:
   1. **مراقبة الحالة العامة**: عرض بطاقة الحالة السحابية (نشطة 🟢 / متوقفة 🔴 / تعذر الاتصال 🟡).
   2. **زر التدمير الشامل (عليا وعلى أعدائي)**:
@@ -287,9 +287,9 @@
 
 | المكون / الخدمة | المفتاح السري / الاعتماد | الوظيفة |
 | :--- | :--- | :--- |
-| **لوحة المالك (Master PIN)** | `yomnaeid` | تسجيل الدخول للوحة التحكم السيادية |
+| **لوحة المالك (Master PIN)** | `[PIN_REDACTED]` | تسجيل الدخول للوحة التحكم السيادية |
 | **لوحة الشريك (Admin Auth)** | `admin` / `zaqzouka2026` | تسجيل الدخول للوحة التحليلات وإدارة المحتوى |
-| **API Secret Header** | `x-admin-secret: Zq!7#mK9xPd@3wR5nT` | توثيق كافة طلبات الـ POST السحابية |
+| **API Secret Header** | `x-admin-secret: [ADMIN_SECRET_REDACTED]` | توثيق كافة طلبات الـ POST السحابية |
 | **Firebase Realtime DB** | `https://madartv-default-rtdb.firebaseio.com` | قاعدة البيانات المركزية المشفرة |
 | **Cloudflare Worker** | `zaafilm.com` & `zaqzouka-dashboard-api` | بوابة التوزيع السحابي والتحكم الفوري |
 

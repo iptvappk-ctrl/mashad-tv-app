@@ -4,7 +4,7 @@ The app checks the public Firebase Hosting manifest at:
 
 `https://madartv-updates.web.app/updates/android/latest.json`
 
-Firebase Hosting is the source of update version, release notes, APK URL, and SHA-256. The APK itself is hosted as an asset in the public `hassanIssa00/madartv-updates` GitHub Release. This split works with Firebase's free Spark plan because Spark blocks `.apk` files on Hosting. The manifest is ordinary JSON and does not require Firebase Authentication, invited testers, a paid plan, or a Play Store release.
+Firebase Hosting is the source of update version, release notes, APK URL, and SHA-256. The APK itself is hosted as an asset in the public `iptvappk-ctrl/madartv-updates` GitHub Release. This split works with Firebase's free Spark plan because Spark blocks `.apk` files on Hosting. The manifest is ordinary JSON and does not require Firebase Authentication, invited testers, a paid plan, or a Play Store release.
 
 ## Update flow
 
@@ -39,7 +39,7 @@ The Firebase manifest format is:
   "packageName": "com.madar.madar_flutter",
   "versionCode": 55,
   "versionName": "1.0.50",
-  "apkUrl": "https://github.com/hassanIssa00/madartv-updates/releases/download/v1.0.50-55/zaqzouka-1.0.50-55.apk",
+  "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.50-55/zaqzouka-1.0.50-55.apk",
   "sha256": "64 lowercase hexadecimal characters",
   "mandatory": false,
   "releaseNotes": "تحسينات وإصلاحات"

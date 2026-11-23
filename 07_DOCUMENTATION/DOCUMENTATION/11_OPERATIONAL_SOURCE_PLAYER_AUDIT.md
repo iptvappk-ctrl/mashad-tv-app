@@ -46,7 +46,7 @@
 .\gradlew.bat :app:assembleDebug :madar-player:assembleDebug --no-daemon
 ```
 
-نُسخت النسختان إلى `C:\Users\hassa\Desktop\apk\` واجتازتا تحقق توقيع APK المحلي. هما نسختا **Debug موقعتان بمفتاح Android Debug** وليستا إصدار إنتاج موقّع بمفتاح نشر.
+نُسخت النسختان إلى `<desktop>\apk\` واجتازتا تحقق توقيع APK المحلي. هما نسختا **Debug موقعتان بمفتاح Android Debug** وليستا إصدار إنتاج موقّع بمفتاح نشر.
 
 | الملف | الحزمة | الحجم | SHA-256 |
 |---|---|---:|---|

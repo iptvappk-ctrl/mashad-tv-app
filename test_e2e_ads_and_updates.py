@@ -3,7 +3,7 @@ import json
 import time
 
 API = 'https://zaafilm.com/api/system_control'
-SECRET = 'Zq!7#mK9xPd@3wR5nT'
+SECRET = '[ADMIN_SECRET_REDACTED]'
 HEADERS = {
     'Content-Type': 'application/json',
     'x-admin-secret': SECRET,
