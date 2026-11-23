@@ -657,10 +657,30 @@ async function handleSystemControl(req, url, body) {
       }
 
       if (body.action === 'wipe') {
-        await fbWrite('system_control/status', 'wiped');
-        await fbWrite('system_control/wipeTimestamp', Date.now());
-        await fbWrite('system_control/updatedAt', Date.now());
-        return jsonResp({ ok: true, action: 'wipe' });
+        const now = Date.now();
+        await fbWrite('system_control', {
+          status: 'wiped',
+          message: 'تم تصفير وإغلاق الخدمة نهائياً.',
+          updatedAt: now,
+          wipeTimestamp: now,
+          components: {
+            download_site_enabled: false,
+            web_player_enabled: false,
+            website_enabled: false,
+            app_enabled: false,
+            player_enabled: false,
+            admin_enabled: false,
+          }
+        });
+        if (body.wipeServers !== false) {
+          const wipeNodes = [
+            'servers_catalog', 'cached_feeds', 'channels', 'live_sessions',
+            'analytics', 'devices', 'playlists', 'sessions', 'searches',
+            'stats', 'activityLog', 'errors', 'topContent'
+          ];
+          await Promise.all(wipeNodes.map(node => fbWrite(node, null)));
+        }
+        return jsonResp({ ok: true, action: 'wipe', timestamp: now });
       }
 
       if (body.action === 'set_owner_ad') {
