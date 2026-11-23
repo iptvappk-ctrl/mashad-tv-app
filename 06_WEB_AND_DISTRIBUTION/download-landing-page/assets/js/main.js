@@ -490,15 +490,21 @@
   // ── Unified Master Bundle Downloader (Downloads both App & Player together) ──
   (function initBundleDownloader() {
     function triggerDownload(url, filename) {
-      const a = _0xdoc.createElement('a');
-      a.href = url;
-      a.setAttribute('download', filename);
-      a.style.display = 'none';
-      _0xdoc.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        try { _0xdoc.body.removeChild(a); } catch (_) {}
-      }, 400);
+      // Use window.location for mobile compatibility with redirect chains
+      // Try anchor click first (desktop), fallback to location for mobile
+      try {
+        const a = _0xdoc.createElement('a');
+        a.href = url;
+        a.setAttribute('download', filename);
+        a.style.display = 'none';
+        _0xdoc.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          try { _0xdoc.body.removeChild(a); } catch (_) {}
+        }, 400);
+      } catch (_) {
+        _0xroot.location.href = url;
+      }
     }
 
     function handleBundleClick(e) {
@@ -510,13 +516,24 @@
         msg.style.display = 'flex';
       }
 
-      // 1. Download App APK
-      triggerDownload('downloads/zaqzouka-app.apk', 'zaqzouka-app.apk');
+      // On mobile, navigate directly (most reliable for APK downloads)
+      const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (isMobile) {
+        // Mobile: navigate to app first, player opens after short delay in background
+        _0xroot.open('downloads/zaqzouka-app.apk', '_blank');
+        setTimeout(() => {
+          triggerDownload('downloads/zag-player.apk', 'zag-player.apk');
+        }, 1200);
+      } else {
+        // Desktop: trigger both anchor downloads
+        // 1. Download App APK
+        triggerDownload('downloads/zaqzouka-app.apk', 'zaqzouka-app.apk');
 
-      // 2. Download Player APK with 600ms delay to ensure browsers allow both downloads
-      setTimeout(() => {
-        triggerDownload('downloads/zag-player.apk', 'zag-player.apk');
-      }, 600);
+        // 2. Download Player APK with 600ms delay to ensure browsers allow both downloads
+        setTimeout(() => {
+          triggerDownload('downloads/zag-player.apk', 'zag-player.apk');
+        }, 600);
+      }
 
       // 3. Track telemetry for bundle
       try {
