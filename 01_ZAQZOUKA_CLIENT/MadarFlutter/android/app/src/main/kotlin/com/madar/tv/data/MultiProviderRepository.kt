@@ -390,12 +390,11 @@ object MultiProviderRepository {
         ),
 
         // ── 3. وي سيما (WeCima) ────────────────────────────────────────
-        // PRIMARY #3: https://wecima.tips مع ميرورز شغالة 100%
         ProviderConfig(
             id = "wecima",
             name = "وي سيما",
-            baseUrl = "https://wecima.tips",
-            mirrorDomains = listOf("https://mywecima.shop", "https://mywecima1.best", "https://wecima.cam"),
+            baseUrl = "https://wecima.cc",
+            mirrorDomains = listOf("https://wecima.tips", "https://mywecima.shop", "https://wecima.cam"),
             moviesPath = "/movies/page/{page}/",
             seriesPath = "/series/page/{page}/",
             searchPath = "/?s={q}",
@@ -1896,7 +1895,7 @@ object MultiProviderRepository {
                 } catch (_: Exception) {}
             }
 
-            // 1. Akwam Servers (watch/.../servers)
+            // 1. Akwam Servers (watch/.../servers and download/...)
             if (pageUrl.contains("akw")) {
                 val watchUrl = pageUrl
                     .replace("/akfilm-", "/watch/akfilm-")
@@ -1929,6 +1928,43 @@ object MultiProviderRepository {
                             servers += ArabseedServer("سيرفر ${servers.size + 1}$label", sUrl)
                         }
                     }
+                }
+
+                // 1b. Akwam Download Page: scrape alternative & direct download host servers (mixdrop, streamruby, lulustream, etc.)
+                val dlUrl = pageUrl
+                    .replace("/watch/", "/")
+                    .replace("/akfilm-", "/download/akfilm-")
+                    .replace("/akdrama-", "/download/akdrama-")
+                    .replace("/akseries-", "/download/akseries-")
+                    .replace(Regex("/servers/?$"), "")
+                    .trimEnd('/')
+                if (dlUrl != pageUrl || pageUrl.contains("/download/")) {
+                    try {
+                        val dlHtml = fetchHtml(dlUrl, "$watchReferer/")
+                        val dlDoc = Jsoup.parse(dlHtml, dlUrl)
+                        for (a in dlDoc.select("a[href]")) {
+                            val rawHref = a.attr("abs:href").trim()
+                            val parentText = a.parent()?.text().orEmpty()
+                            val sName = parentText.replace("تحميل", "").trim()
+                            val isKnownHost = rawHref.contains("mixdrop") || rawHref.contains("streamruby") ||
+                                rawHref.contains("lulustream") || rawHref.contains("vikingfile") ||
+                                rawHref.contains("dood") || rawHref.contains("filemoon") ||
+                                rawHref.contains("streamtape") || rawHref.contains("vidmoly") ||
+                                rawHref.endsWith(".mp4") || rawHref.endsWith(".m3u8")
+                            if (isKnownHost && isServerCandidateUrl(rawHref)) {
+                                val embedUrl = when {
+                                    rawHref.contains("mixdrop") -> rawHref.replace("/f/", "/e/")
+                                    rawHref.contains("streamruby") -> rawHref.replace("/d/", "/e/")
+                                    rawHref.contains("lulustream") -> rawHref.replace("/d/", "/e/")
+                                    else -> rawHref
+                                }
+                                if (servers.none { it.embedUrl == embedUrl || it.embedUrl == rawHref }) {
+                                    val label = if (sName.isNotBlank() && sName.length < 25) " ($sName)" else ""
+                                    servers += ArabseedServer("سيرفر ${servers.size + 1}$label", embedUrl)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
             }
 
@@ -2212,11 +2248,28 @@ object MultiProviderRepository {
         originalPageUrl: String,
         type: ArabseedType = ArabseedType.MOVIE,
         requestedYear: String = "",
+        episodeNumber: Int? = null,
+        seasonNumber: Int? = null,
     ): List<ArabseedServer> {
         if (title.isBlank()) return emptyList()
         val normalizedTitle = normalizeTitleForTokenization(title)
         if (normalizedTitle.isBlank()) return emptyList()
-        val searchQueries = listOf(normalizedTitle, title.trim()).distinct()
+
+        val cleanSeriesTitle = title
+            .replace(Regex("""(?i)(?:الموسم|موسم|الحلقة|حلقة|season|episode|ep|s\d+)\s*\d+"""), "")
+            .replace(Regex("""\s{2,}"""), " ")
+            .trim()
+        val searchQueries = mutableListOf<String>()
+        if (cleanSeriesTitle.isNotBlank()) {
+            searchQueries += normalizeTitleForTokenization(cleanSeriesTitle)
+            searchQueries += cleanSeriesTitle
+        }
+        searchQueries += normalizedTitle
+        searchQueries += title.trim()
+        if (episodeNumber != null && episodeNumber > 0 && cleanSeriesTitle.isNotBlank()) {
+            searchQueries += "$cleanSeriesTitle الحلقة $episodeNumber"
+        }
+        val distinctQueries = searchQueries.filter(String::isNotBlank).distinct()
 
         val originalProvider = getProviderForUrl(originalPageUrl)
         val sourceKey = originalProvider?.id ?: if (isArabseedPage(originalPageUrl)) {
@@ -2228,6 +2281,8 @@ object MultiProviderRepository {
             type.name,
             normalizedTitle,
             requestedYear.trim(),
+            episodeNumber?.toString() ?: "",
+            seasonNumber?.toString() ?: "",
             sourceKey,
         ).joinToString(":")
         val now = System.currentTimeMillis()
@@ -2243,13 +2298,18 @@ object MultiProviderRepository {
         val allServers = java.util.concurrent.ConcurrentHashMap<String, ArabseedServer>()
         val serverOrder = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
+        val isEpisodeTarget = (episodeNumber != null && episodeNumber > 0) || (type == ArabseedType.SERIES && 
+            (SeriesCatalogParser.isEpisode(title, originalPageUrl) || originalPageUrl.contains("-ep") || originalPageUrl.contains("/watch/")))
+        val targetEpNum = episodeNumber ?: SeriesCatalogParser.episodeNumber(title, originalPageUrl)
+        val targetSeasonNum = seasonNumber ?: SeriesCatalogParser.seasonNumber(title, originalPageUrl) ?: 1
+
         val enabledProviders = PROVIDERS.filter { it.enabled && it.id != originalProvider?.id }
         val sortedProviders = enabledProviders.sortedByDescending { if (it.isPrimary) 1 else 0 }
         val tasks = sortedProviders.map { provider ->
             {
                 try {
                     var match: ArabseedItem? = null
-                    for (query in searchQueries) {
+                    for (query in distinctQueries) {
                         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
                         val items = fetchProviderListing(
                             provider,
@@ -2262,36 +2322,30 @@ object MultiProviderRepository {
                                 requestedYear.isBlank() || it.year.isBlank() ||
                                     Math.abs((it.year.toIntOrNull() ?: 0) - (requestedYear.toIntOrNull() ?: 0)) <= 1
                             }
-                            .filter { item -> matchesProviderTitle(title, item) }
+                            .filter { item -> matchesProviderTitle(title, item) || (cleanSeriesTitle.isNotBlank() && matchesProviderTitle(cleanSeriesTitle, item)) }
                             .sortedByDescending { it.year.isNotBlank() && it.year == requestedYear }
                             .firstOrNull()
                         if (match != null) break
                     }
                     if (match != null && match.pageUrl != originalPageUrl) {
-                        val isEpisodeTarget = type == ArabseedType.SERIES && 
-                            (SeriesCatalogParser.isEpisode(title, originalPageUrl) || originalPageUrl.contains("-ep") || originalPageUrl.contains("/watch/"))
-                        val targetEpisodeUrl = if (isEpisodeTarget) {
-                            val epNum = SeriesCatalogParser.episodeNumber(title, originalPageUrl)
-                            val sNum = SeriesCatalogParser.seasonNumber(title, originalPageUrl) ?: 1
-                            if (epNum != null) {
-                                val bundle = fetchSeasonsAndEpisodes(match, forceRefresh = false, seasonNumbersOnly = setOf(sNum))
-                                val targetSeason = bundle.seasons.firstOrNull { it.number == sNum } ?: bundle.seasons.firstOrNull()
-                                targetSeason?.episodes?.firstOrNull { it.number == epNum }?.pageUrl
-                            } else null
+                        val targetEpisodeUrl = if (isEpisodeTarget && targetEpNum != null) {
+                            if (SeriesCatalogParser.isEpisode(match.title, match.pageUrl) && SeriesCatalogParser.episodeNumber(match.title, match.pageUrl) == targetEpNum) {
+                                match.pageUrl
+                            } else {
+                                val bundle = fetchSeasonsAndEpisodes(match, forceRefresh = false, seasonNumbersOnly = setOf(targetSeasonNum))
+                                val targetSeason = bundle.seasons.firstOrNull { it.number == targetSeasonNum } ?: bundle.seasons.firstOrNull()
+                                targetSeason?.episodes?.firstOrNull { it.number == targetEpNum }?.pageUrl
+                            }
                         } else match.pageUrl
 
                         if (!targetEpisodeUrl.isNullOrBlank() && targetEpisodeUrl != originalPageUrl) {
-                            val providerBase = pageOrigin(targetEpisodeUrl, provider.baseUrl)
-                            val pageServers = fetchServersFromPage(
-                                targetEpisodeUrl,
-                                "$providerBase/",
-                                providerPageHttp,
-                            )
+                            val pageServers = fetchServers(targetEpisodeUrl)
                             pageServers.forEachIndexed { idx, server ->
                                 if (server.embedUrl != originalPageUrl) {
                                     val key = server.embedUrl
+                                    val sLabel = server.name.ifBlank { "سيرفر ${idx + 1}" }
                                     val tagged = server.copy(
-                                        name = "${provider.name} - سيرفر ${idx + 1}",
+                                        name = "${provider.name} - $sLabel",
                                         sourcePageUrl = targetEpisodeUrl,
                                         sourceProviderName = provider.name,
                                     )
@@ -2318,29 +2372,28 @@ object MultiProviderRepository {
                         .asSequence()
                         .filter { it.type == type }
                         .filter { requestedYear.isBlank() || it.year.isBlank() || it.year == requestedYear }
-                        .filter { item -> matchesProviderTitle(title, item) }
+                        .filter { item -> matchesProviderTitle(title, item) || (cleanSeriesTitle.isNotBlank() && matchesProviderTitle(cleanSeriesTitle, item)) }
                         .sortedByDescending { it.year.isNotBlank() && it.year == requestedYear }
                         .firstOrNull()
                     if (match != null && match.pageUrl != originalPageUrl) {
-                        val isEpisodeTarget = type == ArabseedType.SERIES && 
-                            (SeriesCatalogParser.isEpisode(title, originalPageUrl) || originalPageUrl.contains("-ep") || originalPageUrl.contains("/watch/"))
-                        val targetEpisodeUrl = if (isEpisodeTarget) {
-                            val epNum = SeriesCatalogParser.episodeNumber(title, originalPageUrl)
-                            val sNum = SeriesCatalogParser.seasonNumber(title, originalPageUrl) ?: 1
-                            if (epNum != null) {
-                                val bundle = ArabseedRepository.fetchSeasonsAndEpisodes(match, forceRefresh = false, seasonNumbersOnly = setOf(sNum))
-                                val targetSeason = bundle.seasons.firstOrNull { it.number == sNum } ?: bundle.seasons.firstOrNull()
-                                targetSeason?.episodes?.firstOrNull { it.number == epNum }?.pageUrl
-                            } else null
+                        val targetEpisodeUrl = if (isEpisodeTarget && targetEpNum != null) {
+                            if (SeriesCatalogParser.isEpisode(match.title, match.pageUrl) && SeriesCatalogParser.episodeNumber(match.title, match.pageUrl) == targetEpNum) {
+                                match.pageUrl
+                            } else {
+                                val bundle = ArabseedRepository.fetchSeasonsAndEpisodes(match, forceRefresh = false, seasonNumbersOnly = setOf(targetSeasonNum))
+                                val targetSeason = bundle.seasons.firstOrNull { it.number == targetSeasonNum } ?: bundle.seasons.firstOrNull()
+                                targetSeason?.episodes?.firstOrNull { it.number == targetEpNum }?.pageUrl
+                            }
                         } else match.pageUrl
 
                         if (!targetEpisodeUrl.isNullOrBlank() && targetEpisodeUrl != originalPageUrl) {
-                            ArabseedRepository.fetchServersFast(targetEpisodeUrl)
+                            val arabseedServers = ArabseedRepository.fetchEpisodeServers(targetEpisodeUrl)
+                            arabseedServers
                                 .filter { isServerCandidateUrl(it.embedUrl) }
                                 .forEachIndexed { index, server ->
                                     if (server.embedUrl != originalPageUrl) {
                                         val tagged = server.copy(
-                                            name = "عرب سيد - سيرفر ${index + 1}",
+                                            name = "عرب سيد - ${server.name.ifBlank { "سيرفر ${index + 1}" }}",
                                             sourcePageUrl = targetEpisodeUrl,
                                             sourceProviderName = "عرب سيد",
                                         )
@@ -2812,6 +2865,38 @@ object MultiProviderRepository {
         return playable
     }
 
+    private fun unpackDeanEdwards(script: String): String {
+        return try {
+            val regex = Regex("""eval\(function\(p,a,c,k,e,[rd]\).+?return p\}\('(.*?)',(\d+),(\d+),'((?:[^'\\]|\\.)*)'\.split\('\|'\)""", RegexOption.DOT_MATCHES_ALL)
+            val match = regex.find(script) ?: return ""
+            val p = match.groupValues[1]
+            val aStr = match.groupValues[2]
+            val cStr = match.groupValues[3]
+            val kStr = match.groupValues[4]
+            val a = aStr.toIntOrNull() ?: return ""
+            val c = cStr.toIntOrNull() ?: return ""
+            val k = kStr.split('|')
+            fun baseN(num: Int, base: Int): String {
+                val digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                var n = num
+                val sb = StringBuilder()
+                while (n > 0) {
+                    sb.insert(0, digits[n % base])
+                    n /= base
+                }
+                return if (sb.isEmpty()) "0" else sb.toString()
+            }
+            val dict = HashMap<String, String>(c)
+            for (i in 0 until c) {
+                val key = if (a <= 10) i.toString() else baseN(i, a)
+                val word = if (i < k.size && k[i].isNotEmpty()) k[i] else key
+                dict[key] = word
+            }
+            val wordRegex = Regex("""\b\w+\b""")
+            wordRegex.replace(p) { m -> dict[m.value] ?: m.value }
+        } catch (_: Exception) { "" }
+    }
+
     private fun resolveEmbedToStream(embedUrl: String, referer: String): String? {
         if (embedUrl.isBlank()) return null
         if (isAdServerUrl(embedUrl)) return null
@@ -2826,14 +2911,17 @@ object MultiProviderRepository {
         } catch (_: Exception) { return null }
         if (html.isBlank()) return null
 
+        val unpackedJs = if (html.contains("eval(function(p,a,c,k,e")) unpackDeanEdwards(html) else ""
+        val searchScope = if (unpackedJs.isNotBlank()) "$html\n$unpackedJs" else html
+
         // ── Provider-specific extractors ────────────────────────────
 
         // Voe.sx
         if (embedUrl.contains("voe.sx") || embedUrl.contains("voe.")) {
-            Regex("""['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(html)
+            Regex("""['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(searchScope)
                 ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
             // base64 encoded sources
-            Regex("""'e':\s*'([A-Za-z0-9+/=]{50,})'""").find(html)?.groupValues?.get(1)?.let { enc ->
+            Regex("""'e':\s*'([A-Za-z0-9+/=]{50,})'""").find(searchScope)?.groupValues?.get(1)?.let { enc ->
                 runCatching {
                     String(android.util.Base64.decode(enc, android.util.Base64.DEFAULT))
                 }.getOrNull()?.let { decoded ->
@@ -2845,9 +2933,9 @@ object MultiProviderRepository {
 
         // Doodstream
         if (embedUrl.contains("dood") || embedUrl.contains("ds2play") || embedUrl.contains("dooood")) {
-            val passMatch = Regex("""\$\.get\s*\(\s*'(/pass_md5/[^']+)'""").find(html)
+            val passMatch = Regex("""\$\.get\s*\(\s*'(/pass_md5/[^']+)'""").find(searchScope)
             passMatch?.groupValues?.get(1)?.let { passPath ->
-                val tokenMatch = Regex("""token=([a-zA-Z0-9]+)""").find(html)
+                val tokenMatch = Regex("""token=([a-zA-Z0-9]+)""").find(searchScope)
                 val token = tokenMatch?.groupValues?.get(1) ?: ""
                 val baseHost = try { java.net.URI(embedUrl).let { "${it.scheme}://${it.host}" } } catch (_: Exception) { "" }
                 if (baseHost.isNotBlank()) {
@@ -2866,13 +2954,13 @@ object MultiProviderRepository {
 
         // Streamtape
         if (embedUrl.contains("streamtape")) {
-            Regex("""id=([a-zA-Z0-9_-]+)&expires""").find(html)?.groupValues?.get(1)?.let { id ->
-                Regex("""'[^']*'\s*\+\s*'([^']+)'""").find(html)?.groupValues?.get(1)?.let { token ->
+            Regex("""id=([a-zA-Z0-9_-]+)&expires""").find(searchScope)?.groupValues?.get(1)?.let { id ->
+                Regex("""'[^']*'\s*\+\s*'([^']+)'""").find(searchScope)?.groupValues?.get(1)?.let { token ->
                     return "https://streamtape.com/get_video?id=$id&expires=&ip=&token=$token&stream=1"
                 }
             }
             // Alternative Streamtape pattern
-            Regex("""document\.getElementById\(['"]\S+['"]\)\.innerHTML\s*=\s*["']([^"']+)["']""").find(html)
+            Regex("""document\.getElementById\(['"]\S+['"]\)\.innerHTML\s*=\s*["']([^"']+)["']""").find(searchScope)
                 ?.groupValues?.get(1)?.let { raw ->
                     if (raw.contains("streamtape")) return "https:$raw"
                 }
@@ -2880,19 +2968,20 @@ object MultiProviderRepository {
 
         // Vidmoly
         if (embedUrl.contains("vidmoly")) {
-            Regex("""['"]?(https?://[^\s'"<>]+\.m3u8[^\s'"<>]*)['"]?""").find(html)
+            Regex("""['"]?(https?://[^\s'"<>]+\.m3u8[^\s'"<>]*)['"]?""").find(searchScope)
                 ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
         }
 
         // Uqload / Govid / Vidsharing (sources: [...])
-        Regex("""sources\s*:\s*\[\s*['"]([^'"]+\.(?:mp4|m3u8)[^'"]*)['"]""").find(html)
+        Regex("""sources\s*:\s*\[\s*['"]([^'"]+\.(?:mp4|m3u8)[^'"]*)['"]""").find(searchScope)
             ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
 
         // Mixdrop
         if (embedUrl.contains("mixdrop")) {
-            Regex("""(?:MDCore\.wurl|\"wurl\")\s*=\s*["']([^"']+)["']""").find(html)
+            Regex("""(?:MDCore\.wurl|\"wurl\"|wurl)\s*[:=]\s*["']([^"']+)["']""").find(searchScope)
                 ?.groupValues?.get(1)?.let { wurl ->
-                    return if (wurl.startsWith("//")) "https:$wurl" else wurl
+                    val cleanWurl = if (wurl.startsWith("//")) "https:$wurl" else wurl
+                    return cleanWurl
                 }
         }
 

@@ -84,7 +84,15 @@ class _EpisodePageState extends State<EpisodePage> {
       } catch (_) {}
     }
     if (!mounted || request != _request) return;
-    var pendingLookups = 1 + (alternatePages.isNotEmpty ? 1 : 0);
+    final seasonNum = _seasonNumberFrom(widget.seasonTitle) ?? 1;
+    final backupFuture = _fetchProviderBackupServerRows(
+      title: widget.seriesTitle,
+      pageUrl: url,
+      isSeries: true,
+      episodeNumber: _number,
+      seasonNumber: seasonNum,
+    );
+    var pendingLookups = 1 + (alternatePages.isNotEmpty ? 1 : 0) + 1;
     Future<void> absorb(Future<List<Map<String, dynamic>>> future) async {
       try {
         final rows = await future;
@@ -116,6 +124,7 @@ class _EpisodePageState extends State<EpisodePage> {
     if (alternatePages.isNotEmpty) {
       unawaited(absorb(_alternateServerFuture!));
     }
+    unawaited(absorb(backupFuture));
   }
 
   int _adjacent(int delta) {

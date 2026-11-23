@@ -548,6 +548,8 @@ Future<List<Map<String, dynamic>>> _fetchProviderBackupServerRows({
   required String pageUrl,
   required bool isSeries,
   String year = '',
+  int? episodeNumber,
+  int? seasonNumber,
 }) async {
   final cleanTitle = title.trim();
   final cleanUrl = pageUrl.trim();
@@ -558,6 +560,8 @@ Future<List<Map<String, dynamic>>> _fetchProviderBackupServerRows({
       pageUrl: cleanUrl,
       isSeries: isSeries,
       year: year.trim(),
+      episodeNumber: episodeNumber,
+      seasonNumber: seasonNumber,
     );
     return _mergeServerRows(_tagServerRows(rows, cleanUrl, 'مصدر بديل'));
   } catch (_) {

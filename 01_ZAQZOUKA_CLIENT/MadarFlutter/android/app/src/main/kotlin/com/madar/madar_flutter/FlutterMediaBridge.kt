@@ -279,9 +279,11 @@ class FlutterMediaBridge(context: Context) {
                 ArabseedType.MOVIE
             }
             val year = call.argument<String>("year").orEmpty().trim()
+            val episodeNumber = call.argument<Int>("episodeNumber")
+            val seasonNumber = call.argument<Int>("seasonNumber")
             if (title.isBlank() || url.isBlank()) return emptyList<Map<String, Any?>>()
-            val rows = MultiProviderRepository.fetchServersAllProviders(title, url, type, year)
-            android.util.Log.i("FlutterMediaBridge", "media.servers.all result=${rows.size} for title=$title")
+            val rows = MultiProviderRepository.fetchServersAllProviders(title, url, type, year, episodeNumber, seasonNumber)
+            android.util.Log.i("FlutterMediaBridge", "media.servers.all result=${rows.size} for title=$title (ep=$episodeNumber, s=$seasonNumber)")
             rows.filter { row -> isAllowedResolverInput(row.embedUrl) }.map { it.toMap() }
         }
         "media.resolve" -> {

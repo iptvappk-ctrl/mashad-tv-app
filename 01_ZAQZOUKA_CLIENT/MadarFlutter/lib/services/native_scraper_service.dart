@@ -48,11 +48,15 @@ class NativeScraperService {
     required String pageUrl,
     required bool isSeries,
     String year = '',
+    int? episodeNumber,
+    int? seasonNumber,
   }) => _list('media.servers.all', {
     'title': title,
     'url': pageUrl,
     'type': isSeries ? 'series' : 'movie',
     'year': year,
+    if (episodeNumber != null) 'episodeNumber': episodeNumber,
+    if (seasonNumber != null) 'seasonNumber': seasonNumber,
   }, timeout: const Duration(seconds: 18));
 
   Future<List<Map<String, dynamic>>> _list(
