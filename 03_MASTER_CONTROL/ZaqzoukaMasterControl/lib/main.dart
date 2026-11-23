@@ -185,6 +185,17 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   final TextEditingController _bannerHtmlCtrl = TextEditingController();
   final TextEditingController _bannerUrlCtrl = TextEditingController();
   bool _isSavingOwnerAds = false;
+  bool _hasFetchedOwnerAd = false;
+
+  // In-App Update Management State
+  bool _updateEnabled = false;
+  bool _isForcedUpdate = false;
+  final TextEditingController _versionCodeCtrl = TextEditingController(text: '85');
+  final TextEditingController _versionNameCtrl = TextEditingController(text: '1.0.78');
+  final TextEditingController _apkUrlCtrl = TextEditingController(text: 'https://zaafilm.com/downloads/zaqzouka-latest.apk');
+  final TextEditingController _releaseNotesCtrl = TextEditingController(text: 'تحديث أمني وسيرفرات فائقة السرعة');
+  bool _isSavingUpdate = false;
+  bool _hasFetchedUpdate = false;
 
   // 4 User-Facing Components to Control
   static const List<Map<String, dynamic>> _components = [
@@ -233,6 +244,10 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     _ownerAdUrlCtrl.dispose();
     _bannerHtmlCtrl.dispose();
     _bannerUrlCtrl.dispose();
+    _versionCodeCtrl.dispose();
+    _versionNameCtrl.dispose();
+    _apkUrlCtrl.dispose();
+    _releaseNotesCtrl.dispose();
     super.dispose();
   }
 
@@ -242,24 +257,90 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     if (!mounted) return;
     final ownerAd = data['owner_ad_config'];
     if (ownerAd is Map) {
-      _ownerAdEnabled = ownerAd['enabled'] == true;
-      _overridePartnerAd = ownerAd['override_partner'] != false;
-      _ownerSkipDelay = (ownerAd['skip_delay_seconds'] as num?)?.toInt() ?? 5;
-      if (_ownerAdHtmlCtrl.text.isEmpty && ownerAd['ad_html'] != null) {
-        _ownerAdHtmlCtrl.text = ownerAd['ad_html'].toString();
-      }
-      if (_ownerAdUrlCtrl.text.isEmpty && ownerAd['ad_url'] != null) {
-        _ownerAdUrlCtrl.text = ownerAd['ad_url'].toString();
-      }
-      _bannerAdEnabled = ownerAd['banner_enabled'] == true;
-      if (_bannerHtmlCtrl.text.isEmpty && ownerAd['banner_html'] != null) {
-        _bannerHtmlCtrl.text = ownerAd['banner_html'].toString();
-      }
-      if (_bannerUrlCtrl.text.isEmpty && ownerAd['banner_url'] != null) {
-        _bannerUrlCtrl.text = ownerAd['banner_url'].toString();
+      if (!_hasFetchedOwnerAd) {
+        _ownerAdEnabled = ownerAd['enabled'] == true;
+        _overridePartnerAd = ownerAd['override_partner'] != false;
+        _ownerSkipDelay = (ownerAd['skip_delay_seconds'] as num?)?.toInt() ?? 5;
+        if (ownerAd['ad_html'] != null) _ownerAdHtmlCtrl.text = ownerAd['ad_html'].toString();
+        if (ownerAd['ad_url'] != null) _ownerAdUrlCtrl.text = ownerAd['ad_url'].toString();
+        _bannerAdEnabled = ownerAd['banner_enabled'] == true;
+        if (ownerAd['banner_html'] != null) _bannerHtmlCtrl.text = ownerAd['banner_html'].toString();
+        if (ownerAd['banner_url'] != null) _bannerUrlCtrl.text = ownerAd['banner_url'].toString();
+        _hasFetchedOwnerAd = true;
       }
     }
+
+    final appUpdate = data['app_update'];
+    if (appUpdate is Map) {
+      _updateEnabled = appUpdate['enabled'] == true;
+      if (!_hasFetchedUpdate) {
+        _isForcedUpdate = appUpdate['forced'] == true;
+        if (appUpdate['latestVersionCode'] != null) {
+          _versionCodeCtrl.text = appUpdate['latestVersionCode'].toString();
+        }
+        if (appUpdate['latestVersionName'] != null) {
+          _versionNameCtrl.text = appUpdate['latestVersionName'].toString();
+        }
+        if (appUpdate['apkUrl'] != null) {
+          _apkUrlCtrl.text = appUpdate['apkUrl'].toString();
+        }
+        if (appUpdate['releaseNotes'] != null) {
+          _releaseNotesCtrl.text = appUpdate['releaseNotes'].toString();
+        }
+        _hasFetchedUpdate = true;
+      }
+    }
+
     setState(() { _statusData = data; _isLoading = false; });
+  }
+
+  Future<void> _publishAppUpdate({required bool forced}) async {
+    final vCode = int.tryParse(_versionCodeCtrl.text.trim()) ?? 85;
+    final vName = _versionNameCtrl.text.trim().isEmpty ? '1.0.78' : _versionNameCtrl.text.trim();
+    final url = _apkUrlCtrl.text.trim().isEmpty ? 'https://zaafilm.com/downloads/zaqzouka-latest.apk' : _apkUrlCtrl.text.trim();
+    final notes = _releaseNotesCtrl.text.trim();
+
+    setState(() => _isSavingUpdate = true);
+    final ok = await MasterApiClient.publishAppUpdate(
+      enabled: true,
+      versionCode: vCode,
+      versionName: vName,
+      apkUrl: url,
+      releaseNotes: notes,
+      forced: forced,
+    );
+    if (!mounted) return;
+    setState(() {
+      _isSavingUpdate = false;
+      if (ok) {
+        _updateEnabled = true;
+        _isForcedUpdate = forced;
+      }
+    });
+    _showToast(ok
+        ? (forced ? '🚨 تم نشر التحديث الإجباري وقفل التطبيق على جميع المستخدمين!' : '📢 تم نشر التحديث الاختياري للمستخدمين!')
+        : 'فشل النشر، تأكد من الاتصال');
+  }
+
+  Future<void> _cancelAppUpdate() async {
+    setState(() => _isSavingUpdate = true);
+    final ok = await MasterApiClient.publishAppUpdate(
+      enabled: false,
+      versionCode: int.tryParse(_versionCodeCtrl.text.trim()) ?? 85,
+      versionName: _versionNameCtrl.text.trim(),
+      apkUrl: _apkUrlCtrl.text.trim(),
+      releaseNotes: _releaseNotesCtrl.text.trim(),
+      forced: false,
+    );
+    if (!mounted) return;
+    setState(() {
+      _isSavingUpdate = false;
+      if (ok) {
+        _updateEnabled = false;
+        _isForcedUpdate = false;
+      }
+    });
+    _showToast(ok ? 'تم إلغاء التحديث وفك قفل التطبيق لجميع المستخدمين' : 'فشل إلغاء التحديث');
   }
 
   Future<void> _saveOwnerAdSettings() async {
@@ -891,6 +972,234 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
                               style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                             ),
                             onPressed: _isSavingOwnerAds ? null : _saveOwnerAdSettings,
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // ── In-App Updates Management Card ──
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF141824),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: _updateEnabled
+                              ? (_isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF))
+                              : const Color(0xFF262D3D),
+                          width: _updateEnabled ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: (_updateEnabled
+                                          ? (_isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF))
+                                          : const Color(0xFF4A90D9))
+                                      .withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  _isForcedUpdate ? Icons.warning_rounded : Icons.system_update_rounded,
+                                  color: _updateEnabled
+                                      ? (_isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF))
+                                      : const Color(0xFF4A90D9),
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'إدارة التحديثات الداخلية للتطبيق (In-App Updates)',
+                                      style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: Colors.white),
+                                    ),
+                                    Text(
+                                      _updateEnabled
+                                          ? (_isForcedUpdate ? '🚨 التحديث مفعل: إجباري وقفل كامل للتطبيق' : '📢 التحديث مفعل: اختياري للمستخدمين')
+                                          : 'لا يوجد تحديث منشور حالياً',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: _updateEnabled
+                                            ? (_isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF))
+                                            : const Color(0xFF8E95AA),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+
+                          // Toggle 1: Is Forced Update (تحديث إجباري)
+                          Container(
+                            decoration: BoxDecoration(
+                              color: _isForcedUpdate
+                                  ? Colors.redAccent.withValues(alpha: 0.1)
+                                  : const Color(0xFF0B0E14),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _isForcedUpdate ? Colors.redAccent.withValues(alpha: 0.5) : const Color(0xFF262D3D),
+                              ),
+                            ),
+                            child: SwitchListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                              title: Row(
+                                children: [
+                                  Icon(
+                                    _isForcedUpdate ? Icons.lock_rounded : Icons.lock_open_rounded,
+                                    size: 16,
+                                    color: _isForcedUpdate ? Colors.redAccent : Colors.white70,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Text(
+                                    'تحديث إجباري (قفل التطبيق بالكامل)',
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                                  ),
+                                ],
+                              ),
+                              subtitle: Text(
+                                _isForcedUpdate
+                                    ? 'يمنع المستخدم من استخدام التطبيق أو إغلاق الرسالة حتى يقوم بالتحديث'
+                                    : 'تحديث اختياري يمكن للمستخدم الضغط على "لاحقاً" والاستمرار بالمشاهدة',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: _isForcedUpdate ? Colors.redAccent.shade100 : const Color(0xFF8E95AA),
+                                ),
+                              ),
+                              value: _isForcedUpdate,
+                              onChanged: (v) => setState(() => _isForcedUpdate = v),
+                              activeThumbColor: Colors.redAccent,
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('رقم الإصدار (Version Code):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
+                                    const SizedBox(height: 4),
+                                    TextField(
+                                      controller: _versionCodeCtrl,
+                                      keyboardType: TextInputType.number,
+                                      style: const TextStyle(fontSize: 12, color: Colors.white),
+                                      decoration: InputDecoration(
+                                        hintText: '85',
+                                        filled: true,
+                                        fillColor: const Color(0xFF0B0E14),
+                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                flex: 3,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('اسم الإصدار (Version Name):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
+                                    const SizedBox(height: 4),
+                                    TextField(
+                                      controller: _versionNameCtrl,
+                                      style: const TextStyle(fontSize: 12, color: Colors.white),
+                                      decoration: InputDecoration(
+                                        hintText: '1.0.78',
+                                        filled: true,
+                                        fillColor: const Color(0xFF0B0E14),
+                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 10),
+                          const Text('رابط تحميل APK المباشر:', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
+                          const SizedBox(height: 4),
+                          TextField(
+                            controller: _apkUrlCtrl,
+                            style: const TextStyle(fontSize: 12, color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'https://zaafilm.com/downloads/zaqzouka-latest.apk',
+                              filled: true,
+                              fillColor: const Color(0xFF0B0E14),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                            ),
+                          ),
+
+                          const SizedBox(height: 10),
+                          const Text('ملاحظات التحديث للمستخدمين (Release Notes):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
+                          const SizedBox(height: 4),
+                          TextField(
+                            controller: _releaseNotesCtrl,
+                            maxLines: 2,
+                            style: const TextStyle(fontSize: 12, color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'إصلاحات أمنية، تسريع السيرفرات وإضافة مزودين جدد',
+                              filled: true,
+                              fillColor: const Color(0xFF0B0E14),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                            ),
+                          ),
+
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF),
+                                    foregroundColor: Colors.black,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    elevation: 4,
+                                  ),
+                                  icon: _isSavingUpdate
+                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                      : Icon(_isForcedUpdate ? Icons.lock_clock_rounded : Icons.rocket_launch_rounded, size: 18),
+                                  label: Text(
+                                    _isSavingUpdate
+                                        ? 'جارٍ النشر...'
+                                        : (_isForcedUpdate ? 'نشر تحديث إجباري 🔒' : 'نشر تحديث عادي 📢'),
+                                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                                  ),
+                                  onPressed: _isSavingUpdate ? null : () => _publishAppUpdate(forced: _isForcedUpdate),
+                                ),
+                              ),
+                              if (_updateEnabled) ...[
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: Colors.white70,
+                                    side: const BorderSide(color: Color(0xFF3A4256)),
+                                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                  icon: const Icon(Icons.cancel_outlined, size: 18, color: Colors.redAccent),
+                                  label: const Text('إلغاء التحديث', style: TextStyle(fontSize: 11.5)),
+                                  onPressed: _isSavingUpdate ? null : _cancelAppUpdate,
+                                ),
+                              ],
+                            ],
                           ),
                         ],
                       ),

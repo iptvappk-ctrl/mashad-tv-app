@@ -66,6 +66,7 @@ class SystemStatus {
   final Map<String, dynamic>? broadcastNotification;
   final Map<String, dynamic>? ownerAdConfig;
   final Map<String, dynamic>? adConfig;
+  final Map<String, dynamic>? appUpdate;
 
   const SystemStatus({
     required this.status,
@@ -77,6 +78,7 @@ class SystemStatus {
     this.broadcastNotification,
     this.ownerAdConfig,
     this.adConfig,
+    this.appUpdate,
   });
 
   factory SystemStatus.fromJson(Map<String, dynamic> j, {String source = 'unknown'}) {
@@ -102,8 +104,18 @@ class SystemStatus {
           (j['notification'] as Map<String, dynamic>?),
       ownerAdConfig: (j['owner_ad_config'] as Map<String, dynamic>?),
       adConfig: (j['ad_config'] as Map<String, dynamic>?),
+      appUpdate: (j['app_update'] as Map<String, dynamic>?) ??
+          (j['appUpdate'] as Map<String, dynamic>?),
     );
   }
+
+  bool get isUpdateActive => appUpdate != null && appUpdate!['enabled'] == true;
+  int get latestUpdateVersionCode => (appUpdate?['latestVersionCode'] as num?)?.toInt() ?? 0;
+  String get latestUpdateVersionName => appUpdate?['latestVersionName']?.toString() ?? '';
+  String get updateApkUrl => appUpdate?['apkUrl']?.toString() ?? 'https://zaafilm.com/downloads/zaqzouka-latest.apk';
+  String get updateReleaseNotes => appUpdate?['releaseNotes']?.toString() ?? '';
+  bool get isForcedUpdate => isUpdateActive && (appUpdate?['forced'] == true) && latestUpdateVersionCode > 84;
+  bool get isOptionalUpdate => isUpdateActive && (appUpdate?['forced'] != true) && latestUpdateVersionCode > 84;
 
   bool get isBannerAdEnabled {
     if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
@@ -547,6 +559,9 @@ class _SystemStatusGuardState extends State<SystemStatusGuard> with WidgetsBindi
     if (_status.isFrozen) {
       return widget.frozenBuilder?.call(_status) ?? _DefaultFrozenScreen(_status);
     }
+    if (_status.isForcedUpdate) {
+      return _DefaultForcedUpdateScreen(status: _status);
+    }
     return widget.child;
   }
 }
@@ -733,6 +748,227 @@ class _DefaultWipedScreen extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 🔒 Default Forced Update Gate Screen (Non-Dismissible Full App Lock)
+// ═════════════════════════════════════════════════════════════════════════════
+
+class _DefaultForcedUpdateScreen extends StatefulWidget {
+  final SystemStatus status;
+  const _DefaultForcedUpdateScreen({required this.status});
+
+  @override
+  State<_DefaultForcedUpdateScreen> createState() => _DefaultForcedUpdateScreenState();
+}
+
+class _DefaultForcedUpdateScreenState extends State<_DefaultForcedUpdateScreen> {
+  bool _isChecking = false;
+  bool _isDownloading = false;
+  String _hint = '';
+
+  Future<void> _handleRefresh() async {
+    if (_isChecking) return;
+    setState(() => _isChecking = true);
+    await ZaqzoukaQuotaGuard().checkNow(force: true);
+    if (mounted) {
+      setState(() => _isChecking = false);
+    }
+  }
+
+  Future<void> _handleUpdate() async {
+    if (_isDownloading) return;
+    setState(() {
+      _isDownloading = true;
+      _hint = 'جارٍ بدء تنزيل وتثبيت التحديث...';
+    });
+
+    try {
+      final res = await _native.invokeMapMethod<String, dynamic>('updates.install');
+      if (res?['status'] != 'install_started') {
+        final apkUrl = widget.status.updateApkUrl;
+        await _native.invokeMethod<bool>('browser.open', {'url': apkUrl});
+      }
+    } catch (_) {
+      try {
+        final apkUrl = widget.status.updateApkUrl;
+        await _native.invokeMethod<bool>('browser.open', {'url': apkUrl});
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      setState(() => _isDownloading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF08080C),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+              decoration: BoxDecoration(
+                color: const Color(0xFF14141E),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4), width: 1.5),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    blurRadius: 30,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 76,
+                    height: 76,
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.35)),
+                    ),
+                    child: const Center(
+                      child: Icon(Icons.system_update_rounded, color: Colors.redAccent, size: 40),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.lock_rounded, size: 14, color: Colors.redAccent),
+                        SizedBox(width: 6),
+                        Text(
+                          'تحديث إجباري مطلوب',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'تطبيق زقزوقة TV ${widget.status.latestUpdateVersionName.isNotEmpty ? "v${widget.status.latestUpdateVersionName}" : ""}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'يتطلب هذا الإصدار تحديثاً فورياً للاستمرار في المشاهدة. تم إيقاف الإصدارات القديمة لضمان استقرار السيرفرات وجودة البث.',
+                    style: TextStyle(
+                      color: Color(0xFF9E9EB2),
+                      fontSize: 13.5,
+                      height: 1.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (widget.status.updateReleaseNotes.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0B0E14),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF262D3D)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.auto_awesome_rounded, size: 14, color: Color(0xFF00E5FF)),
+                              SizedBox(width: 6),
+                              Text('ما الجديد في هذا التحديث:', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 11, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            widget.status.updateReleaseNotes,
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (_hint.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(_hint, style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 12)),
+                  ],
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton.icon(
+                      onPressed: _isDownloading ? null : _handleUpdate,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        elevation: 4,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      icon: _isDownloading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                            )
+                          : const Icon(Icons.download_rounded, size: 22),
+                      label: Text(
+                        _isDownloading ? 'جارٍ التحميل والتثبيت...' : 'تحديث وتثبيت الآن (APK)',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 44,
+                    child: OutlinedButton.icon(
+                      onPressed: _isChecking ? null : _handleRefresh,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        side: const BorderSide(color: Color(0xFF262D3D)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      icon: _isChecking
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(color: Colors.white70, strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('إعادة التحقق من التحديث', style: TextStyle(fontSize: 13)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

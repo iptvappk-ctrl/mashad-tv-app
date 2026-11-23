@@ -180,6 +180,25 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
       );
     });
 
+    // Listen to real-time quota guard updates for optional in-app updates
+    ZaqzoukaQuotaGuard().statusStream.listen((sys) {
+      if (!mounted) return;
+      if (sys.isOptionalUpdate && sys.latestUpdateVersionCode > 0 && sys.latestUpdateVersionCode != _shownVersionCode) {
+        _shownVersionCode = sys.latestUpdateVersionCode;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showUpdateDialog({
+              'available': true,
+              'versionCode': sys.latestUpdateVersionCode,
+              'versionName': sys.latestUpdateVersionName,
+              'releaseNotes': sys.updateReleaseNotes,
+              'downloadUrl': sys.updateApkUrl,
+            });
+          }
+        });
+      }
+    });
+
     _native.setMethodCallHandler((call) async {
       if (call.method == 'navigate.mediaDetail') {
         if (call.arguments is Map) {
@@ -220,6 +239,23 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
 
   Future<void> _checkForUpdate() async {
     try {
+      final sys = ZaqzoukaQuotaGuard().currentStatus;
+      if (sys.isOptionalUpdate && sys.latestUpdateVersionCode > 0 && sys.latestUpdateVersionCode != _shownVersionCode) {
+        _shownVersionCode = sys.latestUpdateVersionCode;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showUpdateDialog({
+              'available': true,
+              'versionCode': sys.latestUpdateVersionCode,
+              'versionName': sys.latestUpdateVersionName,
+              'releaseNotes': sys.updateReleaseNotes,
+              'downloadUrl': sys.updateApkUrl,
+            });
+          }
+        });
+        return;
+      }
+
       final update = await _native.invokeMapMethod<String, dynamic>(
         'updates.check',
       );

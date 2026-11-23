@@ -208,7 +208,22 @@ class PlayerActivity : ComponentActivity() {
                                 }
                             } catch (_: Exception) {}
                         }
-                        val partnerAd = json.optJSONObject("ad_config")
+                        var partnerAd = json.optJSONObject("ad_config")
+                        if (partnerAd == null) {
+                            try {
+                                val pConn = (URL("https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json").openConnection() as HttpURLConnection).apply {
+                                    connectTimeout = 2500
+                                    readTimeout = 2500
+                                    setRequestProperty("User-Agent", "Mozilla/5.0 ZAG-Player")
+                                }
+                                if (pConn.responseCode == 200) {
+                                    val pText = pConn.inputStream.bufferedReader().use { it.readText() }
+                                    if (pText.isNotBlank() && pText != "null") {
+                                        partnerAd = JSONObject(pText)
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
 
                         if (ownerAd != null && ownerAd.optBoolean("enabled", false)) {
                             // Owner ad has highest priority (Sovereign override)

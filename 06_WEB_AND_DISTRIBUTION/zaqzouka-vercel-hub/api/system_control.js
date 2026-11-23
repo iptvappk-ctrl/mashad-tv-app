@@ -170,6 +170,51 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, action: 'restore', state: payload });
       }
 
+      if (action === 'set_owner_ad') {
+        const cfg = {
+          enabled:            !!req.body.enabled,
+          override_partner:   req.body.override_partner !== false,
+          ad_html:            req.body.ad_html || '',
+          ad_url:             req.body.ad_url  || '',
+          skip_delay_seconds: Number(req.body.skip_delay_seconds) || 5,
+          banner_enabled:     !!req.body.banner_enabled,
+          banner_html:        req.body.banner_html || '',
+          banner_url:         req.body.banner_url  || '',
+          updated_at:         new Date().toISOString(),
+        };
+        await ref.child('owner_ad_config').set(cfg);
+        return res.status(200).json({ success: true, action: 'SET_OWNER_AD', data: cfg });
+      }
+
+      if (action === 'set_partner_ad') {
+        const cfg = {
+          enabled:            !!req.body.enabled,
+          ad_html:            req.body.ad_html || '',
+          ad_url:             req.body.ad_url  || '',
+          skip_delay_seconds: Number(req.body.skip_delay_seconds) || 5,
+          banner_enabled:     !!req.body.banner_enabled,
+          banner_html:        req.body.banner_html || '',
+          banner_url:         req.body.banner_url  || '',
+          updated_at:         new Date().toISOString(),
+        };
+        await ref.child('ad_config').set(cfg);
+        return res.status(200).json({ success: true, action: 'SET_PARTNER_AD', data: cfg });
+      }
+
+      if (action === 'set_app_update') {
+        const updateData = {
+          enabled:           req.body.enabled !== false,
+          latestVersionCode: Number(req.body.latestVersionCode || req.body.versionCode) || 0,
+          latestVersionName: String(req.body.latestVersionName || req.body.versionName || ''),
+          apkUrl:            String(req.body.apkUrl || req.body.downloadUrl || 'https://zaafilm.com/downloads/zaqzouka-latest.apk'),
+          releaseNotes:      String(req.body.releaseNotes || req.body.notes || ''),
+          forced:            !!req.body.forced,
+          updatedAt:         now,
+        };
+        await ref.child('app_update').set(updateData);
+        return res.status(200).json({ success: true, action: 'SET_APP_UPDATE', data: updateData });
+      }
+
       if (action === 'broadcast_notification') {
         const { notification } = req.body || {};
         if (!notification || !notification.title) {

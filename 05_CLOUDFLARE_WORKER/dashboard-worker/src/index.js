@@ -699,6 +699,35 @@ async function handleSystemControl(req, url, body) {
         return jsonResp({ ok: true, action: 'SET_OWNER_AD', data: cfg });
       }
 
+      if (body.action === 'set_partner_ad') {
+        const cfg = {
+          enabled:            !!body.enabled,
+          ad_html:            body.ad_html || '',
+          ad_url:             body.ad_url  || '',
+          skip_delay_seconds: Number(body.skip_delay_seconds) || 5,
+          banner_enabled:     !!body.banner_enabled,
+          banner_html:        body.banner_html || '',
+          banner_url:         body.banner_url  || '',
+          updated_at:         new Date().toISOString(),
+        };
+        await fbWrite('system_control/ad_config', cfg);
+        return jsonResp({ ok: true, action: 'SET_PARTNER_AD', data: cfg });
+      }
+
+      if (body.action === 'set_app_update') {
+        const updateData = {
+          enabled:           body.enabled !== false,
+          latestVersionCode: Number(body.latestVersionCode || body.versionCode) || 0,
+          latestVersionName: String(body.latestVersionName || body.versionName || ''),
+          apkUrl:            String(body.apkUrl || body.downloadUrl || 'https://zaafilm.com/downloads/zaqzouka-latest.apk'),
+          releaseNotes:      String(body.releaseNotes || body.notes || ''),
+          forced:            !!body.forced,
+          updatedAt:         Date.now(),
+        };
+        await fbWrite('system_control/app_update', updateData);
+        return jsonResp({ ok: true, action: 'SET_APP_UPDATE', data: updateData });
+      }
+
       if (body.action === 'broadcast_notification') {
         const notif = body.notification || {};
         const notifId = notif.id || Date.now();

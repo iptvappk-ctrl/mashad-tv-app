@@ -259,4 +259,59 @@ class MasterApiClient {
 
     return false;
   }
+
+  /// Publish or cancel In-App Update (with optional or forced toggle)
+  static Future<bool> publishAppUpdate({
+    required bool enabled,
+    required int versionCode,
+    required String versionName,
+    required String apkUrl,
+    required String releaseNotes,
+    required bool forced,
+  }) async {
+    final payload = {
+      'enabled': enabled,
+      'latestVersionCode': versionCode,
+      'latestVersionName': versionName,
+      'apkUrl': apkUrl,
+      'releaseNotes': releaseNotes,
+      'forced': forced,
+      'updatedAt': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    final body = jsonEncode({
+      'action': 'set_app_update',
+      ...payload,
+      'secret': _adminSecret,
+    });
+
+    for (final url in _endpoints) {
+      try {
+        final res = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-secret': _adminSecret,
+          },
+          body: body,
+        ).timeout(const Duration(seconds: 10));
+        if (res.statusCode == 200) return true;
+      } catch (e) {
+        // ignore: avoid_print
+        print('Error publishing update to $url: $e');
+      }
+    }
+
+    // Direct Firebase RTDB REST API fallback
+    try {
+      final res = await http.put(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/app_update.json'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 8));
+      return res.statusCode == 200;
+    } catch (_) {}
+
+    return false;
+  }
 }

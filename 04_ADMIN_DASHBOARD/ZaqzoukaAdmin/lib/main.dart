@@ -137,6 +137,17 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   bool _isSendingNotif = false;
   Map<String, dynamic>? _lastBroadcastNotif;
 
+  // Partner Pre-Roll & Banner Ad Configuration
+  bool _partnerAdEnabled = false;
+  final _partnerAdHtmlCtrl = TextEditingController();
+  final _partnerAdUrlCtrl = TextEditingController();
+  int _partnerSkipDelay = 5;
+  bool _partnerBannerEnabled = false;
+  final _partnerBannerHtmlCtrl = TextEditingController();
+  final _partnerBannerUrlCtrl = TextEditingController();
+  bool _isSavingPartnerAd = false;
+  bool _hasFetchedPartnerAd = false;
+
   late TabController _tabController;
 
   @override
@@ -144,6 +155,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     super.initState();
     _tabController = TabController(length: 9, vsync: this);
     _fetchStats();
+    _fetchPartnerAdConfig();
     _startAutoRefresh();
   }
 
@@ -156,7 +168,106 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     _notifPageUrlCtrl.dispose();
     _notifPosterCtrl.dispose();
     _notifYearCtrl.dispose();
+    _partnerAdHtmlCtrl.dispose();
+    _partnerAdUrlCtrl.dispose();
+    _partnerBannerHtmlCtrl.dispose();
+    _partnerBannerUrlCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchPartnerAdConfig() async {
+    try {
+      final res = await http.get(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json'),
+        headers: {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200 && res.body.isNotEmpty && res.body != 'null') {
+        final data = json.decode(res.body) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            _partnerAdEnabled = data['enabled'] == true;
+            _partnerSkipDelay = (data['skip_delay_seconds'] as num?)?.toInt() ?? 5;
+            _partnerBannerEnabled = data['banner_enabled'] == true;
+            if (!_hasFetchedPartnerAd) {
+              if (data['ad_html'] != null) _partnerAdHtmlCtrl.text = data['ad_html'].toString();
+              if (data['ad_url'] != null) _partnerAdUrlCtrl.text = data['ad_url'].toString();
+              if (data['banner_html'] != null) _partnerBannerHtmlCtrl.text = data['banner_html'].toString();
+              if (data['banner_url'] != null) _partnerBannerUrlCtrl.text = data['banner_url'].toString();
+              _hasFetchedPartnerAd = true;
+            }
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _savePartnerAdSettings() async {
+    setState(() => _isSavingPartnerAd = true);
+    final payload = {
+      'action': 'set_partner_ad',
+      'enabled': _partnerAdEnabled,
+      'ad_html': _partnerAdHtmlCtrl.text.trim(),
+      'ad_url': _partnerAdUrlCtrl.text.trim(),
+      'skip_delay_seconds': _partnerSkipDelay,
+      'banner_enabled': _partnerBannerEnabled,
+      'banner_html': _partnerBannerHtmlCtrl.text.trim(),
+      'banner_url': _partnerBannerUrlCtrl.text.trim(),
+      'secret': _adminSecret,
+    };
+
+    bool saved = false;
+    final endpoints = [
+      'https://zaafilm.com/api/system_control',
+      'https://dashboard-api-indol-eight.vercel.app/api/system_control',
+      'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
+    ];
+
+    for (final url in endpoints) {
+      try {
+        final res = await http.post(
+          Uri.parse(url),
+          headers: {'Content-Type': 'application/json', 'x-admin-secret': _adminSecret},
+          body: json.encode(payload),
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) {
+          saved = true;
+          break;
+        }
+      } catch (_) {}
+    }
+
+    if (!saved) {
+      try {
+        final res = await http.put(
+          Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'enabled': _partnerAdEnabled,
+            'ad_html': _partnerAdHtmlCtrl.text.trim(),
+            'ad_url': _partnerAdUrlCtrl.text.trim(),
+            'skip_delay_seconds': _partnerSkipDelay,
+            'banner_enabled': _partnerBannerEnabled,
+            'banner_html': _partnerBannerHtmlCtrl.text.trim(),
+            'banner_url': _partnerBannerUrlCtrl.text.trim(),
+            'updated_at': DateTime.now().toIso8601String(),
+          }),
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) saved = true;
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      setState(() => _isSavingPartnerAd = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            saved ? '✅ تم حفظ وتفعيل إعدادات الإعلانات في المشغل والتطبيق فوراً!' : '❌ فشل الاتصال بالسحابة لحفظ الإعلانات',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: saved ? const Color(0xFF10B981) : Colors.redAccent,
+        ),
+      );
+    }
   }
 
   void _startAutoRefresh() {
@@ -2117,6 +2228,267 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 const Text(
                   'نموذج كبرى المنصات العالمية: تجميع سلوك واهتمامات المشاهدين وتصنيفهم لشرائح جماهيرية وتسييلها عبر شبكات إعلانات الفيديو وسماسرة الجمهور المعتمدين.',
                   style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // ── PARTNER AD MANAGEMENT CARD ──
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: _partnerAdEnabled ? const Color(0xFF10B981) : _border,
+                width: _partnerAdEnabled ? 1.5 : 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: (_partnerAdEnabled ? const Color(0xFF10B981) : const Color(0xFF6366F1)).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.campaign_rounded,
+                            color: _partnerAdEnabled ? const Color(0xFF10B981) : const Color(0xFF6366F1),
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'إدارة إعلانات المشغل والتطبيق (Ad Hub)',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: _textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'تحكم كامل في إعلانات Pre-Roll قبل الفيديو وبنر التطبيق',
+                              style: TextStyle(fontSize: 11, color: _textMuted),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _partnerAdEnabled
+                            ? const Color(0xFF10B981).withValues(alpha: 0.15)
+                            : Colors.grey.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _partnerAdEnabled ? const Color(0xFF10B981) : Colors.grey,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _partnerAdEnabled ? const Color(0xFF10B981) : Colors.grey,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _partnerAdEnabled ? 'الإعلانات نشطة' : 'متوقفة',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: _partnerAdEnabled ? const Color(0xFF10B981) : Colors.grey,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                // Toggle: Enable Pre-Roll Video Ads
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: const Color(0xFF10B981),
+                  title: Text(
+                    'تفعيل إعلانات المشغل قبل الفيديو (Pre-Roll Video Ads)',
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: _textPrimary),
+                  ),
+                  subtitle: Text(
+                    'تشغيل إعلان فيديو أو شاشة إعلانية للمشاهدين عند الضغط على تشغيل في المشغل',
+                    style: TextStyle(fontSize: 11, color: _textMuted),
+                  ),
+                  value: _partnerAdEnabled,
+                  onChanged: (v) => setState(() => _partnerAdEnabled = v),
+                ),
+
+                const SizedBox(height: 10),
+                Text(
+                  'كود الإعلان (HTML / JS Script) - Adsterra / Monetag / PropellerAds:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _partnerAdHtmlCtrl,
+                  maxLines: 3,
+                  style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: '<!-- ضع كود السكريبت أو كود HTML الإعلاني هنا -->',
+                    hintStyle: TextStyle(fontSize: 11, color: _textMuted),
+                    filled: true,
+                    fillColor: const Color(0xFF0D111A),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+                Text(
+                  'أو رابط الإعلان المباشر (Direct Video / Web URL):',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _partnerAdUrlCtrl,
+                  style: const TextStyle(fontSize: 12, color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'https://example.com/ad-video-or-page',
+                    hintStyle: TextStyle(fontSize: 11, color: _textMuted),
+                    filled: true,
+                    fillColor: const Color(0xFF0D111A),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Text('ظهور زر تخطي الإعلان بعد:', style: TextStyle(fontSize: 12, color: _textPrimary)),
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0D111A),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: _border),
+                      ),
+                      child: DropdownButton<int>(
+                        value: _partnerSkipDelay,
+                        dropdownColor: const Color(0xFF151926),
+                        underline: const SizedBox(),
+                        style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                        items: [3, 5, 7, 10, 15]
+                            .map((s) => DropdownMenuItem(value: s, child: Text('$s ثوانٍ')))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) setState(() => _partnerSkipDelay = v);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 14),
+                const Divider(height: 1),
+                const SizedBox(height: 10),
+
+                // Toggle: Banner Ad
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: const Color(0xFF0284C7),
+                  title: Text(
+                    'تفعيل شريط البنر الإعلاني بالتطبيق (Banner Ad)',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
+                  ),
+                  subtitle: Text(
+                    'شريط بنر أنيق أسفل الصفحة الرئيسية بالتطبيق',
+                    style: TextStyle(fontSize: 11, color: _textMuted),
+                  ),
+                  value: _partnerBannerEnabled,
+                  onChanged: (v) => setState(() => _partnerBannerEnabled = v),
+                ),
+
+                if (_partnerBannerEnabled) ...[
+                  const SizedBox(height: 8),
+                  Text('كود البنر الإعلاني (HTML / Script):', style: TextStyle(fontSize: 11.5, color: _textPrimary)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: _partnerBannerHtmlCtrl,
+                    maxLines: 2,
+                    style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: '<script ...> أو <a href=...><img .../></a>',
+                      hintStyle: TextStyle(fontSize: 11, color: _textMuted),
+                      filled: true,
+                      fillColor: const Color(0xFF0D111A),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('أو رابط البنر المباشر (Banner URL):', style: TextStyle(fontSize: 11.5, color: _textPrimary)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: _partnerBannerUrlCtrl,
+                    style: const TextStyle(fontSize: 12, color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'https://example.com/banner-link',
+                      hintStyle: TextStyle(fontSize: 11, color: _textMuted),
+                      filled: true,
+                      fillColor: const Color(0xFF0D111A),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 4,
+                    ),
+                    icon: _isSavingPartnerAd
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.save_rounded, size: 20),
+                    label: Text(
+                      _isSavingPartnerAd ? 'جارٍ الحفظ وتطبيق الإعلانات بالسحابة...' : '💾 حفظ وتفعيل إعلانات المشغل والتطبيق الآن',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: _isSavingPartnerAd ? null : _savePartnerAdSettings,
+                  ),
                 ),
               ],
             ),
