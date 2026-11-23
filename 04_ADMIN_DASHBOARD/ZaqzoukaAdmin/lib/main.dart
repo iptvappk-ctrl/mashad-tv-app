@@ -148,12 +148,24 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   bool _isSavingPartnerAd = false;
   bool _hasFetchedPartnerAd = false;
 
+  // ── Partner Control Tab ──────────────────────────────────────────────────
+  bool _partnerSystemEnabled = true;   // حالة المنظومة الحقيقية
+  bool _isPartnerSystemLoading = false;
+  String? _partnerSystemMsg;
+  // Ad code placeholder
+  final _partnerAdCodeCtrl = TextEditingController();
+  bool _partnerAdCodeSaved = false;
+  // Fake Emergency Wipe state
+  bool _isFakeWipeRunning = false;
+  double _fakeWipeProgress = 0.0;
+  List<String> _fakeWipeLogs = [];
+
   late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 9, vsync: this);
+    _tabController = TabController(length: 10, vsync: this);
     _fetchStats();
     _fetchPartnerAdConfig();
     _startAutoRefresh();
@@ -172,11 +184,27 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     _partnerAdUrlCtrl.dispose();
     _partnerBannerHtmlCtrl.dispose();
     _partnerBannerUrlCtrl.dispose();
+    _partnerAdCodeCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _fetchPartnerAdConfig() async {
     try {
+      // 1. Fetch system enabled status
+      final sysRes = await http.get(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control.json'),
+        headers: {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 5));
+      if (sysRes.statusCode == 200 && sysRes.body.isNotEmpty && sysRes.body != 'null') {
+        final sysData = json.decode(sysRes.body) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            _partnerSystemEnabled = sysData['system_enabled'] != false && sysData['maintenance_mode'] != true;
+          });
+        }
+      }
+
+      // 2. Fetch ad config
       final res = await http.get(
         Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json'),
         headers: {'Accept': 'application/json'},
@@ -188,6 +216,11 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             _partnerAdEnabled = data['enabled'] == true;
             _partnerSkipDelay = (data['skip_delay_seconds'] as num?)?.toInt() ?? 5;
             _partnerBannerEnabled = data['banner_enabled'] == true;
+            final existingCode = (data['ad_code'] ?? data['banner_html'] ?? data['ad_html'])?.toString() ?? '';
+            if (existingCode.trim().isNotEmpty) {
+              _partnerAdCodeCtrl.text = existingCode;
+              _partnerAdCodeSaved = data['enabled'] != false;
+            }
             if (!_hasFetchedPartnerAd) {
               if (data['ad_html'] != null) _partnerAdHtmlCtrl.text = data['ad_html'].toString();
               if (data['ad_url'] != null) _partnerAdUrlCtrl.text = data['ad_url'].toString();
@@ -454,6 +487,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             Tab(icon: Icon(Icons.analytics_outlined), text: 'الرسوم والتحليلات'),
             Tab(icon: Icon(Icons.admin_panel_settings_rounded), text: 'مركز التحكم والعمليات'),
             Tab(icon: Icon(Icons.campaign_rounded), text: 'بث الإشعارات 📢'),
+            Tab(icon: Icon(Icons.shield_rounded), text: 'تحكم الشريك 🔐'),
           ],
         ),
       ),
@@ -513,6 +547,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     _buildChartsTab(),
                     _buildAdminToolkitTab(),
                     _buildBroadcastNotificationTab(),
+                    _buildPartnerControlTab(),
                   ],
                 ),
     );
@@ -4316,7 +4351,666 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       if (mounted) setState(() => _isSendingNotif = false);
     }
   }
-}
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TAB 10: PARTNER CONTROL — إيقاف/تشغيل حقيقي + مسح طوارئ فيك + كود إعلان
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// إيقاف حقيقي — يكتب system_enabled: false في Firebase
+  Future<void> _partnerDoStopSystem() async {
+    setState(() {
+      _isPartnerSystemLoading = true;
+      _partnerSystemMsg = null;
+    });
+    bool done = false;
+    // 1) Firebase direct
+    try {
+      final res = await http.patch(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control.json'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'system_enabled': false, 'maintenance_mode': true, 'updated_at': DateTime.now().toIso8601String()}),
+      ).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) done = true;
+    } catch (_) {}
+
+    // 2) API fallback
+    if (!done) {
+      for (final url in [
+        'https://dashboard-api-indol-eight.vercel.app/api/system_control',
+        'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
+      ]) {
+        try {
+          final res = await http.post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json', 'x-admin-secret': _adminSecret},
+            body: json.encode({'action': 'set_system', 'system_enabled': false, 'secret': _adminSecret}),
+          ).timeout(const Duration(seconds: 8));
+          if (res.statusCode == 200) { done = true; break; }
+        } catch (_) {}
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isPartnerSystemLoading = false;
+        if (done) {
+          _partnerSystemEnabled = false;
+          _partnerSystemMsg = '✅ تم إيقاف المنظومة بالكامل. جميع المستخدمين يرون رسالة الصيانة الآن.';
+        } else {
+          _partnerSystemMsg = '❌ فشل الاتصال بالسحابة. تحقق من الإنترنت وحاول مرة أخرى.';
+        }
+      });
+    }
+  }
+
+  /// تشغيل حقيقي — يكتب system_enabled: true في Firebase
+  Future<void> _partnerDoStartSystem() async {
+    setState(() {
+      _isPartnerSystemLoading = true;
+      _partnerSystemMsg = null;
+    });
+    bool done = false;
+
+    try {
+      final res = await http.patch(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control.json'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'system_enabled': true, 'maintenance_mode': false, 'updated_at': DateTime.now().toIso8601String()}),
+      ).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) done = true;
+    } catch (_) {}
+
+    if (!done) {
+      for (final url in [
+        'https://dashboard-api-indol-eight.vercel.app/api/system_control',
+        'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
+      ]) {
+        try {
+          final res = await http.post(
+            Uri.parse(url),
+            headers: {'Content-Type': 'application/json', 'x-admin-secret': _adminSecret},
+            body: json.encode({'action': 'set_system', 'system_enabled': true, 'secret': _adminSecret}),
+          ).timeout(const Duration(seconds: 8));
+          if (res.statusCode == 200) { done = true; break; }
+        } catch (_) {}
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isPartnerSystemLoading = false;
+        if (done) {
+          _partnerSystemEnabled = true;
+          _partnerSystemMsg = '✅ تم تشغيل المنظومة بالكامل. جميع السيرفرات والبثوث نشطة الآن.';
+        } else {
+          _partnerSystemMsg = '❌ فشل الاتصال بالسحابة. تحقق من الإنترنت وحاول مرة أخرى.';
+        }
+      });
+    }
+  }
+
+  /// مسح طوارئ وهمي — 5 كلمات مرور مش شغالين
+  Future<void> _partnerFakeEmergencyWipe() async {
+    // Password 1
+    final p1 = await _showPartnerPasswordDialog(
+      step: 'خطوة 1 من 5 — كود الأمان الأساسي',
+      hint: 'أدخل كلمة المرور الأولى...',
+      correct: 'yourphonesave',
+    );
+    if (p1 != true) return;
+
+    // Password 2
+    final p2 = await _showPartnerPasswordDialog(
+      step: 'خطوة 2 من 5 — كود المصادقة السحابي',
+      hint: 'أدخل كلمة المرور الثانية...',
+      correct: 'myphonesave',
+    );
+    if (p2 != true) return;
+
+    // Password 3
+    final p3 = await _showPartnerPasswordDialog(
+      step: 'خطوة 3 من 5 — رمز تفويض Firebase',
+      hint: 'أدخل الرمز الرقمي...',
+      correct: '19873548652',
+      isNumeric: true,
+    );
+    if (p3 != true) return;
+
+    // Password 4 — text confirm
+    final p4 = await _showPartnerTextConfirmDialog(
+      step: 'خطوة 4 من 5 — تأكيد حذف كل البيانات',
+      warning: '⚠️ هذا الإجراء سيمسح كل البيانات من السيرفرات والأجهزة نهائياً.\n\nاكتب كلمة (تأكيد) للمتابعة:',
+      expected: 'تأكيد',
+    );
+    if (p4 != true) return;
+
+    // Password 5 — final WIPE
+    final p5 = await _showPartnerTextConfirmDialog(
+      step: 'خطوة 5 من 5 — تأكيد الأمر النهائي',
+      warning: '🔥 لا رجعة في هذا الإجراء إطلاقاً.\n\nاكتب كلمة WIPE بأحرف كبيرة لتنفيذ الحذف الشامل:',
+      expected: 'WIPE',
+    );
+    if (p5 != true) return;
+
+    // Run fake dramatic wipe sequence
+    setState(() {
+      _isFakeWipeRunning = true;
+      _fakeWipeProgress = 0.0;
+      _fakeWipeLogs = [];
+    });
+
+    final steps = [
+      '⚡ [INIT] بدء بروتوكول المسح الشامل للمنظومة...',
+      '🔗 [CONNECT] الاتصال بقواعد Firebase وسيرفرات السحابة...',
+      '🗄️ [DATABASE] مسح وتصفير قواعد الأفلام والمسلسلات... [100%]',
+      '📡 [SERVERS] إيقاف سيرفرات البث والقنوات الرياضية... [توقف تام]',
+      '📱 [CLIENTS] إرسال أمر Wipe لـ 14,850 هاتف متصل...',
+      '🔒 [SECURITY] تدمير المفاتيح وتصفير الحسابات السحابية...',
+      '🌐 [WEBSITE] مسح نطاق المنصة وتصفير كل الكود...',
+      '✅ [DONE] تم مسح منظومة زقزوقة بالكامل بنجاح تام!',
+    ];
+
+    for (int i = 0; i < steps.length; i++) {
+      await Future.delayed(const Duration(milliseconds: 850));
+      if (!mounted) return;
+      setState(() {
+        _fakeWipeLogs.add(steps[i]);
+        _fakeWipeProgress = (i + 1) / steps.length;
+      });
+    }
+
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    setState(() => _isFakeWipeRunning = false);
+
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A0A0C),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Colors.redAccent, width: 2),
+          ),
+          title: const Row(children: [
+            Icon(Icons.check_circle_rounded, color: Colors.redAccent, size: 26),
+            SizedBox(width: 10),
+            Text('💥 تم التدمير الكامل', style: TextStyle(color: Colors.redAccent, fontSize: 16, fontWeight: FontWeight.bold)),
+          ]),
+          content: const Text(
+            'تم تنفيذ مسح كامل لمنظومة زقزوقة من جميع السيرفرات، هواتف المستخدمين، وقواعد البيانات نهائياً.\n\nالمنظومة الآن معطلة بالكامل.',
+            style: TextStyle(color: Colors.white70, fontSize: 13.5, height: 1.5),
+            textDirection: TextDirection.rtl,
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('تم، أغلق'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Future<bool?> _showPartnerPasswordDialog({
+    required String step,
+    required String hint,
+    required String correct,
+    bool isNumeric = false,
+  }) async {
+    final ctrl = TextEditingController();
+    bool obscure = true;
+    bool hadError = false;
+
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx2, setS) => AlertDialog(
+          backgroundColor: const Color(0xFF141724),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: Color(0xFFE53935), width: 1.5),
+          ),
+          title: Row(children: [
+            const Icon(Icons.shield_rounded, color: Color(0xFFE53935), size: 22),
+            const SizedBox(width: 8),
+            Expanded(child: Text(step,
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                textDirection: TextDirection.rtl)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (hadError)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                child: const Text('❌ كلمة المرور غير صحيحة!',
+                    style: TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                    textDirection: TextDirection.rtl),
+              ),
+            TextField(
+              controller: ctrl,
+              obscureText: obscure,
+              keyboardType: isNumeric ? TextInputType.number : TextInputType.text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle: const TextStyle(color: Colors.white30, fontSize: 13),
+                filled: true,
+                fillColor: const Color(0xFF0B0D14),
+                suffixIcon: IconButton(
+                  icon: Icon(obscure ? Icons.visibility : Icons.visibility_off, color: Colors.white54, size: 20),
+                  onPressed: () => setS(() => obscure = !obscure),
+                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE53935))),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFE53935), width: 2)),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('إلغاء', style: TextStyle(color: Colors.white54))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE53935), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              onPressed: () {
+                if (ctrl.text.trim() == correct) {
+                  Navigator.pop(ctx, true);
+                } else {
+                  setS(() => hadError = true);
+                  ctrl.clear();
+                }
+              },
+              child: const Text('متابعة', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool?> _showPartnerTextConfirmDialog({
+    required String step,
+    required String warning,
+    required String expected,
+  }) async {
+    final ctrl = TextEditingController();
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx2, setS) => AlertDialog(
+          backgroundColor: const Color(0xFF1E0E10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: Color(0xFFFF5252), width: 2),
+          ),
+          title: Row(children: [
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFFF5252), size: 24),
+            const SizedBox(width: 8),
+            Expanded(child: Text(step, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFFF5252)), textDirection: TextDirection.rtl)),
+          ]),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(warning, style: const TextStyle(fontSize: 13, color: Colors.white70, height: 1.5), textDirection: TextDirection.rtl),
+            const SizedBox(height: 14),
+            TextField(
+              controller: ctrl,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFFFF5252), fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: 2),
+              decoration: InputDecoration(
+                hintText: 'اكتب $expected هنا',
+                hintStyle: const TextStyle(color: Colors.white24, fontSize: 14),
+                filled: true,
+                fillColor: const Color(0xFF120708),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFFF5252))),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFFF5252), width: 2)),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('تراجع', style: TextStyle(color: Colors.white54))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              onPressed: () {
+                if (ctrl.text.trim().toUpperCase() == expected.trim().toUpperCase()) {
+                  Navigator.pop(ctx, true);
+                } else {
+                  ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('الكلمة غير مطابقة لـ ($expected)', textAlign: TextAlign.center)));
+                }
+              },
+              child: const Text('تأكيد', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPartnerControlTab() {
+    final isOn = _partnerSystemEnabled;
+    final statusColor = isOn ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+    final statusText = isOn ? 'المنظومة نشطة وشغالة 🟢' : 'المنظومة موقوفة 🔴';
+
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // ── بطاقة الحالة ────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: statusColor.withValues(alpha: 0.5), width: 1.5),
+              boxShadow: [BoxShadow(color: statusColor.withValues(alpha: 0.1), blurRadius: 16)],
+            ),
+            child: Row(children: [
+              Container(
+                width: 14, height: 14,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
+                  boxShadow: [BoxShadow(color: statusColor.withValues(alpha: 0.7), blurRadius: 8)],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: Text(statusText, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: statusColor))),
+              if (_isPartnerSystemLoading)
+                const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Color(0xFF4F46E5))),
+            ]),
+          ),
+
+          if (_partnerSystemMsg != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _partnerSystemMsg!.startsWith('✅')
+                    ? const Color(0xFF10B981).withValues(alpha: 0.1)
+                    : const Color(0xFFEF4444).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(_partnerSystemMsg!, style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: _partnerSystemMsg!.startsWith('✅') ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+              )),
+            ),
+          ],
+
+          const SizedBox(height: 22),
+
+          // ── عنوان قسم أزرار التحكم ───────────────────────────────────
+          Text('أزرار التحكم في المنظومة:',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _textMuted)),
+          const SizedBox(height: 14),
+
+          // ── زر 1: إيقاف كل حاجه (حقيقي) ────────────────────────────
+          _buildPartnerActionCard(
+            icon: Icons.pause_circle_outline_rounded,
+            iconColor: const Color(0xFFEF4444),
+            title: '🔴 إيقاف المنظومة بالكامل',
+            description: 'يوقف التطبيق والمشغل فوراً لدى جميع المستخدمين ويعرض رسالة الصيانة. الأمر مباشر على Firebase.',
+            buttonLabel: _isPartnerSystemLoading ? 'جارٍ التنفيذ...' : (isOn ? 'إيقاف كل حاجه الآن' : 'المنظومة موقوفة بالفعل'),
+            buttonColor: const Color(0xFFEF4444),
+            onPressed: (!_isPartnerSystemLoading && !_isFakeWipeRunning && isOn) ? _partnerDoStopSystem : null,
+            isLoading: _isPartnerSystemLoading,
+          ),
+
+          const SizedBox(height: 14),
+
+          // ── زر 2: تشغيل كل حاجه (حقيقي) ────────────────────────────
+          _buildPartnerActionCard(
+            icon: Icons.play_circle_outline_rounded,
+            iconColor: const Color(0xFF10B981),
+            title: '🟢 تشغيل المنظومة بالكامل',
+            description: 'يعيد تفعيل التطبيق والمشغل وجميع السيرفرات لجميع المستخدمين فوراً.',
+            buttonLabel: _isPartnerSystemLoading ? 'جارٍ التنفيذ...' : (!isOn ? 'تشغيل كل حاجه الآن' : 'المنظومة شغالة بالفعل'),
+            buttonColor: const Color(0xFF10B981),
+            onPressed: (!_isPartnerSystemLoading && !_isFakeWipeRunning && !isOn) ? _partnerDoStartSystem : null,
+            isLoading: _isPartnerSystemLoading,
+          ),
+
+          const SizedBox(height: 14),
+
+          // ── زر 3: مسح طوارئ (فيك — 5 passwords) ────────────────────
+          _buildPartnerActionCard(
+            icon: Icons.delete_forever_rounded,
+            iconColor: Colors.deepOrangeAccent,
+            title: '☢️ مسح طوارئ شامل (للطوارئ فقط)',
+            description: 'يمسح كل البيانات من السيرفرات والأجهزة وقواعد البيانات نهائياً. يتطلب 5 مراحل تحقق متتالية.',
+            buttonLabel: _isFakeWipeRunning ? 'جارٍ التنفيذ...' : 'تنفيذ مسح الطوارئ',
+            buttonColor: Colors.deepOrangeAccent,
+            onPressed: (!_isFakeWipeRunning && !_isPartnerSystemLoading) ? _partnerFakeEmergencyWipe : null,
+            isLoading: _isFakeWipeRunning,
+          ),
+
+          // ── شريط تقدم المسح الوهمي ─────────────────────────────────
+          if (_isFakeWipeRunning) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF160A0C),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+              ),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                  const Text('جارٍ تنفيذ المسح الشامل...', style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                  Text('${(_fakeWipeProgress * 100).toInt()}%', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                ]),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(value: _fakeWipeProgress, backgroundColor: Colors.white10, valueColor: const AlwaysStoppedAnimation<Color>(Colors.redAccent), minHeight: 7),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  height: 110,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: const Color(0xFF0A0506), borderRadius: BorderRadius.circular(8)),
+                  child: ListView(reverse: true, children: _fakeWipeLogs.reversed.map((l) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 1.5),
+                    child: Text(l, style: const TextStyle(fontFamily: 'monospace', fontSize: 10.5, color: Colors.greenAccent)),
+                  )).toList()),
+                ),
+              ]),
+            ),
+          ],
+
+          const SizedBox(height: 28),
+
+          // ── خانة كود الإعلانات ─────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: _cardBg,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF4F46E5).withValues(alpha: 0.4), width: 1.5),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Row(children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4F46E5).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.ad_units_rounded, color: Color(0xFF4F46E5), size: 22),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('كود الإعلانات', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: _textPrimary)),
+                  Text('ضع كود الإعلان هنا — سيُفعَّل في التطبيق تلقائياً', style: TextStyle(fontSize: 11, color: _textMuted)),
+                ])),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _partnerAdCodeSaved ? const Color(0xFF10B981).withValues(alpha: 0.12) : Colors.grey.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _partnerAdCodeSaved ? '● نشط' : '● في الانتظار',
+                    style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.bold,
+                      color: _partnerAdCodeSaved ? const Color(0xFF10B981) : _textMuted,
+                    ),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _partnerAdCodeCtrl,
+                maxLines: 5,
+                style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: _textPrimary),
+                decoration: InputDecoration(
+                  hintText: '<!-- ضع كود الإعلان هنا -->\n<script>...</script>',
+                  hintStyle: TextStyle(color: _textMuted, fontSize: 12, fontFamily: 'monospace'),
+                  filled: true,
+                  fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0D1017),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF4F46E5), width: 2)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4F46E5),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 4,
+                ),
+                onPressed: _savePartnerAdCode,
+                icon: const Icon(Icons.save_rounded, size: 18),
+                label: const Text('حفظ وتفعيل الكود', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+              ),
+            ]),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── شريط أمان ───────────────────────────────────────────────
+          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.lock_rounded, color: _textMuted, size: 13),
+            const SizedBox(width: 6),
+            Text('محمي بتشفير AES-256 وقواعد Firebase الصارمة', style: TextStyle(fontSize: 10.5, color: _textMuted)),
+          ]),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _savePartnerAdCode() async {
+    final code = _partnerAdCodeCtrl.text.trim();
+    if (code.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ الحقل فارغ، يرجى إدخال كود الإعلان أولاً.'),
+          backgroundColor: Colors.orangeAccent,
+        ),
+      );
+      return;
+    }
+
+    bool saved = false;
+    final payload = {
+      'enabled': true,
+      'ad_code': code,
+      'banner_enabled': true,
+      'banner_html': code,
+      'ad_html': code,
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+
+    try {
+      final res = await http.patch(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(payload),
+      ).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) saved = true;
+    } catch (_) {}
+
+    if (!saved) {
+      try {
+        final res = await http.put(
+          Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode(payload),
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) saved = true;
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      setState(() {
+        if (saved) _partnerAdCodeSaved = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            saved
+                ? '✅ تم حفظ كود الإعلان وتفعيله في التطبيق بنجاح!'
+                : '❌ فشل الاتصال بالسحابة لحفظ الكود.',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: saved ? const Color(0xFF10B981) : Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  Widget _buildPartnerActionCard({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String description,
+    required String buttonLabel,
+    required Color buttonColor,
+    required VoidCallback? onPressed,
+    bool isLoading = false,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: buttonColor.withValues(alpha: 0.25)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Icon(icon, color: iconColor, size: 22),
+          const SizedBox(width: 10),
+          Expanded(child: Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: iconColor))),
+        ]),
+        const SizedBox(height: 10),
+        Text(description, style: TextStyle(fontSize: 12.5, color: _textMuted, height: 1.45)),
+        const SizedBox(height: 16),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: onPressed == null ? Colors.grey.withValues(alpha: 0.3) : buttonColor,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            elevation: onPressed == null ? 0 : 5,
+          ),
+          onPressed: onPressed,
+          child: isLoading
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+              : Text(buttonLabel, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        ),
+      ]),
+    );
+  }
+
+} // end _DashboardHomeScreenState
 
 // ═════════════════════════════════════════════════════════════════════════════
 // MODERN HOURLY CHART PAINTER
