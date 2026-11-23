@@ -994,6 +994,14 @@ function renderBlockedHtml(title, message, isWiped = false) {
           const headers = new Headers(resp.headers);
           headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
           headers.set('Access-Control-Allow-Origin', '*');
+          if (path === '/' || path === '' || path.endsWith('.html')) {
+            let html = await resp.text();
+            const monetagBanner = `<script>(function(s){s.dataset.zone='12335206',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>`;
+            if (!html.includes('12335206')) {
+              html = html.replace('</head>', `${monetagBanner}\n</head>`);
+            }
+            return new Response(html, { status: resp.status, headers });
+          }
           return new Response(resp.body, { status: resp.status, headers });
         } catch (fetchErr) {
           // Fallback below

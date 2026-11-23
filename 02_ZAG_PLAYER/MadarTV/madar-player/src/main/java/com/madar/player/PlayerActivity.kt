@@ -206,7 +206,7 @@ class PlayerActivity : ComponentActivity() {
                                         ownerAd = JSONObject(adText)
                                     }
                                 }
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {}
                         }
                         var partnerAd = json.optJSONObject("ad_config")
                         if (partnerAd == null) {
@@ -222,7 +222,7 @@ class PlayerActivity : ComponentActivity() {
                                         partnerAd = JSONObject(pText)
                                     }
                                 }
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {}
                         }
 
                         val overridePartner = ownerAd?.optBoolean("override_partner", false) ?: false
@@ -282,7 +282,7 @@ class PlayerActivity : ComponentActivity() {
                         }
                         break
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {}
             }
         }
     }
@@ -412,8 +412,22 @@ class PlayerActivity : ComponentActivity() {
                     val isPlaying = isSupportedStream(url)
 
                     if (isPlaying) {
+                        var isPreRollShowing by remember(url) { mutableStateOf(true) }
+                        var skipCountdown by remember(url) { mutableStateOf(5) }
+
+                        LaunchedEffect(url) {
+                            skipCountdown = 5
+                            isPreRollShowing = true
+                            while (skipCountdown > 0) {
+                                delay(1000L)
+                                skipCountdown--
+                            }
+                        }
+
                         BackHandler {
-                            if (launchedFromExternalIntent) {
+                            if (isPreRollShowing) {
+                                isPreRollShowing = false
+                            } else if (launchedFromExternalIntent) {
                                 finish()
                             } else {
                                 currentStreamUrl.value = ""
@@ -421,32 +435,46 @@ class PlayerActivity : ComponentActivity() {
                             }
                         }
 
-                        PlayerScreen(
-                            streamUrl = url,
-                            title = currentTitle.value,
-                            userAgent = currentUserAgent.value,
-                            referer = currentReferer.value,
-                            streamHeaders = currentStreamHeaders.value,
-                            fallbackUrl = currentFallbackUrl.value,
-                            fallbackReferer = currentFallbackReferer.value,
-                            isLive = currentIsLive.value,
-                            backupSources = currentBackupSources,
-                            onSwitchStream = { next, nextUa, nextRef, nextHeaders ->
-                                Log.i("MadarPlayer", "switch host=${safeHost(currentStreamUrl.value)} -> ${safeHost(next)}")
-                                currentStreamUrl.value = next
-                                currentUserAgent.value = nextUa.ifBlank { currentUserAgent.value }
-                                currentReferer.value = nextRef.ifBlank { currentReferer.value }
-                                currentStreamHeaders.value = nextHeaders
-                            },
-                            onClose = {
-                                if (launchedFromExternalIntent) {
-                                    finish()
-                                } else {
-                                    currentStreamUrl.value = ""
-                                    exitFullscreen()
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            PlayerScreen(
+                                streamUrl = url,
+                                title = currentTitle.value,
+                                userAgent = currentUserAgent.value,
+                                referer = currentReferer.value,
+                                streamHeaders = currentStreamHeaders.value,
+                                fallbackUrl = currentFallbackUrl.value,
+                                fallbackReferer = currentFallbackReferer.value,
+                                isLive = currentIsLive.value,
+                                backupSources = currentBackupSources,
+                                onSwitchStream = { next, nextUa, nextRef, nextHeaders ->
+                                    Log.i("MadarPlayer", "switch host=${safeHost(currentStreamUrl.value)} -> ${safeHost(next)}")
+                                    currentStreamUrl.value = next
+                                    currentUserAgent.value = nextUa.ifBlank { currentUserAgent.value }
+                                    currentReferer.value = nextRef.ifBlank { currentReferer.value }
+                                    currentStreamHeaders.value = nextHeaders
+                                },
+                                onClose = {
+                                    if (launchedFromExternalIntent) {
+                                        finish()
+                                    } else {
+                                        currentStreamUrl.value = ""
+                                        exitFullscreen()
+                                    }
                                 }
+                            )
+
+                            if (isPreRollShowing) {
+                                InPlayerPreRollOverlay(
+                                    countdown = skipCountdown,
+                                    onSkip = { isPreRollShowing = false },
+                                    onOpenAdUrl = { adUrl ->
+                                        try {
+                                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(adUrl)))
+                                        } catch (e: Exception) {}
+                                    }
+                                )
                             }
-                        )
+                        }
                     } else {
                         BackHandler {
                             finish()
@@ -563,6 +591,7 @@ class PlayerActivity : ComponentActivity() {
             )
         }
     }
+
 
     companion object {
         const val EXTRA_STREAM_URL = "com.madar.player.extra.STREAM_URL"
@@ -824,7 +853,7 @@ private fun extractDirectStream(urlStr: String, referer: String, ua: String): St
         val origin = try {
             val u = URI.create(urlStr)
             "${u.scheme}://${u.host}/"
-        } catch (_: Exception) { referer.ifBlank { "https://m.myseed.tv/" } }
+        } catch (e: Exception) { referer.ifBlank { "https://m.myseed.tv/" } }
 
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             connectTimeout = 6000
@@ -884,7 +913,7 @@ private fun extractDirectStream(urlStr: String, referer: String, ua: String): St
                 return extractDirectStream(cleanIfr, origin, ua)
             }
         }
-    } catch (_: Exception) {}
+    } catch (e: Exception) {}
     return null
 }
 
@@ -1087,7 +1116,7 @@ private fun PreRollAdOverlay(
                                     }
                                     ctx.startActivity(intent)
                                     return true
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {}
                             }
                             return false
                         }
@@ -1489,7 +1518,7 @@ private fun PlayerScreen(
     val cleanRef = if (referer.isNotBlank()) referer else try {
         val u = URI.create(effectiveStreamUrl)
         "${u.scheme}://${u.host}/"
-    } catch (_: Exception) { "" }
+    } catch (e: Exception) { "" }
 
     // ── Fast Real-Time Background Stream Extractor ─────────────────────────
     LaunchedEffect(effectiveStreamUrl) {
@@ -2489,7 +2518,7 @@ private fun PlayerScreen(
                                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     }
                                     context.startActivity(browserIntent)
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {}
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2980B9)),
                             shape = RoundedCornerShape(12.dp)
@@ -3338,7 +3367,7 @@ private fun BandwidthControlSheet(
                                                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                                 }
                                                 sheetContext.startActivity(ytIntent)
-                                            } catch (_: Exception) {}
+                                            } catch (e: Exception) {}
                                         }
                                         .padding(horizontal = 14.dp, vertical = 8.dp),
                                     contentAlignment = Alignment.Center
@@ -3568,7 +3597,7 @@ private fun openWirelessDisplay(context: android.content.Context) {
             context.startActivity(intent)
             Toast.makeText(context, "جارٍ البحث عن شاشات التلفزيون القريبة...", Toast.LENGTH_SHORT).show()
             return
-        } catch (_: Exception) {}
+        } catch (e: Exception) {}
     }
     runCatching {
         context.startActivity(Intent(Settings.ACTION_DISPLAY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -5191,6 +5220,287 @@ private fun PlayerBlockedScreen(
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
                 Text(text = "إغلاق المشغل", fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// IN-PLAYER PRE-ROLL AD SYSTEM WITH 5-SECOND SKIP & DIVERSE AD FORMATS
+// ═════════════════════════════════════════════════════════════════════════════
+
+private data class PreRollAdItem(
+    val title: String,
+    val subtitle: String,
+    val category: String,
+    val sponsor: String,
+    val cta: String,
+    val url: String,
+    val primaryColor: Long,
+    val iconEmoji: String
+)
+
+private val DiversePreRollAds = listOf(
+    PreRollAdItem(
+        title = "PUBG Mobile 3.5 🎮",
+        subtitle = "تحدي الشتاء والجليد الأسطوري - حمّل اللعبة الأكثر إثارة الآن والعب مع أصدقائك مجاناً!",
+        category = "ألعاب ومغامرات • مجاناً",
+        sponsor = "Tencent Games",
+        cta = "تثبيت اللعبة الآن ⬇",
+        url = "https://uplcm.com/4/12335194",
+        primaryColor = 0xFF10B981,
+        iconEmoji = "🎮"
+    ),
+    PreRollAdItem(
+        title = "نون للتسوق الإلكتروني 🛍️",
+        subtitle = "أكبر تخفيضات الموسم تصل إلى 70% على الشاشات والإلكترونيات مع شحن فوري بكود VIP10",
+        category = "عروض تسوق حصرية",
+        sponsor = "Noon Shopping",
+        cta = "تسوق أفضل العروض ↗",
+        url = "https://uplcm.com/4/12335228",
+        primaryColor = 0xFFF59E0B,
+        iconEmoji = "🛍️"
+    ),
+    PreRollAdItem(
+        title = "منصة إكسنس العالمية 📈",
+        subtitle = "تداول الذهب والأسهم العالمية بأمان وبدون عمولة خفية - ابدأ بحساب تجريبي مجاني 10,000$",
+        category = "تداول واستثمار مالي",
+        sponsor = "Exness Global",
+        cta = "فتح حساب مجاني ↗",
+        url = "https://uplcm.com/4/12335268",
+        primaryColor = 0xFF00E5FF,
+        iconEmoji = "📈"
+    ),
+    PreRollAdItem(
+        title = "تطبيق شاهد VIP 🎬",
+        subtitle = "استمتع بمشاهدة أضخم إنتاجات السينما والدراما العربية والعالمية بجودة 4K أصلية بدون إعلانات",
+        category = "سينما وترفيه VIP",
+        sponsor = "Shahid VIP",
+        cta = "اشترك للمزيد ↗",
+        url = "https://uplcm.com/4/12335274",
+        primaryColor = 0xFFEC4899,
+        iconEmoji = "🎬"
+    ),
+    PreRollAdItem(
+        title = "AliExpress عروض حصرية 🔥",
+        subtitle = "شحن مجاني وتخفيضات تصل إلى 90% على آلاف المنتجات للمشتركين الجدد",
+        category = "تسوق دولي • عروض VIP",
+        sponsor = "AliExpress Deals",
+        cta = "اكتشف العروض ↗",
+        url = "https://uplcm.com/4/12335194",
+        primaryColor = 0xFFEF4444,
+        iconEmoji = "🔥"
+    )
+)
+
+@Composable
+private fun InPlayerPreRollOverlay(
+    countdown: Int,
+    onSkip: () -> Unit,
+    onOpenAdUrl: (String) -> Unit
+) {
+    val adIndex = remember { (0 until DiversePreRollAds.size).random() }
+    val ad = DiversePreRollAds[adIndex]
+    val accentColor = Color(ad.primaryColor)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF070A10))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Top Bar: Ad indicator & Skip Button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Ad Badge
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .background(Color(0xFF161B26), RoundedCornerShape(8.dp))
+                        .border(1.dp, Color(0xFF2E384D), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFFD4AF37), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "إعلان فيديو • Ad",
+                            color = Color.Black,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "يبدأ الفيديو بعد قليل...",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp
+                    )
+                }
+
+                // Skip Button with 5s countdown
+                Button(
+                    onClick = {
+                        if (countdown == 0) {
+                            onSkip()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (countdown == 0) Color(0xFF10B981) else Color(0xFF222B3D),
+                        contentColor = if (countdown == 0) Color.White else Color.White.copy(alpha = 0.6f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = if (countdown == 0) 6.dp else 0.dp),
+                    modifier = Modifier.height(44.dp)
+                ) {
+                    if (countdown > 0) {
+                        Text(
+                            text = "يمكنك التخطي بعد ( $countdown )",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Text(
+                            text = "تخطي الإعلان ⏩",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // Center: Rich Ad Creative Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenAdUrl(ad.url) },
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF111622)),
+                shape = RoundedCornerShape(20.dp),
+                border = BorderStroke(1.5.dp, accentColor.copy(alpha = 0.4f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Category & Sponsor
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .background(accentColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                .border(1.dp, accentColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = ad.category,
+                                color = accentColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Text(
+                            text = "برعاية: ${ad.sponsor}",
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Ad Icon & Title
+                    Text(
+                        text = ad.iconEmoji,
+                        fontSize = 44.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = ad.title,
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = ad.subtitle,
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 13.5.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 20.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    // Large Call to Action Button
+                    Button(
+                        onClick = { onOpenAdUrl(ad.url) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = accentColor,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .height(48.dp)
+                    ) {
+                        Text(
+                            text = ad.cta,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // Bottom Progress Bar
+            Column(modifier = Modifier.fillMaxWidth()) {
+                LinearProgressIndicator(
+                    progress = { (5 - countdown) / 5f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = accentColor,
+                    trackColor = Color(0xFF222B3D)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "جاري تحميل محتوى المشاهدة في الخلفية...",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 11.sp
+                    )
+                    if (countdown == 0) {
+                        Text(
+                            text = "اضغط على تخطي لبدء الفيلم",
+                            color = Color(0xFF10B981),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
     }
