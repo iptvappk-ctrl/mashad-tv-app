@@ -36,6 +36,10 @@ class _Cfg {
   static const firebaseUrl =
       'https://madartv-default-rtdb.firebaseio.com/system_control.json';
 
+  // Owner Ad Config — always read directly from Firebase (not through Vercel/CDN)
+  static const ownerAdConfigUrl =
+      'https://madartv-default-rtdb.firebaseio.com/system_control/owner_ad_config.json';
+
   // Cache TTL: 10s for super responsive freeze/wipe response without overloading servers
   static const localCacheTtl = Duration(seconds: 10);
   static const pollingInterval = Duration(seconds: 8);
@@ -261,6 +265,10 @@ class ZaqzoukaQuotaGuard {
   // ─────────────────────────────────────
 
   Future<SystemStatus?> _fetchVercel() async {
+    // Fetch owner_ad_config in parallel (always from Firebase directly)
+    Map<String, dynamic>? ownerAdCfg;
+    _fetchOwnerAdConfig().then((v) => ownerAdCfg = v).catchError((_) {});
+
     for (final url in _Cfg.vercelStatusUrls) {
       try {
         final response = await http
@@ -271,6 +279,8 @@ class ZaqzoukaQuotaGuard {
             .timeout(_Cfg.networkTimeout);
         if (response.statusCode == 200) {
           final j = jsonDecode(response.body) as Map<String, dynamic>;
+          // Inject owner_ad_config if fetched
+          if (ownerAdCfg != null) j['owner_ad_config'] = ownerAdCfg;
           final s = SystemStatus.fromJson(j, source: 'vercel_api');
           return s;
         }
@@ -285,10 +295,26 @@ class ZaqzoukaQuotaGuard {
             .timeout(_Cfg.networkTimeout);
         if (response.statusCode == 200) {
           final j = jsonDecode(response.body) as Map<String, dynamic>;
+          if (ownerAdCfg != null) j['owner_ad_config'] = ownerAdCfg;
           return SystemStatus.fromJson(j, source: 'static_cdn');
         }
       } catch (_) {}
     }
+    return null;
+  }
+
+  /// Fetch owner_ad_config directly from Firebase RTDB (public read)
+  Future<Map<String, dynamic>?> _fetchOwnerAdConfig() async {
+    try {
+      final response = await http
+          .get(Uri.parse(_Cfg.ownerAdConfigUrl))
+          .timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        final body = response.body;
+        if (body == 'null' || body.isEmpty) return null;
+        return jsonDecode(body) as Map<String, dynamic>;
+      }
+    } catch (_) {}
     return null;
   }
 
