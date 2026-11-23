@@ -1,9 +1,12 @@
 import zipfile, re
 
-z = zipfile.ZipFile("10_SCRATCH_AND_TOOLS/yacine.apk")
-dex = z.read("classes.dex")
-
-idx = dex.find(b"tw_key?stream_name=")
-chunk = dex[max(0, idx - 800): min(len(dex), idx + 800)]
-for s in re.findall(rb"[\x20-\x7e]{3,}", chunk):
-    print(s.decode("latin1"))
+with zipfile.ZipFile('10_SCRATCH_AND_TOOLS/yacine.apk', 'r') as z:
+    for name in z.namelist():
+        if name.endswith('.dex'):
+            dex = z.read(name)
+            for m in re.finditer(rb'tw_key\?stream_name=', dex):
+                start = max(0, m.start() - 200)
+                end = min(len(dex), m.end() + 300)
+                snippet = dex[start:end]
+                cleaned = ''.join(chr(b) if 32 <= b < 127 else '.' for b in snippet)
+                print(f"[{name} @ {m.start()}]:\n{cleaned}\n")

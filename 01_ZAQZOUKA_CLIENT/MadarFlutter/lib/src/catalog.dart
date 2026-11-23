@@ -214,6 +214,7 @@ class _RootTabsState extends State<RootTabs> with WidgetsBindingObserver {
                 ),
               ),
             ),
+            const AppBannerAdStrip(),
           ],
         ),
       ),

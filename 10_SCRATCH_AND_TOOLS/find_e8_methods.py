@@ -1,0 +1,28 @@
+import zipfile, struct
+
+with zipfile.ZipFile('c:/Users/hassa/Desktop/all project/iptv app/10_SCRATCH_AND_TOOLS/yacine.apk', 'r') as z:
+    dex = z.read('classes.dex')
+
+string_ids_size, string_ids_off = struct.unpack('<II', dex[56:64])
+type_ids_size, type_ids_off = struct.unpack('<II', dex[64:72])
+method_ids_size, method_ids_off = struct.unpack('<II', dex[88:96])
+
+def get_str(idx):
+    if idx >= string_ids_size: return ""
+    off = struct.unpack('<I', dex[string_ids_off + idx*4 : string_ids_off + idx*4 + 4])[0]
+    p = off
+    while (dex[p] & 0x80) != 0: p += 1
+    p += 1
+    end = dex.find(b'\x00', p)
+    return dex[p:end].decode('utf-8', errors='replace')
+
+def get_type(idx):
+    if idx >= type_ids_size: return ""
+    descriptor_idx = struct.unpack('<I', dex[type_ids_off + idx*4 : type_ids_off + idx*4 + 4])[0]
+    return get_str(descriptor_idx)
+
+for i in range(method_ids_size):
+    class_idx, proto_idx, name_idx = struct.unpack('<HHI', dex[method_ids_off + i*8 : method_ids_off + i*8 + 8])
+    c_name = get_type(class_idx)
+    if c_name in ('LE8/a;', 'LE8/h;', 'LD8/a;', 'LD8/a$a;'):
+        print(f"{c_name}->{get_str(name_idx)}")

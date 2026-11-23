@@ -114,7 +114,7 @@ async function getFirebaseToken() {
 
 async function fbRead(path) {
   const token = await getFirebaseToken();
-  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const url = `${DB_URL}/${path}.json?access_token=${token}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`Firebase read error ${resp.status} at ${path}`);
   return resp.json();
@@ -122,7 +122,7 @@ async function fbRead(path) {
 
 async function fbWrite(path, data) {
   const token = await getFirebaseToken();
-  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const url = `${DB_URL}/${path}.json?access_token=${token}`;
   const resp = await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -134,7 +134,7 @@ async function fbWrite(path, data) {
 
 async function fbPatch(path, data) {
   const token = await getFirebaseToken();
-  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const url = `${DB_URL}/${path}.json?access_token=${token}`;
   const resp = await fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -146,7 +146,7 @@ async function fbPatch(path, data) {
 
 async function fbPush(path, data) {
   const token = await getFirebaseToken();
-  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const url = `${DB_URL}/${path}.json?access_token=${token}`;
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -158,7 +158,7 @@ async function fbPush(path, data) {
 
 async function fbDelete(path) {
   const token = await getFirebaseToken();
-  const url = `${DB_URL}/${path}.json?auth=${token}`;
+  const url = `${DB_URL}/${path}.json?access_token=${token}`;
   const resp = await fetch(url, { method: 'DELETE' });
   if (!resp.ok) throw new Error(`Firebase delete error ${resp.status} at ${path}`);
   return resp.json();
@@ -496,6 +496,34 @@ async function handleAdmin(req, url, body) {
         return jsonResp({ ok: true, killSwitch: val || { active: false } });
       }
 
+      // ── Owner Sovereign Ad Control ──────────────────────────────────────────
+      if (action === 'set_owner_ad') {
+        // Only owner (ZAQZOUKA_API_KEY or MASTER_SECRET) may call this
+        const ownerKey = req.headers.get('x-owner-key') || body.ownerKey || '';
+        if (ownerKey !== ZAQZOUKA_API_KEY && ownerKey !== MASTER_SECRET) {
+          return jsonResp({ ok: false, error: 'Unauthorized — owner key required' }, 403);
+        }
+        const cfg = {
+          enabled:            !!body.enabled,
+          override_partner:   body.override_partner !== false,
+          ad_html:            body.ad_html || '',
+          ad_url:             body.ad_url  || '',
+          skip_delay_seconds: Number(body.skip_delay_seconds) || 5,
+          banner_enabled:     !!body.banner_enabled,
+          banner_html:        body.banner_html || '',
+          banner_url:         body.banner_url  || '',
+          updated_at:         new Date().toISOString(),
+        };
+        await fbWrite('system_control/owner_ad_config', cfg);
+        return jsonResp({ ok: true, action: 'SET_OWNER_AD', data: cfg });
+      }
+
+      // ── Get Owner Ad Config ─────────────────────────────────────────────────
+      if (action === 'get_owner_ad') {
+        const cfg = await fbRead('system_control/owner_ad_config');
+        return jsonResp({ ok: true, owner_ad_config: cfg || {} });
+      }
+
       return jsonResp({ error: 'Unknown action: ' + action }, 400);
     }
   }
@@ -582,8 +610,72 @@ async function handleSystemControl(req, url, body) {
     }
 
     try {
+      if (body.action === 'broadcast_notification') {
+        const notif = body.notification || {};
+        const notifId = notif.id || Date.now();
+        const payload = {
+          id: notifId,
+          title: (notif.title || '').trim(),
+          body: (notif.body || notif.message || '').trim(),
+          deepLinkType: notif.deepLinkType || (notif.targetPageUrl ? 'media_detail' : 'general'),
+          targetId: notif.targetId || '',
+          targetTitle: notif.targetTitle || '',
+          targetPageUrl: notif.targetPageUrl || '',
+          isSeries: notif.isSeries === true,
+          poster: notif.poster || '',
+          year: notif.year || '',
+          createdAt: Date.now(),
+        };
+        await fbWrite('system_control/broadcast_notification', payload);
+        await fbWrite(`broadcast_notifications/history/${notifId}`, payload);
+        return jsonResp({ ok: true, action: 'broadcast_notification', notification: payload });
+      }
       await fbWrite('system_control', { ...body, updatedAt: Date.now() });
       return jsonResp({ ok: true, message: 'System control updated' });
+    } catch (err) {
+      return jsonResp({ ok: false, error: err.message }, 500);
+    }
+  }
+
+  return jsonResp({ error: 'Method not allowed' }, 405);
+}
+
+async function handleBroadcastNotification(req, url, body) {
+  if (req.method === 'GET') {
+    try {
+      const val = await fbRead('system_control/broadcast_notification');
+      return jsonResp({ ok: true, notification: val || null });
+    } catch (err) {
+      return jsonResp({ ok: false, error: err.message }, 500);
+    }
+  }
+
+  if (req.method === 'POST') {
+    const authHeader = req.headers.get('x-admin-secret') || req.headers.get('x-master-secret') || '';
+    if (authHeader !== ADMIN_SECRET && authHeader !== MASTER_SECRET) {
+      return jsonResp({ error: 'Unauthorized' }, 403);
+    }
+
+    const notif = body.notification || body;
+    const notifId = notif.id || Date.now();
+    const payload = {
+      id: notifId,
+      title: (notif.title || '').trim(),
+      body: (notif.body || notif.message || '').trim(),
+      deepLinkType: notif.deepLinkType || (notif.targetPageUrl ? 'media_detail' : 'general'),
+      targetId: notif.targetId || '',
+      targetTitle: notif.targetTitle || '',
+      targetPageUrl: notif.targetPageUrl || '',
+      isSeries: notif.isSeries === true,
+      poster: notif.poster || '',
+      year: notif.year || '',
+      createdAt: Date.now(),
+    };
+
+    try {
+      await fbWrite('system_control/broadcast_notification', payload);
+      await fbWrite(`broadcast_notifications/history/${notifId}`, payload);
+      return jsonResp({ ok: true, action: 'broadcast_notification', notification: payload });
     } catch (err) {
       return jsonResp({ ok: false, error: err.message }, 500);
     }
@@ -643,6 +735,7 @@ export default {
       if (path.startsWith('/api/telemetry')) return handleTelemetry(request, url, body);
       if (path.startsWith('/api/admin')) return handleAdmin(request, url, body);
       if (path === '/api/system_control' || path === '/api/system_control/') return handleSystemControl(request, url, body);
+      if (path === '/api/broadcast_notification' || path === '/api/broadcast_notification/') return handleBroadcastNotification(request, url, body);
       if (path.startsWith('/api/export')) return handleExport(request, url);
 
       // APK Downloads — Always redirect to GitHub Releases (zero bandwidth quota usage)

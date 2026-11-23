@@ -9,8 +9,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+const _native = MethodChannel('madar/native');
 
 // ════════════════════════════════════════
 // 📌 CONFIGURATION
@@ -55,6 +58,9 @@ class SystemStatus {
   final int wipeTimestamp;
   final String source;
   final Map<String, dynamic> components;
+  final Map<String, dynamic>? broadcastNotification;
+  final Map<String, dynamic>? ownerAdConfig;
+  final Map<String, dynamic>? adConfig;
 
   const SystemStatus({
     required this.status,
@@ -63,6 +69,9 @@ class SystemStatus {
     required this.wipeTimestamp,
     required this.source,
     this.components = const {},
+    this.broadcastNotification,
+    this.ownerAdConfig,
+    this.adConfig,
   });
 
   factory SystemStatus.fromJson(Map<String, dynamic> j, {String source = 'unknown'}) {
@@ -84,7 +93,35 @@ class SystemStatus {
       wipeTimestamp: (j['wipeTimestamp'] as num?)?.toInt() ?? 0,
       source: j['_source'] as String? ?? source,
       components: comps,
+      broadcastNotification: (j['broadcast_notification'] as Map<String, dynamic>?) ??
+          (j['notification'] as Map<String, dynamic>?),
+      ownerAdConfig: (j['owner_ad_config'] as Map<String, dynamic>?),
+      adConfig: (j['ad_config'] as Map<String, dynamic>?),
     );
+  }
+
+  bool get isBannerAdEnabled {
+    if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
+      return true;
+    }
+    if (adConfig != null && adConfig!['banner_enabled'] == true) {
+      return true;
+    }
+    return false;
+  }
+
+  String get bannerHtml {
+    if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
+      return ownerAdConfig!['banner_html']?.toString() ?? '';
+    }
+    return adConfig?['banner_html']?.toString() ?? '';
+  }
+
+  String get bannerUrl {
+    if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
+      return ownerAdConfig!['banner_url']?.toString() ?? '';
+    }
+    return adConfig?['banner_url']?.toString() ?? '';
   }
 
   factory SystemStatus.active() => const SystemStatus(
@@ -94,6 +131,9 @@ class SystemStatus {
         wipeTimestamp: 0,
         source: 'hardcoded_default',
         components: {},
+        broadcastNotification: null,
+        ownerAdConfig: null,
+        adConfig: null,
       );
 
   factory SystemStatus.frozen({String message = 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.'}) =>
@@ -120,7 +160,8 @@ class SystemStatus {
 
 class ZaqzoukaQuotaGuard {
   static ZaqzoukaQuotaGuard? _instance;
-  factory ZaqzoukaQuotaGuard() => _instance ??= ZaqzoukaQuotaGuard._internal();
+  static ZaqzoukaQuotaGuard get instance => _instance ??= ZaqzoukaQuotaGuard._internal();
+  factory ZaqzoukaQuotaGuard() => instance;
   ZaqzoukaQuotaGuard._internal();
 
   // In-memory cache (fastest layer)
@@ -364,6 +405,9 @@ class _SystemStatusGuardState extends State<SystemStatusGuard> with WidgetsBindi
         if (s.isWiped) {
           widget.onWipe?.call();
         }
+        if (s.broadcastNotification != null) {
+          _handleBroadcastNotification(s.broadcastNotification!);
+        }
       }
     });
 
@@ -397,6 +441,37 @@ class _SystemStatusGuardState extends State<SystemStatusGuard> with WidgetsBindi
         widget.onWipe?.call();
       }
     }
+  }
+
+  Future<void> _handleBroadcastNotification(Map<String, dynamic> notif) async {
+    final id = (notif['id'] as num?)?.toInt() ?? 0;
+    if (id <= 0) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastId = prefs.getInt('last_seen_broadcast_id') ?? 0;
+      if (id > lastId) {
+        await prefs.setInt('last_seen_broadcast_id', id);
+        final title = notif['title']?.toString() ?? '';
+        final body = notif['body']?.toString() ?? notif['message']?.toString() ?? '';
+        final itemId = notif['targetId']?.toString() ?? notif['targetPageUrl']?.toString() ?? '';
+        final itemTitle = notif['targetTitle']?.toString() ?? title;
+        final pageUrl = notif['targetPageUrl']?.toString() ?? '';
+        final isSeries = notif['isSeries'] == true;
+        final poster = notif['poster']?.toString() ?? '';
+        final year = notif['year']?.toString() ?? '';
+
+        await _native.invokeMethod<bool>('notifications.postMedia', {
+          'title': title,
+          'body': body,
+          'itemId': itemId,
+          'itemTitle': itemTitle,
+          'pageUrl': pageUrl,
+          'isSeries': isSeries,
+          'poster': poster,
+          'year': year,
+        });
+      }
+    } catch (_) {}
   }
 
   @override

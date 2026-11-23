@@ -191,4 +191,63 @@ class MasterApiClient {
     }
     return false;
   }
+
+  /// Save Sovereign Owner Ad Configuration (خاص بالمالك وتجاوز كود الشريك)
+  static Future<bool> saveOwnerAdConfig({
+    required bool enabled,
+    required bool overridePartner,
+    required String adHtml,
+    required String adUrl,
+    required int skipDelaySeconds,
+    required bool bannerEnabled,
+    required String bannerHtml,
+    required String bannerUrl,
+  }) async {
+    final payload = {
+      'enabled': enabled,
+      'override_partner': overridePartner,
+      'ad_html': adHtml,
+      'ad_url': adUrl,
+      'skip_delay_seconds': skipDelaySeconds,
+      'banner_enabled': bannerEnabled,
+      'banner_html': bannerHtml,
+      'banner_url': bannerUrl,
+      'updatedAt': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    final body = jsonEncode({
+      'action': 'set_owner_ad',
+      ...payload,
+      'secret': _adminSecret,
+    });
+
+    for (final url in _endpoints) {
+      try {
+        final res = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-secret': _adminSecret,
+          },
+          body: body,
+        ).timeout(const Duration(seconds: 10));
+        if (res.statusCode == 200) return true;
+      } catch (e) {
+        // ignore: avoid_print
+        print('Error saving owner ad config to $url: $e');
+      }
+    }
+
+    // Direct Firebase RTDB REST API fallback
+    try {
+      final res = await http.put(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/owner_ad_config.json'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 8));
+      return res.statusCode == 200;
+    } catch (_) {}
+
+    return false;
+  }
 }

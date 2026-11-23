@@ -64,17 +64,42 @@ internal class NewContentNotificationWorker(context: Context, params: WorkerPara
         }
         val fresh = keyed.filter { it.first !in seen }.distinctBy { it.first }
         if (fresh.isNotEmpty()) {
-            val kind = if (type == "series") "مسلسل أو حلقة جديدة" else "فيلم جديد"
-            val names = fresh.take(3).joinToString("، ") { it.second.title }
-            val extra = if (fresh.size > 3) " وأعمال أخرى" else ""
-            val posted = NotificationCenter.post(
-                applicationContext,
-                if (type == "series") CONTENT_SERIES_ID else CONTENT_MOVIES_ID,
-                NotificationCenter.CONTENT_CHANNEL,
-                "وصل $kind",
-                "$names$extra",
-            )
-            if (!posted) return
+            val isSeries = type == "series"
+            // Send focused notification for each single item (up to 2 newest items)
+            val itemsToNotify = fresh.take(2)
+            for ((_, item) in itemsToNotify) {
+                val notifTitle: String
+                val notifBody: String
+                if (isSeries) {
+                    val epLabel = item.latestEpisodeLabel.trim()
+                    if (epLabel.isNotBlank()) {
+                        notifTitle = "📺 حلقة جديدة: ${item.title}"
+                        notifBody = "$epLabel · شاهد الحلقة الآن بجودة عالية"
+                    } else {
+                        notifTitle = "📺 مسلسل جديد: ${item.title}"
+                        notifBody = "بدأ عرض المسلسل الآن · متاح للمشاهدة والتحميل"
+                    }
+                } else {
+                    notifTitle = "🎬 فيلم جديد: ${item.title}"
+                    val yearStr = if (item.year.isNotBlank()) "(${item.year})" else ""
+                    notifBody = "وصل الآن $yearStr للمشاهدة والتحميل بدون إعلانات"
+                }
+                val notifId = (item.pageUrl.hashCode() and 0x7fffffff) % 90000 + 10000
+                NotificationCenter.postMediaNotification(
+                    context = applicationContext,
+                    id = notifId,
+                    channel = NotificationCenter.CONTENT_CHANNEL,
+                    title = notifTitle,
+                    body = notifBody,
+                    itemId = item.id.ifBlank { item.pageUrl },
+                    itemTitle = item.title,
+                    pageUrl = item.pageUrl,
+                    isSeries = isSeries,
+                    poster = item.posterUrl.orEmpty(),
+                    year = item.year,
+                    highPriority = true,
+                )
+            }
         }
         saveKeys(prefs, key, seen + currentKeys)
     }

@@ -103,6 +103,35 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, action: 'set_component', component, enabled: enabled !== false });
       }
 
+      // Sovereign Owner Ad Configuration (خاص بالمالك وتجاوز كود الشريك)
+      if (action === 'set_owner_ad') {
+        const {
+          enabled,
+          override_partner,
+          ad_html,
+          ad_url,
+          skip_delay_seconds,
+          banner_enabled,
+          banner_html,
+          banner_url,
+        } = req.body || {};
+
+        const payload = {
+          enabled: !!enabled,
+          override_partner: override_partner !== false,
+          ad_html: ad_html || '',
+          ad_url: ad_url || '',
+          skip_delay_seconds: Number(skip_delay_seconds) || 5,
+          banner_enabled: !!banner_enabled,
+          banner_html: banner_html || '',
+          banner_url: banner_url || '',
+          updatedAt: now,
+        };
+
+        await db.ref('system_control/owner_ad_config').set(payload);
+        return res.status(200).json({ success: true, action: 'set_owner_ad', config: payload });
+      }
+
       if (action === 'freeze') {
         const payload = {
           status: 'frozen',

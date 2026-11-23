@@ -127,12 +127,22 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   List<dynamic> _activityLog = [];
   List<dynamic> _errors = [];
 
+  // Broadcast Notification State
+  final _notifTitleCtrl = TextEditingController();
+  final _notifBodyCtrl = TextEditingController();
+  final _notifPageUrlCtrl = TextEditingController();
+  final _notifPosterCtrl = TextEditingController();
+  final _notifYearCtrl = TextEditingController();
+  String _notifType = 'movie'; // 'movie', 'series', 'general'
+  bool _isSendingNotif = false;
+  Map<String, dynamic>? _lastBroadcastNotif;
+
   late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 8, vsync: this);
+    _tabController = TabController(length: 9, vsync: this);
     _fetchStats();
     _startAutoRefresh();
   }
@@ -141,6 +151,11 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   void dispose() {
     _refreshTimer?.cancel();
     _tabController.dispose();
+    _notifTitleCtrl.dispose();
+    _notifBodyCtrl.dispose();
+    _notifPageUrlCtrl.dispose();
+    _notifPosterCtrl.dispose();
+    _notifYearCtrl.dispose();
     super.dispose();
   }
 
@@ -327,6 +342,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             Tab(icon: Icon(Icons.query_stats_rounded), text: 'رادار البحث'),
             Tab(icon: Icon(Icons.analytics_outlined), text: 'الرسوم والتحليلات'),
             Tab(icon: Icon(Icons.admin_panel_settings_rounded), text: 'مركز التحكم والعمليات'),
+            Tab(icon: Icon(Icons.campaign_rounded), text: 'بث الإشعارات 📢'),
           ],
         ),
       ),
@@ -385,6 +401,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                     _buildSearchRadarTab(),
                     _buildChartsTab(),
                     _buildAdminToolkitTab(),
+                    _buildBroadcastNotificationTab(),
                   ],
                 ),
     );
@@ -3462,6 +3479,470 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
         ],
       ),
     );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════════
+  // TAB 9: BROADCAST NOTIFICATIONS
+  // ═════════════════════════════════════════════════════════════════════════════
+  Widget _buildBroadcastNotificationTab() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // 1. Header Hero Card
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [
+                Color(0xFF4F46E5),
+                Color(0xFF0284C7),
+              ],
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft,
+            ),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF4F46E5).withValues(alpha: 0.25),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.campaign_rounded, color: Colors.white, size: 28),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'مركز بث الإشعارات المباشرة',
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'أرسل إشعاراً لجميع أجهزة المستخدمين فوراً، مع ميزة فتح العمل مباشرة (Deep Link) بنقرة واحدة.',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        // 2. Notification Builder Form
+        _buildCardContainer(
+          title: '📝 إنشاء وتخصيص الإشعار',
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Quick preset buttons
+                Row(
+                  children: [
+                    Text('نماذج سريعة جاهزة:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _textMuted)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          ActionChip(
+                            avatar: const Icon(Icons.movie_creation_rounded, size: 14),
+                            label: const Text('فيلم جديد', style: TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              setState(() {
+                                _notifType = 'movie';
+                                _notifTitleCtrl.text = '🎬 فيلم جديد: Gladiator II';
+                                _notifBodyCtrl.text = 'وصل الآن بجودة WEB-DL مترجم بأعلى دقة · شاهد فوراً بدون إعلانات';
+                                _notifPageUrlCtrl.text = 'https://arabseed.show/watch/gladiator-ii';
+                                _notifYearCtrl.text = '2024';
+                                _notifPosterCtrl.text = 'https://image.tmdb.org/t/p/w500/2cxhvwyEwRlysAmRH4iodkvo0z5.jpg';
+                              });
+                            },
+                          ),
+                          ActionChip(
+                            avatar: const Icon(Icons.tv_rounded, size: 14),
+                            label: const Text('حلقة مسلسل', style: TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              setState(() {
+                                _notifType = 'series';
+                                _notifTitleCtrl.text = '📺 حلقة جديدة: قيامة عثمان';
+                                _notifBodyCtrl.text = 'الحلقة 168 مترجمة كاملة بجودة FHD · متاحة الآن للمشاهدة والتحميل';
+                                _notifPageUrlCtrl.text = 'https://arabseed.show/series/kurulus-osman';
+                                _notifYearCtrl.text = '2024';
+                                _notifPosterCtrl.text = '';
+                              });
+                            },
+                          ),
+                          ActionChip(
+                            avatar: const Icon(Icons.info_outline_rounded, size: 14),
+                            label: const Text('تنبيه عام', style: TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              setState(() {
+                                _notifType = 'general';
+                                _notifTitleCtrl.text = '📢 تنبيه هام لمستخدمي زقزوقة TV';
+                                _notifBodyCtrl.text = 'تمت ترقية المشغل وسيرفرات البث لتحسين سرعة وجودة المشاهدة.';
+                                _notifPageUrlCtrl.clear();
+                                _notifYearCtrl.clear();
+                                _notifPosterCtrl.clear();
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+
+                // Type selector
+                Text('نوع المحتوى المستهدف:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('فيلم 🎬'),
+                      selected: _notifType == 'movie',
+                      onSelected: (val) => setState(() => _notifType = 'movie'),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('مسلسل / حلقة 📺'),
+                      selected: _notifType == 'series',
+                      onSelected: (val) => setState(() => _notifType = 'series'),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('تنبيه عام 📢'),
+                      selected: _notifType == 'general',
+                      onSelected: (val) => setState(() => _notifType = 'general'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Title input
+                Text('عنوان الإشعار (Title):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _notifTitleCtrl,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'مثال: 🎬 فيلم جديد: Gladiator II',
+                    hintStyle: TextStyle(fontSize: 12, color: _textMuted),
+                    filled: true,
+                    fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0F141C),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Body input
+                Text('نص الإشعار (Message Body):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _notifBodyCtrl,
+                  maxLines: 2,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'مثال: وصل الآن بجودة عالية مترجم · شاهد بدون إعلانات',
+                    hintStyle: TextStyle(fontSize: 12, color: _textMuted),
+                    filled: true,
+                    fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0F141C),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Media URL & Extras (if not general)
+                if (_notifType != 'general') ...[
+                  Text('رابط صفحة العمل (Deep Link Page URL):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _notifPageUrlCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'رابط الفيلم أو المسلسل من عرب سيد أو ماي سيما أو فاصل إعلاني',
+                      hintStyle: TextStyle(fontSize: 12, color: _textMuted),
+                      filled: true,
+                      fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0F141C),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 1,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('سنة الإنتاج:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary)),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _notifYearCtrl,
+                              decoration: InputDecoration(
+                                hintText: '2024',
+                                hintStyle: TextStyle(fontSize: 12, color: _textMuted),
+                                filled: true,
+                                fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0F141C),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('رابط البوستر (اختياري):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary)),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _notifPosterCtrl,
+                              decoration: InputDecoration(
+                                hintText: 'https://...',
+                                hintStyle: TextStyle(fontSize: 12, color: _textMuted),
+                                filled: true,
+                                fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0F141C),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                ],
+
+                // 3. Live Phone Mockup Preview
+                Text('👁️ معاينة مظهر الإشعار على هاتف المستخدم:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary)),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: widget.isLightMode ? const Color(0xFF1E293B) : const Color(0xFF0F172A),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFF334155)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFE11D48),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.tv_rounded, color: Colors.white, size: 12),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'زقزوقة TV',
+                            style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(width: 6),
+                          const Text('· الآن', style: TextStyle(color: Colors.white38, fontSize: 10)),
+                          const Spacer(),
+                          const Icon(Icons.notifications_active_rounded, color: Color(0xFF38BDF8), size: 14),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _notifTitleCtrl.text.trim().isEmpty ? 'عنوان الإشعار يظهر هنا...' : _notifTitleCtrl.text.trim(),
+                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _notifBodyCtrl.text.trim().isEmpty ? 'تفاصيل ونص الإشعار تظهر هنا بشكل واضح...' : _notifBodyCtrl.text.trim(),
+                        style: const TextStyle(color: Colors.white70, fontSize: 11),
+                      ),
+                      if (_notifType != 'general') ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF4F46E5).withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFF818CF8)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('مشاهدة الآن ❯', style: TextStyle(color: Color(0xFF818CF8), fontSize: 10, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Send Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 3,
+                    ),
+                    onPressed: _isSendingNotif ? null : _sendBroadcastNotification,
+                    icon: _isSendingNotif
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.send_rounded),
+                    label: Text(
+                      _isSendingNotif ? 'جاري بث الإشعار للمستخدمين...' : 'بث الإشعار فوراً لجميع الأجهزة 🚀',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // 4. Last Broadcast Notification Status
+        if (_lastBroadcastNotif != null)
+          _buildCardContainer(
+            title: '📡 آخر إشعار تم بثه بنجاح',
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        _lastBroadcastNotif!['title']?.toString() ?? '',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _textPrimary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _lastBroadcastNotif!['body']?.toString() ?? '',
+                    style: TextStyle(fontSize: 11, color: _textMuted),
+                  ),
+                  if ((_lastBroadcastNotif!['targetPageUrl']?.toString() ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'الرابط: ${_lastBroadcastNotif!['targetPageUrl']}',
+                      style: const TextStyle(fontSize: 10, color: Color(0xFF0284C7)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _sendBroadcastNotification() async {
+    final title = _notifTitleCtrl.text.trim();
+    final body = _notifBodyCtrl.text.trim();
+    if (title.isEmpty || body.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('يرجى إدخال عنوان الإشعار ونصه'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSendingNotif = true);
+
+    try {
+      final notifId = DateTime.now().millisecondsSinceEpoch;
+      final payload = {
+        'action': 'broadcast_notification',
+        'notification': {
+          'id': notifId,
+          'title': title,
+          'body': body,
+          'deepLinkType': _notifType == 'general' ? 'general' : 'media_detail',
+          'targetId': _notifPageUrlCtrl.text.trim(),
+          'targetTitle': title,
+          'targetPageUrl': _notifPageUrlCtrl.text.trim(),
+          'isSeries': _notifType == 'series',
+          'poster': _notifPosterCtrl.text.trim(),
+          'year': _notifYearCtrl.text.trim(),
+        }
+      };
+
+      final res = await http.post(
+        Uri.parse('$_apiBaseUrl/api/system_control'),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-secret': _adminSecret,
+        },
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 10));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        setState(() {
+          _lastBroadcastNotif = data['notification'] as Map<String, dynamic>? ?? payload['notification'] as Map<String, dynamic>;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ تم بث الإشعار بنجاح! سيصل لجميع المستخدمين فوراً.'),
+              backgroundColor: Color(0xFF10B981),
+            ),
+          );
+        }
+      } else {
+        throw Exception('Server responded with ${res.statusCode}: ${res.body}');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('فشل بث الإشعار: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingNotif = false);
+    }
   }
 }
 

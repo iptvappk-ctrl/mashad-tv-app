@@ -174,6 +174,18 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   final Map<String, bool> _componentLoading = {};
   Timer? _pollTimer;
 
+  // 👑 Sovereign Owner Ad States & Controllers
+  bool _ownerAdEnabled = false;
+  bool _overridePartnerAd = true;
+  final TextEditingController _ownerAdHtmlCtrl = TextEditingController();
+  final TextEditingController _ownerAdUrlCtrl = TextEditingController();
+  int _ownerSkipDelay = 5;
+
+  bool _bannerAdEnabled = false;
+  final TextEditingController _bannerHtmlCtrl = TextEditingController();
+  final TextEditingController _bannerUrlCtrl = TextEditingController();
+  bool _isSavingOwnerAds = false;
+
   // 4 User-Facing Components to Control
   static const List<Map<String, dynamic>> _components = [
     {
@@ -217,6 +229,10 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _ownerAdHtmlCtrl.dispose();
+    _ownerAdUrlCtrl.dispose();
+    _bannerHtmlCtrl.dispose();
+    _bannerUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -224,7 +240,43 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     if (!silent) setState(() => _isLoading = true);
     final data = await MasterApiClient.fetchStatus();
     if (!mounted) return;
+    final ownerAd = data['owner_ad_config'];
+    if (ownerAd is Map) {
+      _ownerAdEnabled = ownerAd['enabled'] == true;
+      _overridePartnerAd = ownerAd['override_partner'] != false;
+      _ownerSkipDelay = (ownerAd['skip_delay_seconds'] as num?)?.toInt() ?? 5;
+      if (_ownerAdHtmlCtrl.text.isEmpty && ownerAd['ad_html'] != null) {
+        _ownerAdHtmlCtrl.text = ownerAd['ad_html'].toString();
+      }
+      if (_ownerAdUrlCtrl.text.isEmpty && ownerAd['ad_url'] != null) {
+        _ownerAdUrlCtrl.text = ownerAd['ad_url'].toString();
+      }
+      _bannerAdEnabled = ownerAd['banner_enabled'] == true;
+      if (_bannerHtmlCtrl.text.isEmpty && ownerAd['banner_html'] != null) {
+        _bannerHtmlCtrl.text = ownerAd['banner_html'].toString();
+      }
+      if (_bannerUrlCtrl.text.isEmpty && ownerAd['banner_url'] != null) {
+        _bannerUrlCtrl.text = ownerAd['banner_url'].toString();
+      }
+    }
     setState(() { _statusData = data; _isLoading = false; });
+  }
+
+  Future<void> _saveOwnerAdSettings() async {
+    setState(() => _isSavingOwnerAds = true);
+    final ok = await MasterApiClient.saveOwnerAdConfig(
+      enabled: _ownerAdEnabled,
+      overridePartner: _overridePartnerAd,
+      adHtml: _ownerAdHtmlCtrl.text.trim(),
+      adUrl: _ownerAdUrlCtrl.text.trim(),
+      skipDelaySeconds: _ownerSkipDelay,
+      bannerEnabled: _bannerAdEnabled,
+      bannerHtml: _bannerHtmlCtrl.text.trim(),
+      bannerUrl: _bannerUrlCtrl.text.trim(),
+    );
+    if (!mounted) return;
+    setState(() => _isSavingOwnerAds = false);
+    _showToast(ok ? 'تم حفظ وتفعيل إعلانات المالك بنجاح!' : 'فشل الحفظ، تأكد من الاتصال');
   }
 
   String get _currentStatus => _statusData['status']?.toString().toLowerCase() ?? 'active';
@@ -573,7 +625,7 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
                                     Switch(
                                       value: isEnabled,
                                       onChanged: (val) => _toggleComponent(key, val),
-                                      activeColor: color, activeTrackColor: color.withValues(alpha: 0.5),
+                                      activeThumbColor: color, activeTrackColor: color.withValues(alpha: 0.5),
                                       inactiveThumbColor: const Color(0xFF555E75),
                                       inactiveTrackColor: const Color(0xFF2A2A3D),
                                     ),
@@ -652,6 +704,196 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
                           ),
                         ),
                       ],
+                    ),
+
+                     const SizedBox(height: 18),
+
+                    // ── 5. Sovereign Owner Ads & Partner Override (خاص بالمالك وتجاوز كود الشريك) ──
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF141824),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.8), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(color: const Color(0xFFD4AF37).withValues(alpha: 0.15), blurRadius: 14, spreadRadius: 1),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFD4AF37).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.shield_rounded, color: Color(0xFFD4AF37), size: 22),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('إدارة الإعلانات السيادية (خاص بك كمالك)', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: Colors.white)),
+                                    Text('تحكم منفصل وسري: كودك الخاص وتجاوز كود الشريك', style: TextStyle(fontSize: 11, color: Color(0xFF8E95AA))),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+
+                          // Toggle 1: Enable Owner Ads
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('تفعيل إعلانات المشغل الخاصة بك', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
+                            subtitle: const Text('تشغيل إعلان قبل الفيديو (Pre-Roll) خاص بك', style: TextStyle(fontSize: 11, color: Color(0xFF8E95AA))),
+                            value: _ownerAdEnabled,
+                            onChanged: (v) => setState(() => _ownerAdEnabled = v),
+                            activeThumbColor: const Color(0xFFD4AF37),
+                          ),
+
+                          // Toggle 2: Override Partner Ads (تجاوز كود الشريك)
+                          Container(
+                            margin: const EdgeInsets.symmetric(vertical: 6),
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: _overridePartnerAd ? const Color(0xFF2A1B0A) : const Color(0xFF0F131E),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: _overridePartnerAd ? const Color(0xFFD4AF37) : const Color(0xFF2A2A3D)),
+                            ),
+                            child: SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('تجاوز وحجب كود الشريك (لوحة التحليلات)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFE5A958))),
+                              subtitle: const Text('عند التفعيل، يتم حجب إعلان الشريك نهائياً وعرض إعلانك الخاص دون أن يظهر أي شيء في لوحته', style: TextStyle(fontSize: 10.5, color: Colors.white70)),
+                              value: _overridePartnerAd,
+                              onChanged: (v) => setState(() => _overridePartnerAd = v),
+                              activeThumbColor: const Color(0xFFD4AF37),
+                            ),
+                          ),
+
+                          const SizedBox(height: 10),
+                          const Text('كود إعلان المشغل (HTML / JS Script):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70)),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: _ownerAdHtmlCtrl,
+                            maxLines: 4,
+                            style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: '<!-- ضع كود إعلانك هنا (Adsterra / Monetag / Custom HTML) -->',
+                              hintStyle: const TextStyle(fontSize: 11, color: Colors.white38),
+                              filled: true,
+                              fillColor: const Color(0xFF0B0E14),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                            ),
+                          ),
+
+                          const SizedBox(height: 8),
+                          const Text('أو رابط إعلان المشغل المباشر (URL):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70)),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: _ownerAdUrlCtrl,
+                            style: const TextStyle(fontSize: 12, color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'https://example.com/ad',
+                              hintStyle: const TextStyle(fontSize: 11, color: Colors.white38),
+                              filled: true,
+                              fillColor: const Color(0xFF0B0E14),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                            ),
+                          ),
+
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Text('ظهور زر التخطي بعد:', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                              const SizedBox(width: 8),
+                              DropdownButton<int>(
+                                value: _ownerSkipDelay,
+                                dropdownColor: const Color(0xFF141824),
+                                style: const TextStyle(color: Color(0xFFD4AF37), fontWeight: FontWeight.bold),
+                                items: [3, 5, 7, 10, 15].map((s) => DropdownMenuItem(value: s, child: Text('$s ثوانٍ'))).toList(),
+                                onChanged: (v) { if (v != null) setState(() => _ownerSkipDelay = v); },
+                              ),
+                            ],
+                          ),
+
+                          const Divider(color: Color(0xFF262D3D), height: 24),
+
+                          // ── Banner Ad Section (بنر غير مزعج) ──
+                          Row(
+                            children: [
+                              const Icon(Icons.view_stream_rounded, color: Color(0xFF4A90D9), size: 18),
+                              const SizedBox(width: 6),
+                              const Text('شريط إعلاني ثابت غير مزعج (Banner)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
+                            ],
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('تفعيل شريط البنر الإعلاني بالتطبيق', style: TextStyle(fontSize: 12.5, color: Colors.white)),
+                            subtitle: const Text('شريط أنيق أسفل الصفحة الرئيسية لا يعطل التصفح ولا يظهر بالمشغل', style: TextStyle(fontSize: 10.5, color: Color(0xFF8E95AA))),
+                            value: _bannerAdEnabled,
+                            onChanged: (v) => setState(() => _bannerAdEnabled = v),
+                            activeThumbColor: const Color(0xFF4A90D9),
+                          ),
+
+                          if (_bannerAdEnabled) ...[
+                            const SizedBox(height: 6),
+                            const Text('كود البنر (HTML / JS):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
+                            const SizedBox(height: 4),
+                            TextField(
+                              controller: _bannerHtmlCtrl,
+                              maxLines: 2,
+                              style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Colors.white),
+                              decoration: InputDecoration(
+                                hintText: '<script ...> أو <a href=...><img .../></a>',
+                                hintStyle: const TextStyle(fontSize: 11, color: Colors.white38),
+                                filled: true,
+                                fillColor: const Color(0xFF0B0E14),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text('أو رابط صفحة البنر (URL):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
+                            const SizedBox(height: 4),
+                            TextField(
+                              controller: _bannerUrlCtrl,
+                              style: const TextStyle(fontSize: 12, color: Colors.white),
+                              decoration: InputDecoration(
+                                hintText: 'https://example.com/banner',
+                                hintStyle: const TextStyle(fontSize: 11, color: Colors.white38),
+                                filled: true,
+                                fillColor: const Color(0xFF0B0E14),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
+                              ),
+                            ),
+                          ],
+
+                          const SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFD4AF37),
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              elevation: 4,
+                            ),
+                            icon: _isSavingOwnerAds
+                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                                : const Icon(Icons.save_rounded, size: 20),
+                            label: Text(
+                              _isSavingOwnerAds ? 'جارٍ الحفظ السحابي...' : 'حفظ وتفعيل إعلانات المالك فوراً',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: _isSavingOwnerAds ? null : _saveOwnerAdSettings,
+                          ),
+                        ],
+                      ),
                     ),
 
                     const SizedBox(height: 20),

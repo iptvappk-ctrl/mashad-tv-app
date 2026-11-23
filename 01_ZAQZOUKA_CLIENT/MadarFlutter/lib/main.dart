@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'services/native_scraper_service.dart';
 import 'src/firebase_quota_guard.dart';
+import 'src/banner_ad_widget.dart';
 part 'src/app_shared.dart';
 part 'src/catalog.dart';
 part 'src/catalog_widgets.dart';
@@ -34,11 +35,38 @@ class MyApp extends ZakzoukaFlutterApp {
   const MyApp({super.key});
 }
 
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+void openMediaDetailPage(MediaItem item) {
+  appNavigatorKey.currentState?.push<void>(
+    PageRouteBuilder<void>(
+      transitionDuration: const Duration(milliseconds: 250),
+      reverseTransitionDuration: const Duration(milliseconds: 190),
+      pageBuilder: (_, animation, __) => FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, .025),
+            end: Offset.zero,
+          ).animate(
+            CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            ),
+          ),
+          child: DetailPage(item: item, onOpenItem: openMediaDetailPage),
+        ),
+      ),
+    ),
+  );
+}
+
 class ZakzoukaFlutterApp extends StatelessWidget {
   const ZakzoukaFlutterApp({super.key});
 
   @override
   Widget build(BuildContext context) => MaterialApp(
+    navigatorKey: appNavigatorKey,
     debugShowCheckedModeBanner: false,
     title: 'زقزوقة',
     theme: ThemeData(
@@ -150,6 +178,43 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
         isDownloading: true,
         downloadProgress: prog,
       );
+    });
+
+    _native.setMethodCallHandler((call) async {
+      if (call.method == 'navigate.mediaDetail') {
+        if (call.arguments is Map) {
+          _handleDeepLink(Map<dynamic, dynamic>.from(call.arguments as Map));
+        }
+      }
+      return null;
+    });
+
+    Timer(const Duration(milliseconds: 700), () async {
+      try {
+        final link = await _native.invokeMapMethod<String, dynamic>('deepLink.check');
+        if (link != null && link.isNotEmpty) {
+          _handleDeepLink(link);
+        }
+      } catch (_) {}
+    });
+  }
+
+  void _handleDeepLink(Map<dynamic, dynamic> link) {
+    final pageUrl = link['pageUrl']?.toString() ?? '';
+    final title = link['title']?.toString() ?? '';
+    if (pageUrl.isEmpty && title.isEmpty) return;
+
+    final item = MediaItem(
+      id: (link['id']?.toString() ?? '').ifEmpty(pageUrl),
+      title: title.ifEmpty('عمل فني'),
+      pageUrl: pageUrl,
+      isSeries: link['isSeries'] == true,
+      poster: link['poster']?.toString() ?? '',
+      year: link['year']?.toString() ?? '',
+    );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      openMediaDetailPage(item);
     });
   }
 

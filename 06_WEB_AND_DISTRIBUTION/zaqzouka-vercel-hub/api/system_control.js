@@ -170,6 +170,30 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, action: 'restore', state: payload });
       }
 
+      if (action === 'broadcast_notification') {
+        const { notification } = req.body || {};
+        if (!notification || !notification.title) {
+          return res.status(400).json({ error: 'Missing notification payload or title' });
+        }
+        const notifId = notification.id || Date.now();
+        const payload = {
+          id: notifId,
+          title: notification.title.trim(),
+          body: (notification.body || notification.message || '').trim(),
+          deepLinkType: notification.deepLinkType || (notification.targetPageUrl ? 'media_detail' : 'general'),
+          targetId: notification.targetId || '',
+          targetTitle: notification.targetTitle || '',
+          targetPageUrl: notification.targetPageUrl || '',
+          isSeries: notification.isSeries === true,
+          poster: notification.poster || '',
+          year: notification.year || '',
+          createdAt: now,
+        };
+        await ref.child('broadcast_notification').set(payload);
+        await db.ref(`broadcast_notifications/history/${notifId}`).set(payload);
+        return res.status(200).json({ success: true, action: 'broadcast_notification', notification: payload });
+      }
+
       return res.status(400).json({ error: 'Invalid action.' });
     } catch (err) {
       return res.status(500).json({ error: err.message });

@@ -38,7 +38,8 @@ class SecurityVault {
     await prefs.setString(_kPinKey, hashPin(newPin));
   }
 
-  /// XOR + SHA-256 symmetric cipher for local offline backup storage
+  // ignore: unused_element
+  /// XOR + SHA-256 symmetric cipher for local offline backup storage (reserved for future use)
   static String _xorCipher(String text, String key) {
     final keyBytes = sha256.convert(utf8.encode(key)).bytes;
     final textBytes = utf8.encode(text);
@@ -49,6 +50,7 @@ class SecurityVault {
     return base64.encode(output);
   }
 
+  // ignore: unused_element
   static String _xorDecipher(String base64Text, String key) {
     final keyBytes = sha256.convert(utf8.encode(key)).bytes;
     final cipherBytes = base64.decode(base64Text);

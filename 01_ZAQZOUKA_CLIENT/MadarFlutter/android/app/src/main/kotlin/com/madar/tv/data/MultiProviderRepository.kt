@@ -547,14 +547,47 @@ object MultiProviderRepository {
             titleSelectors = listOf("h2", "h3", ".entry-title", ".title", "[title]"),
         ),
 
-        // ── 11. قصة عشق (Esheeq) ───────────────────────────────────────
-        // Live-tested 2026-11-14: 33 Turkish series ✅
+        // ── آرا دراما (Aradrama - كوري وأسيوي أساسي) ──────────────────
+        ProviderConfig(
+            id = "aradrama",
+            name = "آرا دراما",
+            baseUrl = "https://aradramatv.cc",
+            mirrorDomains = listOf("https://aradramatv.com"),
+            moviesPath = "/category/%d8%a7%d9%84%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%84%d8%a2%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/page/{page}/",
+            seriesPath = "/category/serie/korea/page/{page}/",
+            searchPath = "/?s={q}",
+            cardSelectors = listOf(
+                "article a", ".post-item a", "div.post a", "article.post a", "h2.entry-title a",
+            ),
+            titleSelectors = listOf("h2.entry-title", "h2", "h3", ".title", "[title]"),
+            isPrimary = true,
+        ),
+
+        // ── اسيا تو تي في (Asia2tv - كوري وأسيوي أساسي) ────────────────
+        ProviderConfig(
+            id = "asia2tv",
+            name = "اسيا تو تي في",
+            baseUrl = "https://asia2tv.com",
+            mirrorDomains = listOf("https://asia2tv.com"),
+            moviesPath = "/catalog?country=legacy-term-125&page={page}",
+            seriesPath = "/catalog?country=legacy-term-125&page={page}",
+            searchPath = "/catalog?search={q}",
+            cardSelectors = listOf(
+                "a[href*='/movie/']", "a[href*='/series/']", "a[href*='/drama/']",
+                ".movie-item a", ".post-item a", "article a",
+            ),
+            titleSelectors = listOf("h2", "h3", ".title", "[title]"),
+            isPrimary = true,
+        ),
+
+        // ── 11. قصة عشق (Esheeq - تركي أساسي) ──────────────────────────
+        // Live-tested: Turkish series & movies primary source
         // Uses shot90.com base64 redirect — AdBypassHelper.decodeShot90Url() handles this
         ProviderConfig(
             id = "esheeq",
             name = "قصة عشق",
             baseUrl = "https://qesset.net",
-            mirrorDomains = listOf("https://qeseh.net"),
+            mirrorDomains = listOf("https://qeseh.net", "https://3sk.tv", "https://3sk.biz"),
             moviesPath = "/category/yeni-filmler/page/{page}/",
             seriesPath = "/son-bolumler/page/{page}/",
             searchPath = "/?s={q}",
@@ -563,6 +596,7 @@ object MultiProviderRepository {
                 "div.thumb a", ".video-card a",
             ),
             titleSelectors = listOf("h2", "h3", ".title", ".entry-title"),
+            isPrimary = true,
         ),
 
         // ── 12. موفيز لاند (Movizland) ─────────────────────────────────
@@ -828,7 +862,9 @@ object MultiProviderRepository {
 
             url.contains("brstej") || url.contains("prstej") -> PROVIDERS.firstOrNull { it.id == "prestige" }
 
-            url.contains("q-ask") || url.contains("3sk") -> PROVIDERS.firstOrNull { it.id == "esheeq" }
+            url.contains("aradrama") -> PROVIDERS.firstOrNull { it.id == "aradrama" }
+            url.contains("asia2tv") -> PROVIDERS.firstOrNull { it.id == "asia2tv" }
+            url.contains("qesset") || url.contains("qeseh") || url.contains("q-ask") || url.contains("3sk") -> PROVIDERS.firstOrNull { it.id == "esheeq" }
 
             url.contains("c4u") -> PROVIDERS.firstOrNull { it.id == "cima4u" }
 
@@ -1328,6 +1364,7 @@ object MultiProviderRepository {
      */
     private fun categoryFeeds(categoryId: String): List<CategoryFeed> = when (categoryId) {
         "turkish_series" -> listOf(
+            CategoryFeed("esheeq", "/son-bolumler/", "/son-bolumler/page/{page}/"),
             CategoryFeed("esheeq", "/", "/page/{page}/"),
             CategoryFeed("wecima", "/category.php?cat=turkish-series", "/category.php?cat=turkish-series&page={page}"),
             CategoryFeed("akwam", "/category/مسلسلات-تركي", "/category/مسلسلات-تركي/page/{page}"),
@@ -1335,6 +1372,7 @@ object MultiProviderRepository {
             CategoryFeed("egydead", "/category/مسلسلات-تركية/", "/category/مسلسلات-تركية/page/{page}/"),
         )
         "turkish_movies" -> listOf(
+            CategoryFeed("esheeq", "/category/yeni-filmler/", "/category/yeni-filmler/page/{page}/"),
             CategoryFeed("wecima", "/category.php?cat=turkish-films", "/category.php?cat=turkish-films&page={page}"),
             CategoryFeed("akwam", "/category/افلام-تركي", "/category/افلام-تركي/page/{page}"),
             CategoryFeed("egybest", "/movies/turkish/?page=1", "/movies/turkish/?page={page}"),
@@ -1371,6 +1409,9 @@ object MultiProviderRepository {
             CategoryFeed("spacemov", "/tv-series/page/{page}/"),
         )
         "asian_series" -> listOf(
+            CategoryFeed("aradrama", "/category/serie/korea/", "/category/serie/korea/page/{page}/"),
+            CategoryFeed("aradrama", "/category/serie/", "/category/serie/page/{page}/"),
+            CategoryFeed("asia2tv", "/catalog?country=legacy-term-125", "/catalog?country=legacy-term-125&page={page}"),
             CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/page/{page}/"),
             CategoryFeed("akwam", "/category/مسلسلات-أسيوي", "/category/مسلسلات-أسيوي/page/{page}"),
             CategoryFeed("egydead", "/category/مسلسلات-اسيوية/", "/category/مسلسلات-اسيوية/page/{page}/"),
@@ -1393,6 +1434,8 @@ object MultiProviderRepository {
             CategoryFeed("egydead", "/category/افلام-مدبلجة/", "/category/افلام-مدبلجة/page/{page}/"),
         )
         "asian_movies" -> listOf(
+            CategoryFeed("aradrama", "/category/%d8%a7%d9%84%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%84%d8%a2%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/", "/category/%d8%a7%d9%84%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%84%d8%a2%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/page/{page}/"),
+            CategoryFeed("asia2tv", "/catalog?country=legacy-term-125", "/catalog?country=legacy-term-125&page={page}"),
             CategoryFeed("akwam", "/category/افلام-اسيوي", "/category/افلام-اسيوي/page/{page}"),
             CategoryFeed("lodynet", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/page/{page}/"),
             CategoryFeed("egydead", "/category/افلام-اسيوية/", "/category/افلام-اسيوية/page/{page}/"),
@@ -1823,6 +1866,30 @@ object MultiProviderRepository {
                                         }
                                     }
                                 } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 0b. Aradrama dedicated server extractor
+            if (pageUrl.contains("aradrama")) {
+                try {
+                    val html = fetchHtml(pageUrl, baseUrl)
+                    val doc = Jsoup.parse(html, pageUrl)
+                    for (a in doc.select("a[href], [data-embed], [data-url], iframe[src]")) {
+                        val href = a.attr("abs:src").ifBlank { a.attr("data-embed").ifBlank { a.attr("data-url").ifBlank { a.attr("abs:href") } } }.trim()
+                        val text = a.text().trim()
+                        if (isServerCandidateUrl(href) && (
+                            href.contains("ok.ru") || href.contains("vidmoly") || href.contains("filemoon") ||
+                            href.contains("bysevepoin") || href.contains("minochinos") || href.contains("vkvideo") ||
+                            href.contains("dood") || href.contains("playmogo") || href.contains("hgcloud") ||
+                            href.contains("luluvid") || href.contains("streamtape") || href.contains("mixdrop") ||
+                            href.contains("embed")
+                        )) {
+                            if (servers.none { it.embedUrl == href }) {
+                                val sName = text.ifBlank { "سيرفر ${servers.size + 1}" }
+                                servers += ArabseedServer("سيرفر ${servers.size + 1} ($sName)", href)
                             }
                         }
                     }

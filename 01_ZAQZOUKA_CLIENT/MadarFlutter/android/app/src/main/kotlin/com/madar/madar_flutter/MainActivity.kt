@@ -22,10 +22,13 @@ import com.madar.tv.notifications.NotificationWorkScheduler
 
 class MainActivity : FlutterActivity() {
     private lateinit var inAppUpdateManager: InAppUpdateManager
+    private var pendingDeepLink: Map<String, Any?>? = null
+    private var nativeChannel: MethodChannel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         inAppUpdateManager = InAppUpdateManager(this)
+        extractDeepLink(intent)
         runCatching { NotificationCenter.createChannels(applicationContext) }
             .onFailure { android.util.Log.e(STARTUP_TAG, "Notification channels unavailable", it) }
         runCatching { NotificationWorkScheduler.schedule(applicationContext) }
@@ -34,12 +37,68 @@ class MainActivity : FlutterActivity() {
             .onFailure { android.util.Log.e(STARTUP_TAG, "Notification permission request failed", it) }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        extractDeepLink(intent)
+        pendingDeepLink?.let { deepLink ->
+            nativeChannel?.invokeMethod("navigate.mediaDetail", deepLink)
+        }
+    }
+
+    private fun extractDeepLink(intent: Intent?) {
+        if (intent == null) return
+        val deepLinkType = intent.getStringExtra("extra_deep_link") ?: return
+        val map = mutableMapOf<String, Any?>(
+            "deepLinkType" to deepLinkType,
+            "id" to (intent.getStringExtra("extra_item_id") ?: ""),
+            "title" to (intent.getStringExtra("extra_item_title") ?: ""),
+            "pageUrl" to (intent.getStringExtra("extra_item_page_url") ?: ""),
+            "isSeries" to intent.getBooleanExtra("extra_is_series", false),
+            "poster" to (intent.getStringExtra("extra_poster") ?: ""),
+            "year" to (intent.getStringExtra("extra_year") ?: "")
+        )
+        pendingDeepLink = map
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val mediaBridge = FlutterMediaBridge(applicationContext)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "madar/native")
-            .setMethodCallHandler { call, result ->
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "madar/native")
+        nativeChannel = channel
+        channel.setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "deepLink.check" -> {
+                        val link = pendingDeepLink
+                        pendingDeepLink = null
+                        result.success(link)
+                    }
+                    "notifications.postMedia" -> {
+                        val title = call.argument<String>("title").orEmpty()
+                        val body = call.argument<String>("body").orEmpty()
+                        val itemId = call.argument<String>("itemId").orEmpty()
+                        val itemTitle = call.argument<String>("itemTitle").orEmpty()
+                        val pageUrl = call.argument<String>("pageUrl").orEmpty()
+                        val isSeries = call.argument<Boolean>("isSeries") ?: false
+                        val poster = call.argument<String>("poster").orEmpty()
+                        val year = call.argument<String>("year").orEmpty()
+                        val notifId = (pageUrl.hashCode() and 0x7fffffff) % 90000 + 10000
+                        val posted = NotificationCenter.postMediaNotification(
+                            context = applicationContext,
+                            id = notifId,
+                            channel = NotificationCenter.CONTENT_CHANNEL,
+                            title = title,
+                            body = body,
+                            itemId = itemId,
+                            itemTitle = itemTitle,
+                            pageUrl = pageUrl,
+                            isSeries = isSeries,
+                            poster = poster,
+                            year = year,
+                            highPriority = true,
+                        )
+                        result.success(posted)
+                    }
                     "cache.read" -> {
                         val key = call.argument<String>("key").orEmpty()
                         result.success(getSharedPreferences("madar_flutter_cache", MODE_PRIVATE).getString(key, null))
@@ -58,6 +117,17 @@ class MainActivity : FlutterActivity() {
                     "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), call.argument("backupSourcesJson"), call.argument<Boolean>("live") ?: false, result)
                     "player.openExternal" -> openExternalPlayer(call.argument("url"), call.argument("title"), result)
                     "player.store" -> openPlayerStore(result)
+                    "system.openUrl" -> {
+                        val targetUrl = call.argument<String>("url").orEmpty()
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
                     "player.status" -> {
                         val code = inAppUpdateManager.getInstalledPlayerVersionCode()
                         result.success(

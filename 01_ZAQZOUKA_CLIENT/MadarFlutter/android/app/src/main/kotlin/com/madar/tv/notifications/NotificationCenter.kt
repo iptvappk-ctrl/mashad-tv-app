@@ -68,6 +68,55 @@ internal object NotificationCenter {
         )
     }
 
+    fun postMediaNotification(
+        context: Context,
+        id: Int,
+        channel: String,
+        title: String,
+        body: String,
+        itemId: String,
+        itemTitle: String,
+        pageUrl: String,
+        isSeries: Boolean,
+        poster: String = "",
+        year: String = "",
+        highPriority: Boolean = true
+    ): Boolean {
+        if (!isChannelAllowed(context, channel)) return false
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("extra_deep_link", "media_detail")
+            putExtra("extra_item_id", itemId)
+            putExtra("extra_item_title", itemTitle)
+            putExtra("extra_item_page_url", pageUrl)
+            putExtra("extra_is_series", isSeries)
+            putExtra("extra_poster", poster)
+            putExtra("extra_year", year)
+        }
+        val pendingIntent = launchIntent?.let {
+            android.app.PendingIntent.getActivity(
+                context,
+                id,
+                it,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+            )
+        }
+        val notification = NotificationCompat.Builder(context, channel)
+            .setSmallIcon(R.drawable.ic_notification_brand)
+            .setLargeIcon(BitmapFactory.decodeResource(context.resources, R.drawable.ic_launcher_foreground))
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(if (highPriority) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        return runCatching {
+            NotificationManagerCompat.from(context).notify(id, notification)
+            true
+        }.getOrDefault(false)
+    }
+
     fun post(context: Context, id: Int, channel: String, title: String, body: String, highPriority: Boolean = false): Boolean {
         if (!isChannelAllowed(context, channel)) return false
         val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {

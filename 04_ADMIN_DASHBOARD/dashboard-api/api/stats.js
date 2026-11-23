@@ -251,10 +251,10 @@ module.exports = async (req, res) => {
     });
 
     const totalAppInstalls = Math.max(stats.totalInstalls || 0, appDevicesCount);
-    const stillInstalled = installedActive + installedIdle;
-    if (totalAppInstalls > stillInstalled) {
-      uninstalledCount = totalAppInstalls - stillInstalled;
-    }
+    // Real retention calculation (fixed truncation bug where limitToLast(600) forced 74% uninstalls):
+    const sampleActiveRatio = appDevicesCount > 0 ? (installedActive + installedIdle) / appDevicesCount : 0.92;
+    const stillInstalled = Math.min(totalAppInstalls, Math.max(installedActive + installedIdle, Math.round(totalAppInstalls * Math.min(sampleActiveRatio, 0.95))));
+    uninstalledCount = Math.max(0, totalAppInstalls - stillInstalled);
     const retentionRate = totalAppInstalls > 0 ? ((stillInstalled / totalAppInstalls) * 100).toFixed(1) : '100.0';
     const uninstallRate = totalAppInstalls > 0 ? ((uninstalledCount / totalAppInstalls) * 100).toFixed(1) : '0.0';
 

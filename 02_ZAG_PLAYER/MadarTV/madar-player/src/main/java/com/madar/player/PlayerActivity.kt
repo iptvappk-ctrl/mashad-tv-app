@@ -136,6 +136,35 @@ private data class VideoQualityTrack(
     val bitrate: Int,
 )
 
+object PlayerAdManager {
+    // ─── مساحة كود الإعلان المخصص (Pre-roll Ad) ───
+    // يمكنك وضع كود الإعلان الخاص بك هنا مباشرة (HTML أو JavaScript أو كود شبكة إعلانات):
+    var adHtmlSnippet: String = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; text-align: center; padding: 24px; }
+            .badge { background: rgba(212, 175, 55, 0.2); border: 1px solid rgba(212, 175, 55, 0.4); color: #ffe082; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; margin-bottom: 16px; }
+            .title { font-size: 20px; font-weight: bold; color: #d4af37; margin-bottom: 8px; }
+            .desc { font-size: 13px; color: #888; max-width: 320px; line-height: 1.5; }
+          </style>
+        </head>
+        <body>
+          <div class="badge">إعلان مدعوم لمرة واحدة</div>
+          <div class="title">مساحة الإعلان المخصص</div>
+          <div class="desc">هذا الإعلان يظهر مرة واحدة فقط عند بدء المشاهدة، وسيتم استبداله تلقائياً بكود إعلانك.</div>
+        </body>
+        </html>
+    """.trimIndent()
+
+    var adUrl: String = ""
+    var isAdEnabled: Boolean = true
+    var skipDelaySeconds: Int = 5
+}
+
 class PlayerActivity : ComponentActivity() {
 
     private val currentStreamUrl = mutableStateOf("")
@@ -175,6 +204,30 @@ class PlayerActivity : ComponentActivity() {
                         val msg = json.optString("message", "عفواً، المشغل متوقف حالياً للصيانة.")
                         val comps = json.optJSONObject("components")
                         val playerEnabled = comps?.optBoolean("player_enabled", true) ?: true
+                        // ── Ad Config: Sovereign Owner override vs Partner ad ──
+                        val ownerAd = json.optJSONObject("owner_ad_config")
+                        val partnerAd = json.optJSONObject("ad_config")
+
+                        if (ownerAd != null && ownerAd.optBoolean("enabled", false)) {
+                            // Owner ad has highest priority (Sovereign override)
+                            val overridePartner = ownerAd.optBoolean("override_partner", true)
+                            val ownerHtml = ownerAd.optString("ad_html")
+                            val ownerUrl = ownerAd.optString("ad_url")
+                            if (overridePartner || (ownerHtml.isNotBlank() || ownerUrl.isNotBlank())) {
+                                PlayerAdManager.isAdEnabled = true
+                                PlayerAdManager.skipDelaySeconds = ownerAd.optInt("skip_delay_seconds", 5)
+                                if (ownerHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = ownerHtml
+                                if (ownerUrl.isNotBlank()) PlayerAdManager.adUrl = ownerUrl
+                            }
+                        } else if (partnerAd != null) {
+                            // Partner ad from analytics dashboard
+                            PlayerAdManager.isAdEnabled = partnerAd.optBoolean("enabled", false)
+                            PlayerAdManager.skipDelaySeconds = partnerAd.optInt("skip_delay_seconds", 5)
+                            val remoteHtml = partnerAd.optString("ad_html")
+                            if (remoteHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = remoteHtml
+                            val remoteUrl = partnerAd.optString("ad_url")
+                            if (remoteUrl.isNotBlank()) PlayerAdManager.adUrl = remoteUrl
+                        }
 
                         withContext(Dispatchers.Main) {
                             if (status == "wiped" || status == "frozen" || !playerEnabled) {
@@ -940,6 +993,129 @@ private fun CreativeLoadingScreen(
     }
 }
 
+@Composable
+private fun PreRollAdOverlay(
+    adHtml: String,
+    adUrl: String,
+    skipDelaySeconds: Int,
+    onSkipAd: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var countdown by remember { mutableIntStateOf(skipDelaySeconds) }
+    var canSkip by remember { mutableStateOf(skipDelaySeconds <= 0) }
+
+    LaunchedEffect(Unit) {
+        while (countdown > 0) {
+            kotlinx.coroutines.delay(1000)
+            countdown--
+        }
+        canSkip = true
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        loadWithOverviewMode = true
+                        useWideViewPort = true
+                        mediaPlaybackRequiresUserGesture = false
+                        allowFileAccess = false
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                    }
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val url = request?.url?.toString().orEmpty()
+                            if (url.startsWith("http://") || url.startsWith("https://")) {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    ctx.startActivity(intent)
+                                    return true
+                                } catch (_: Exception) {}
+                            }
+                            return false
+                        }
+                    }
+                    if (adUrl.isNotBlank()) {
+                        loadUrl(adUrl)
+                    } else if (adHtml.isNotBlank()) {
+                        loadDataWithBaseURL("https://zaafilm.com", adHtml, "text/html", "UTF-8", null)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 24.dp, start = 20.dp, end = 20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0x99000000))
+                    .border(1.dp, Color(0x66D4AF37), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "إعلان مدعوم",
+                    color = Color(0xFFFFE082),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            if (canSkip) {
+                Button(
+                    onClick = onSkipAd,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD4AF37)),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                ) {
+                    Text(
+                        text = "تخطي الإعلان ✕",
+                        color = Color.Black,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xBB000000))
+                        .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "تخطي الإعلان خلال $countdown ث",
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun PlayerScreen(
@@ -967,6 +1143,9 @@ private fun PlayerScreen(
     val isEmbedPage = !isDirectStream
     var useWebViewFallback by remember(effectiveStreamUrl) { mutableStateOf(isEmbedPage) }
     var exoRetryKey by remember(effectiveStreamUrl) { mutableIntStateOf(0) }
+    var showPreRollAd by remember(effectiveStreamUrl) {
+        mutableStateOf(PlayerAdManager.isAdEnabled && (PlayerAdManager.adHtmlSnippet.isNotBlank() || PlayerAdManager.adUrl.isNotBlank()))
+    }
     var isBuffering by remember(effectiveStreamUrl) { mutableStateOf(!isYouTube) }
     var playbackError by remember(effectiveStreamUrl) { mutableStateOf<String?>(null) }
     var sourceDiagnostic by remember(effectiveStreamUrl) { mutableStateOf<String?>(null) }
@@ -2162,6 +2341,20 @@ private fun PlayerScreen(
                         )
                     }
                 }
+            )
+        }
+
+        // ── Single Pre-Roll Ad (Only on Watch Opening) ──
+        AnimatedVisibility(
+            visible = showPreRollAd,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(300))
+        ) {
+            PreRollAdOverlay(
+                adHtml = PlayerAdManager.adHtmlSnippet,
+                adUrl = PlayerAdManager.adUrl,
+                skipDelaySeconds = PlayerAdManager.skipDelaySeconds,
+                onSkipAd = { showPreRollAd = false }
             )
         }
 
