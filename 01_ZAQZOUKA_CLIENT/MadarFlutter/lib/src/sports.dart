@@ -1795,6 +1795,9 @@ Future<void> _launchPlayer(
     event: 'start',
   );
 
+  final status = ZaqzoukaQuotaGuard.instance.currentStatus;
+  
+
   final opened = await NativeBridge.openPlayer(
     url: url,
     title: title,

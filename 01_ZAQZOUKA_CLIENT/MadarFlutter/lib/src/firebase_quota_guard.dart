@@ -117,17 +117,57 @@ class SystemStatus {
   bool get isForcedUpdate => isUpdateActive && (appUpdate?['forced'] == true) && latestUpdateVersionCode > 84;
   bool get isOptionalUpdate => isUpdateActive && (appUpdate?['forced'] != true) && latestUpdateVersionCode > 84;
 
-  bool get isBannerAdEnabled {
+  String get activeStartAppId {
     if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      return ownerAdConfig!['banner_enabled'] == true;
+      final source = (ownerAdConfig!['active_source'] ?? 'owner').toString().toLowerCase();
+      if (source == 'owner') {
+        return (ownerAdConfig!['owner_app_id'] ?? '210353039').toString().trim();
+      } else if (source == 'partner') {
+        final pid = ownerAdConfig!['partner_app_id'] ?? adConfig?['app_id'] ?? adConfig?['ad_code'];
+        return (pid ?? '210293961').toString().trim();
+      } else if (source == 'disabled') {
+        return '';
+      }
     }
-    if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
-      return true;
+    final partnerId = adConfig?['app_id'] ?? adConfig?['ad_code'];
+    if (partnerId != null && partnerId.toString().trim().isNotEmpty) {
+      return partnerId.toString().trim();
     }
-    if (adConfig != null && adConfig!['banner_enabled'] == true) {
-      return true;
+    return '210353039';
+  }
+
+  bool get isStartAppBannerEnabled {
+    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
+      final source = (ownerAdConfig!['active_source'] ?? 'owner').toString().toLowerCase();
+      if (source == 'disabled') return false;
+      return ownerAdConfig!['banner_enabled'] != false;
     }
-    return false;
+    if (adConfig != null && adConfig!['banner_enabled'] == false) return false;
+    return true;
+  }
+
+  bool get isStartAppVideoEnabled {
+    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
+      final source = (ownerAdConfig!['active_source'] ?? 'owner').toString().toLowerCase();
+      if (source == 'disabled') return false;
+      return ownerAdConfig!['video_enabled'] != false;
+    }
+    if (adConfig != null && adConfig!['video_enabled'] == false) return false;
+    return true;
+  }
+
+  bool get isBannerAdEnabled {
+    if (status != 'active') return false;
+    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
+      return ownerAdConfig!['banner_enabled'] != false;
+    }
+    if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == false) {
+      return false;
+    }
+    if (adConfig != null && adConfig!['banner_enabled'] == false) {
+      return false;
+    }
+    return true;
   }
 
   String get bannerHtml {
@@ -287,9 +327,11 @@ class ZaqzoukaQuotaGuard {
   // ─────────────────────────────────────
 
   Future<SystemStatus?> _fetchVercel() async {
-    // Fetch owner_ad_config in parallel (always from Firebase directly)
+    // Fetch owner_ad_config directly from Firebase
     Map<String, dynamic>? ownerAdCfg;
-    _fetchOwnerAdConfig().then((v) => ownerAdCfg = v).catchError((_) {});
+    try {
+      ownerAdCfg = await _fetchOwnerAdConfig();
+    } catch (_) {}
 
     for (final url in _Cfg.vercelStatusUrls) {
       try {
@@ -301,7 +343,6 @@ class ZaqzoukaQuotaGuard {
             .timeout(_Cfg.networkTimeout);
         if (response.statusCode == 200) {
           final j = jsonDecode(response.body) as Map<String, dynamic>;
-          // Inject owner_ad_config if fetched
           if (ownerAdCfg != null) j['owner_ad_config'] = ownerAdCfg;
           final s = SystemStatus.fromJson(j, source: 'vercel_api');
           return s;
@@ -397,6 +438,10 @@ class ZaqzoukaQuotaGuard {
   void _setMemCache(SystemStatus s) {
     _memCache = s;
     _memCacheTime = DateTime.now();
+    if (s.activeStartAppId.isNotEmpty) {
+      try {
+      } catch (_) {}
+    }
   }
 
   void _startPolling() {

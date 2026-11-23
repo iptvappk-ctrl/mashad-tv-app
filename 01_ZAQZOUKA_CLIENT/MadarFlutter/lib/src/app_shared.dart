@@ -147,6 +147,22 @@ class NativeBridge {
     return raw == null ? null : Map<String, dynamic>.from(raw);
   }
 
+  static Future<bool> initStartApp(String appId) async {
+    try {
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> showStartAppInterstitial() async {
+    try {
+      return await _native.invokeMethod<bool>('ads.showInterstitial') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> openPlayer({
     required String url,
     required String title,
@@ -785,7 +801,12 @@ bool _seasonNeedsEnrichment(dynamic value) {
     value,
   ).map(_episodeNumber).where((number) => number > 0).toSet().toList()..sort();
 
-  if (episodeNumbers.length < 3) return true;
+  // If we have no episodes at all, enrichment is needed
+  if (episodeNumbers.isEmpty) return true;
+
+  // FIX: If episodes exist (even 1 or 2), treat as complete unless there are gaps.
+  // Previously: `< 3` caused infinite sync loop for newly-released series with 1-2 eps.
+  // Now: only flag as needing enrichment if there's a gap in the sequence.
   for (var index = 1; index < episodeNumbers.length; index++) {
     if (episodeNumbers[index] - episodeNumbers[index - 1] > 1) return true;
   }

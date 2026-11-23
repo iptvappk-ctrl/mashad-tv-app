@@ -342,7 +342,10 @@ class _DetailPageState extends State<DetailPage> {
         'item': widget.item.toMap(),
         'seasonUrl': seasonUrl,
         'seasonNumber': seasonNumber,
-      });
+      }).timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => null,
+      );
       if (!mounted || request != _request || fresh == null) return;
       final merged = _mergeSeasonBundles(_bundle, fresh);
       if (_seasonBundleSignature(merged) != _seasonBundleSignature(_bundle)) {
@@ -1678,6 +1681,8 @@ class _DetailPageState extends State<DetailPage> {
     );
 
     if (!mounted) return;
+    final adStatus = ZaqzoukaQuotaGuard.instance.currentStatus;
+    
     await _launchPlayer(
       context,
       playableUrl,

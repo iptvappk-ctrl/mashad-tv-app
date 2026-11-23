@@ -30,8 +30,8 @@ android {
         applicationId = "com.madar.player"
         minSdk = 24
         targetSdk = 36
-        versionCode = 29
-        versionName = "1.1.29"
+        versionCode = 30
+        versionName = "1.1.30"
     }
 
     signingConfigs {
@@ -98,4 +98,5 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.dash)
     implementation(libs.androidx.media3.ui)
     implementation(libs.google.play.services.cast.framework)
+    // StartApp SDK removed
 }

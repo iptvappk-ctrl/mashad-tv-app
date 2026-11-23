@@ -4,3 +4,9 @@
 -keep class androidx.work.impl.WorkDatabase_Impl {
     public <init>();
 }
+
+# Start.io SDK
+-keepattributes Exceptions, InnerClasses, Signature, Deprecated, SourceFile, LineNumberTable, *Annotation*, EnclosingMethod
+-dontwarn com.startapp.**
+-keep class com.startapp.** { *; }
+-keep interface com.startapp.** { *; }

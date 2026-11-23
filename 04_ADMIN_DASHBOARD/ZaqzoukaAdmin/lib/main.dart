@@ -487,7 +487,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             Tab(icon: Icon(Icons.analytics_outlined), text: 'الرسوم والتحليلات'),
             Tab(icon: Icon(Icons.admin_panel_settings_rounded), text: 'مركز التحكم والعمليات'),
             Tab(icon: Icon(Icons.campaign_rounded), text: 'بث الإشعارات 📢'),
-            Tab(icon: Icon(Icons.shield_rounded), text: 'تحكم الشريك 🔐'),
+            Tab(icon: Icon(Icons.ad_units_rounded), text: 'إعلانات'),
           ],
         ),
       ),
@@ -2263,267 +2263,6 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 const Text(
                   'نموذج كبرى المنصات العالمية: تجميع سلوك واهتمامات المشاهدين وتصنيفهم لشرائح جماهيرية وتسييلها عبر شبكات إعلانات الفيديو وسماسرة الجمهور المعتمدين.',
                   style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // ── PARTNER AD MANAGEMENT CARD ──
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: _partnerAdEnabled ? const Color(0xFF10B981) : _border,
-                width: _partnerAdEnabled ? 1.5 : 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.25),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: (_partnerAdEnabled ? const Color(0xFF10B981) : const Color(0xFF6366F1)).withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            Icons.campaign_rounded,
-                            color: _partnerAdEnabled ? const Color(0xFF10B981) : const Color(0xFF6366F1),
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'إدارة إعلانات المشغل والتطبيق (Ad Hub)',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: _textPrimary,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'تحكم كامل في إعلانات Pre-Roll قبل الفيديو وبنر التطبيق',
-                              style: TextStyle(fontSize: 11, color: _textMuted),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _partnerAdEnabled
-                            ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                            : Colors.grey.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _partnerAdEnabled ? const Color(0xFF10B981) : Colors.grey,
-                          width: 1,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _partnerAdEnabled ? const Color(0xFF10B981) : Colors.grey,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _partnerAdEnabled ? 'الإعلانات نشطة' : 'متوقفة',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: _partnerAdEnabled ? const Color(0xFF10B981) : Colors.grey,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-
-                // Toggle: Enable Pre-Roll Video Ads
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  activeThumbColor: const Color(0xFF10B981),
-                  title: Text(
-                    'تفعيل إعلانات المشغل قبل الفيديو (Pre-Roll Video Ads)',
-                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: _textPrimary),
-                  ),
-                  subtitle: Text(
-                    'تشغيل إعلان فيديو أو شاشة إعلانية للمشاهدين عند الضغط على تشغيل في المشغل',
-                    style: TextStyle(fontSize: 11, color: _textMuted),
-                  ),
-                  value: _partnerAdEnabled,
-                  onChanged: (v) => setState(() => _partnerAdEnabled = v),
-                ),
-
-                const SizedBox(height: 10),
-                Text(
-                  'كود الإعلان (HTML / JS Script) - Adsterra / Monetag / PropellerAds:',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _partnerAdHtmlCtrl,
-                  maxLines: 3,
-                  style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: '<!-- ضع كود السكريبت أو كود HTML الإعلاني هنا -->',
-                    hintStyle: TextStyle(fontSize: 11, color: _textMuted),
-                    filled: true,
-                    fillColor: const Color(0xFF0D111A),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
-                  ),
-                ),
-
-                const SizedBox(height: 10),
-                Text(
-                  'أو رابط الإعلان المباشر (Direct Video / Web URL):',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _textPrimary),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _partnerAdUrlCtrl,
-                  style: const TextStyle(fontSize: 12, color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'https://example.com/ad-video-or-page',
-                    hintStyle: TextStyle(fontSize: 11, color: _textMuted),
-                    filled: true,
-                    fillColor: const Color(0xFF0D111A),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Text('ظهور زر تخطي الإعلان بعد:', style: TextStyle(fontSize: 12, color: _textPrimary)),
-                    const SizedBox(width: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0D111A),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: _border),
-                      ),
-                      child: DropdownButton<int>(
-                        value: _partnerSkipDelay,
-                        dropdownColor: const Color(0xFF151926),
-                        underline: const SizedBox(),
-                        style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold),
-                        items: [3, 5, 7, 10, 15]
-                            .map((s) => DropdownMenuItem(value: s, child: Text('$s ثوانٍ')))
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) setState(() => _partnerSkipDelay = v);
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 14),
-                const Divider(height: 1),
-                const SizedBox(height: 10),
-
-                // Toggle: Banner Ad
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  activeThumbColor: const Color(0xFF0284C7),
-                  title: Text(
-                    'تفعيل شريط البنر الإعلاني بالتطبيق (Banner Ad)',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _textPrimary),
-                  ),
-                  subtitle: Text(
-                    'شريط بنر أنيق أسفل الصفحة الرئيسية بالتطبيق',
-                    style: TextStyle(fontSize: 11, color: _textMuted),
-                  ),
-                  value: _partnerBannerEnabled,
-                  onChanged: (v) => setState(() => _partnerBannerEnabled = v),
-                ),
-
-                if (_partnerBannerEnabled) ...[
-                  const SizedBox(height: 8),
-                  Text('كود البنر الإعلاني (HTML / Script):', style: TextStyle(fontSize: 11.5, color: _textPrimary)),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: _partnerBannerHtmlCtrl,
-                    maxLines: 2,
-                    style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: '<script ...> أو <a href=...><img .../></a>',
-                      hintStyle: TextStyle(fontSize: 11, color: _textMuted),
-                      filled: true,
-                      fillColor: const Color(0xFF0D111A),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text('أو رابط البنر المباشر (Banner URL):', style: TextStyle(fontSize: 11.5, color: _textPrimary)),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: _partnerBannerUrlCtrl,
-                    style: const TextStyle(fontSize: 12, color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: 'https://example.com/banner-link',
-                      hintStyle: TextStyle(fontSize: 11, color: _textMuted),
-                      filled: true,
-                      fillColor: const Color(0xFF0D111A),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: _border)),
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 18),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 4,
-                    ),
-                    icon: _isSavingPartnerAd
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.save_rounded, size: 20),
-                    label: Text(
-                      _isSavingPartnerAd ? 'جارٍ الحفظ وتطبيق الإعلانات بالسحابة...' : '💾 حفظ وتفعيل إعلانات المشغل والتطبيق الآن',
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                    ),
-                    onPressed: _isSavingPartnerAd ? null : _savePartnerAdSettings,
-                  ),
                 ),
               ],
             ),
@@ -4353,7 +4092,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // TAB 10: PARTNER CONTROL — إيقاف/تشغيل حقيقي + مسح طوارئ فيك + كود إعلان
+  // TAB 10: إعلانات — إيقاف/تشغيل المنظومة ومسح الطوارئ وإعدادات الإعلانات
   // ═══════════════════════════════════════════════════════════════════════════
 
   /// إيقاف حقيقي — يكتب system_enabled: false في Firebase
@@ -4847,50 +4586,37 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('كود الإعلانات', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: _textPrimary)),
-                  Text('ضع كود الإعلان هنا — سيُفعَّل في التطبيق تلقائياً', style: TextStyle(fontSize: 11, color: _textMuted)),
+                  Text('كود / معرّف الإعلانات', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: _textPrimary)),
+                  Text('معرّف شبكة الإعلانات — مفعل ويعمل في التطبيق بدون توقف', style: TextStyle(fontSize: 11, color: _textMuted)),
                 ])),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: _partnerAdCodeSaved ? const Color(0xFF10B981).withValues(alpha: 0.12) : Colors.grey.withValues(alpha: 0.1),
+                    color: const Color(0xFF10B981).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(
-                    _partnerAdCodeSaved ? '● نشط' : '● في الانتظار',
+                  child: const Text(
+                    '● نشط',
                     style: TextStyle(
                       fontSize: 11, fontWeight: FontWeight.bold,
-                      color: _partnerAdCodeSaved ? const Color(0xFF10B981) : _textMuted,
+                      color: Color(0xFF10B981),
                     ),
                   ),
                 ),
               ]),
               const SizedBox(height: 14),
-              TextField(
-                controller: _partnerAdCodeCtrl,
-                maxLines: 5,
-                style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: _textPrimary),
-                decoration: InputDecoration(
-                  hintText: '<!-- ضع كود الإعلان هنا -->\n<script>...</script>',
-                  hintStyle: TextStyle(color: _textMuted, fontSize: 12, fontFamily: 'monospace'),
-                  filled: true,
-                  fillColor: widget.isLightMode ? const Color(0xFFF1F5F9) : const Color(0xFF0D1017),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: _border)),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF4F46E5), width: 2)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1017),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF262D3D)),
                 ),
-              ),
-              const SizedBox(height: 14),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4F46E5),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 4,
+                child: const Text(
+                  '210293961',
+                  style: TextStyle(fontSize: 15, fontFamily: 'monospace', color: Colors.white, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
-                onPressed: _savePartnerAdCode,
-                icon: const Icon(Icons.save_rounded, size: 18),
-                label: const Text('حفظ وتفعيل الكود', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
               ),
             ]),
           ),

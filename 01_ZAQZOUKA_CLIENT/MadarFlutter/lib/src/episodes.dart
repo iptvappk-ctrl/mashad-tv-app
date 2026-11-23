@@ -468,6 +468,8 @@ class _EpisodePageState extends State<EpisodePage> {
       'directStreamUrl': playableUrl,
       'playableVerified': true,
     };
+    final adStatus = ZaqzoukaQuotaGuard.instance.currentStatus;
+    
     await _launchPlayer(
       context,
       playableUrl,

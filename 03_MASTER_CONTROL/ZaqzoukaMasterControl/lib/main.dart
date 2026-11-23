@@ -174,6 +174,12 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   final Map<String, bool> _componentLoading = {};
   Timer? _pollTimer;
 
+  // 👑 Sovereign  Ad Network Switch
+  String _activeAdSource = 'owner'; // 'owner' | 'partner'
+  final TextEditingController _ownerAppIdCtrl = TextEditingController(text: '210353039');
+  final TextEditingController _partnerAppIdCtrl = TextEditingController(text: '210293961');
+  bool _isSwitchingAdSource = false;
+
   // 👑 Sovereign Owner Ad States & Controllers
   bool _ownerAdEnabled = false;
   bool _overridePartnerAd = true;
@@ -240,6 +246,8 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _ownerAppIdCtrl.dispose();
+    _partnerAppIdCtrl.dispose();
     _ownerAdHtmlCtrl.dispose();
     _ownerAdUrlCtrl.dispose();
     _bannerHtmlCtrl.dispose();
@@ -257,6 +265,15 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
     if (!mounted) return;
     final ownerAd = data['owner_ad_config'];
     if (ownerAd is Map) {
+      if (ownerAd['active_source'] != null) {
+        _activeAdSource = ownerAd['active_source'].toString().toLowerCase();
+      }
+      if (ownerAd['owner_app_id'] != null) {
+        _ownerAppIdCtrl.text = ownerAd['owner_app_id'].toString();
+      }
+      if (ownerAd['partner_app_id'] != null) {
+        _partnerAppIdCtrl.text = ownerAd['partner_app_id'].toString();
+      }
       if (!_hasFetchedOwnerAd) {
         _ownerAdEnabled = ownerAd['enabled'] == true;
         _overridePartnerAd = ownerAd['override_partner'] != false;
@@ -341,6 +358,29 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
       }
     });
     _showToast(ok ? 'تم إلغاء التحديث وفك قفل التطبيق لجميع المستخدمين' : 'فشل إلغاء التحديث');
+  }
+
+  Future<void> _switchActiveAdNetwork(String targetSource) async {
+    setState(() => _isSwitchingAdSource = true);
+    final ownerId = _ownerAppIdCtrl.text.trim().isEmpty ? '210353039' : _ownerAppIdCtrl.text.trim();
+    final partnerId = _partnerAppIdCtrl.text.trim().isEmpty ? '210293961' : _partnerAppIdCtrl.text.trim();
+
+    final ok = await MasterApiClient.setStartioControl(
+      activeSource: targetSource,
+      ownerAppId: ownerId,
+      partnerAppId: partnerId,
+      bannerEnabled: true,
+      videoEnabled: true,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _isSwitchingAdSource = false;
+      if (ok) _activeAdSource = targetSource;
+    });
+
+    final name = targetSource == 'owner' ? '👑 إعلانات المالك ($ownerId)' : '🤝 إعلانات الشريك ($partnerId)';
+    _showToast(ok ? '✅ تم بنجاح تحويل شبكة الإعلانات النشطة إلى: $name' : '❌ فشل التحويل، تحقق من الاتصال.');
   }
 
   Future<void> _saveOwnerAdSettings() async {
@@ -827,384 +867,109 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
                           ),
                           const SizedBox(height: 14),
 
-                          // Toggle 1: Enable Owner Ads
-                          SwitchListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('تفعيل إعلانات المشغل الخاصة بك', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-                            subtitle: const Text('تشغيل إعلان قبل الفيديو (Pre-Roll) خاص بك', style: TextStyle(fontSize: 11, color: Color(0xFF8E95AA))),
-                            value: _ownerAdEnabled,
-                            onChanged: (v) => setState(() => _ownerAdEnabled = v),
-                            activeThumbColor: const Color(0xFFD4AF37),
-                          ),
-
-                          // Toggle 2: Override Partner Ads (تجاوز كود الشريك)
+                          // ──  Sovereign Switch (الزرارين) ──
                           Container(
-                            margin: const EdgeInsets.symmetric(vertical: 6),
-                            padding: const EdgeInsets.all(10),
+                            padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: _overridePartnerAd ? const Color(0xFF2A1B0A) : const Color(0xFF0F131E),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: _overridePartnerAd ? const Color(0xFFD4AF37) : const Color(0xFF2A2A3D)),
-                            ),
-                            child: SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('تجاوز وحجب كود الشريك (لوحة التحليلات)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFE5A958))),
-                              subtitle: const Text('عند التفعيل، يتم حجب إعلان الشريك نهائياً وعرض إعلانك الخاص دون أن يظهر أي شيء في لوحته', style: TextStyle(fontSize: 10.5, color: Colors.white70)),
-                              value: _overridePartnerAd,
-                              onChanged: (v) => setState(() => _overridePartnerAd = v),
-                              activeThumbColor: const Color(0xFFD4AF37),
-                            ),
-                          ),
-
-                          const SizedBox(height: 10),
-                          const Text('كود إعلان المشغل (HTML / JS Script):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70)),
-                          const SizedBox(height: 6),
-                          TextField(
-                            controller: _ownerAdHtmlCtrl,
-                            maxLines: 4,
-                            style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: '<!-- ضع كود إعلانك هنا (Adsterra / Monetag / Custom HTML) -->',
-                              hintStyle: const TextStyle(fontSize: 11, color: Colors.white38),
-                              filled: true,
-                              fillColor: const Color(0xFF0B0E14),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                            ),
-                          ),
-
-                          const SizedBox(height: 8),
-                          const Text('أو رابط إعلان المشغل المباشر (URL):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70)),
-                          const SizedBox(height: 6),
-                          TextField(
-                            controller: _ownerAdUrlCtrl,
-                            style: const TextStyle(fontSize: 12, color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: 'https://example.com/ad',
-                              hintStyle: const TextStyle(fontSize: 11, color: Colors.white38),
-                              filled: true,
-                              fillColor: const Color(0xFF0B0E14),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                            ),
-                          ),
-
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              const Text('ظهور زر التخطي بعد:', style: TextStyle(fontSize: 12, color: Colors.white70)),
-                              const SizedBox(width: 8),
-                              DropdownButton<int>(
-                                value: _ownerSkipDelay,
-                                dropdownColor: const Color(0xFF141824),
-                                style: const TextStyle(color: Color(0xFFD4AF37), fontWeight: FontWeight.bold),
-                                items: [3, 5, 7, 10, 15].map((s) => DropdownMenuItem(value: s, child: Text('$s ثوانٍ'))).toList(),
-                                onChanged: (v) { if (v != null) setState(() => _ownerSkipDelay = v); },
-                              ),
-                            ],
-                          ),
-
-                          const Divider(color: Color(0xFF262D3D), height: 24),
-
-                          // ── Banner Ad Section (بنر غير مزعج) ──
-                          Row(
-                            children: [
-                              const Icon(Icons.view_stream_rounded, color: Color(0xFF4A90D9), size: 18),
-                              const SizedBox(width: 6),
-                              const Text('شريط إعلاني ثابت غير مزعج (Banner)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white)),
-                            ],
-                          ),
-                          SwitchListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('تفعيل شريط البنر الإعلاني بالتطبيق', style: TextStyle(fontSize: 12.5, color: Colors.white)),
-                            subtitle: const Text('شريط أنيق أسفل الصفحة الرئيسية لا يعطل التصفح ولا يظهر بالمشغل', style: TextStyle(fontSize: 10.5, color: Color(0xFF8E95AA))),
-                            value: _bannerAdEnabled,
-                            onChanged: (v) => setState(() => _bannerAdEnabled = v),
-                            activeThumbColor: const Color(0xFF4A90D9),
-                          ),
-
-                          if (_bannerAdEnabled) ...[
-                            const SizedBox(height: 6),
-                            const Text('كود البنر (HTML / JS):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
-                            const SizedBox(height: 4),
-                            TextField(
-                              controller: _bannerHtmlCtrl,
-                              maxLines: 2,
-                              style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Colors.white),
-                              decoration: InputDecoration(
-                                hintText: '<script ...> أو <a href=...><img .../></a>',
-                                hintStyle: const TextStyle(fontSize: 11, color: Colors.white38),
-                                filled: true,
-                                fillColor: const Color(0xFF0B0E14),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text('أو رابط صفحة البنر (URL):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
-                            const SizedBox(height: 4),
-                            TextField(
-                              controller: _bannerUrlCtrl,
-                              style: const TextStyle(fontSize: 12, color: Colors.white),
-                              decoration: InputDecoration(
-                                hintText: 'https://example.com/banner',
-                                hintStyle: const TextStyle(fontSize: 11, color: Colors.white38),
-                                filled: true,
-                                fillColor: const Color(0xFF0B0E14),
-                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                              ),
-                            ),
-                          ],
-
-                          const SizedBox(height: 16),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFD4AF37),
-                              foregroundColor: Colors.black,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              elevation: 4,
-                            ),
-                            icon: _isSavingOwnerAds
-                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                                : const Icon(Icons.save_rounded, size: 20),
-                            label: Text(
-                              _isSavingOwnerAds ? 'جارٍ الحفظ السحابي...' : 'حفظ وتفعيل إعلانات المالك فوراً',
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                            ),
-                            onPressed: _isSavingOwnerAds ? null : _saveOwnerAdSettings,
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // ── In-App Updates Management Card ──
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF141824),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: _updateEnabled
-                              ? (_isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF))
-                              : const Color(0xFF262D3D),
-                          width: _updateEnabled ? 1.5 : 1,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: (_updateEnabled
-                                          ? (_isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF))
-                                          : const Color(0xFF4A90D9))
-                                      .withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(
-                                  _isForcedUpdate ? Icons.warning_rounded : Icons.system_update_rounded,
-                                  color: _updateEnabled
-                                      ? (_isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF))
-                                      : const Color(0xFF4A90D9),
-                                  size: 20,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'إدارة التحديثات الداخلية للتطبيق (In-App Updates)',
-                                      style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: Colors.white),
-                                    ),
-                                    Text(
-                                      _updateEnabled
-                                          ? (_isForcedUpdate ? '🚨 التحديث مفعل: إجباري وقفل كامل للتطبيق' : '📢 التحديث مفعل: اختياري للمستخدمين')
-                                          : 'لا يوجد تحديث منشور حالياً',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: _updateEnabled
-                                            ? (_isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF))
-                                            : const Color(0xFF8E95AA),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-
-                          // Toggle 1: Is Forced Update (تحديث إجباري)
-                          Container(
-                            decoration: BoxDecoration(
-                              color: _isForcedUpdate
-                                  ? Colors.redAccent.withValues(alpha: 0.1)
-                                  : const Color(0xFF0B0E14),
-                              borderRadius: BorderRadius.circular(10),
+                              color: const Color(0xFF0D1017),
+                              borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: _isForcedUpdate ? Colors.redAccent.withValues(alpha: 0.5) : const Color(0xFF262D3D),
+                                color: _activeAdSource == 'owner'
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFF0284C7),
+                                width: 1.5,
                               ),
                             ),
-                            child: SwitchListTile(
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                              title: Row(
-                                children: [
-                                  Icon(
-                                    _isForcedUpdate ? Icons.lock_rounded : Icons.lock_open_rounded,
-                                    size: 16,
-                                    color: _isForcedUpdate ? Colors.redAccent : Colors.white70,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  const Text(
-                                    'تحديث إجباري (قفل التطبيق بالكامل)',
-                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
-                                  ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text('🌐 شبكة الإعلانات النشطة للمستخدمين:', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Colors.white)),
+                                    const Spacer(),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: _activeAdSource == 'owner' ? const Color(0xFF10B981) : const Color(0xFF0284C7),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        _activeAdSource == 'owner' ? '👑 إعلاناتك تعمل' : '🤝 إعلانات الشريك تعمل',
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    // Button 1: Owner
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: _activeAdSource == 'owner' ? const Color(0xFF10B981) : const Color(0xFF1F2433),
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(vertical: 14),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            side: BorderSide(color: _activeAdSource == 'owner' ? const Color(0xFF10B981) : const Color(0xFF2E384D), width: 1.5),
+                                          ),
+                                          elevation: _activeAdSource == 'owner' ? 4 : 0,
+                                        ),
+                                        onPressed: _isSwitchingAdSource ? null : () => _switchActiveAdNetwork('owner'),
+                                        child: Column(
+                                          children: [
+                                            const Text('👑 إعلانات المالك', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                            const SizedBox(height: 3),
+                                            Text(_ownerAppIdCtrl.text, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.white70)),
+                                            if (_activeAdSource == 'owner') ...[
+                                              const SizedBox(height: 4),
+                                              const Text('● نشط للمستخدمين', style: TextStyle(fontSize: 9.5, color: Colors.white, fontWeight: FontWeight.bold)),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    // Button 2: Partner
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: _activeAdSource == 'partner' ? const Color(0xFF0284C7) : const Color(0xFF1F2433),
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(vertical: 14),
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            side: BorderSide(color: _activeAdSource == 'partner' ? const Color(0xFF0284C7) : const Color(0xFF2E384D), width: 1.5),
+                                          ),
+                                          elevation: _activeAdSource == 'partner' ? 4 : 0,
+                                        ),
+                                        onPressed: _isSwitchingAdSource ? null : () => _switchActiveAdNetwork('partner'),
+                                        child: Column(
+                                          children: [
+                                            const Text('🤝 إعلانات الشريك', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                            const SizedBox(height: 3),
+                                            Text(_partnerAppIdCtrl.text, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.white70)),
+                                            if (_activeAdSource == 'partner') ...[
+                                              const SizedBox(height: 4),
+                                              const Text('● نشط للمستخدمين', style: TextStyle(fontSize: 9.5, color: Colors.white, fontWeight: FontWeight.bold)),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (_isSwitchingAdSource) ...[
+                                  const SizedBox(height: 8),
+                                  const Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFD4AF37)))),
                                 ],
-                              ),
-                              subtitle: Text(
-                                _isForcedUpdate
-                                    ? 'يمنع المستخدم من استخدام التطبيق أو إغلاق الرسالة حتى يقوم بالتحديث'
-                                    : 'تحديث اختياري يمكن للمستخدم الضغط على "لاحقاً" والاستمرار بالمشاهدة',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: _isForcedUpdate ? Colors.redAccent.shade100 : const Color(0xFF8E95AA),
-                                ),
-                              ),
-                              value: _isForcedUpdate,
-                              onChanged: (v) => setState(() => _isForcedUpdate = v),
-                              activeThumbColor: Colors.redAccent,
-                            ),
-                          ),
-
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                flex: 2,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text('رقم الإصدار (Version Code):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
-                                    const SizedBox(height: 4),
-                                    TextField(
-                                      controller: _versionCodeCtrl,
-                                      keyboardType: TextInputType.number,
-                                      style: const TextStyle(fontSize: 12, color: Colors.white),
-                                      decoration: InputDecoration(
-                                        hintText: '85',
-                                        filled: true,
-                                        fillColor: const Color(0xFF0B0E14),
-                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                flex: 3,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text('اسم الإصدار (Version Name):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
-                                    const SizedBox(height: 4),
-                                    TextField(
-                                      controller: _versionNameCtrl,
-                                      style: const TextStyle(fontSize: 12, color: Colors.white),
-                                      decoration: InputDecoration(
-                                        hintText: '1.0.78',
-                                        filled: true,
-                                        fillColor: const Color(0xFF0B0E14),
-                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 10),
-                          const Text('رابط تحميل APK المباشر:', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
-                          const SizedBox(height: 4),
-                          TextField(
-                            controller: _apkUrlCtrl,
-                            style: const TextStyle(fontSize: 12, color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: 'https://zaafilm.com/downloads/zaqzouka-latest.apk',
-                              filled: true,
-                              fillColor: const Color(0xFF0B0E14),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                            ),
-                          ),
-
-                          const SizedBox(height: 10),
-                          const Text('ملاحظات التحديث للمستخدمين (Release Notes):', style: TextStyle(fontSize: 11.5, color: Colors.white70)),
-                          const SizedBox(height: 4),
-                          TextField(
-                            controller: _releaseNotesCtrl,
-                            maxLines: 2,
-                            style: const TextStyle(fontSize: 12, color: Colors.white),
-                            decoration: InputDecoration(
-                              hintText: 'إصلاحات أمنية، تسريع السيرفرات وإضافة مزودين جدد',
-                              filled: true,
-                              fillColor: const Color(0xFF0B0E14),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF262D3D))),
-                            ),
-                          ),
-
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: _isForcedUpdate ? Colors.redAccent : const Color(0xFF00E5FF),
-                                    foregroundColor: Colors.black,
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    elevation: 4,
-                                  ),
-                                  icon: _isSavingUpdate
-                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                                      : Icon(_isForcedUpdate ? Icons.lock_clock_rounded : Icons.rocket_launch_rounded, size: 18),
-                                  label: Text(
-                                    _isSavingUpdate
-                                        ? 'جارٍ النشر...'
-                                        : (_isForcedUpdate ? 'نشر تحديث إجباري 🔒' : 'نشر تحديث عادي 📢'),
-                                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
-                                  ),
-                                  onPressed: _isSavingUpdate ? null : () => _publishAppUpdate(forced: _isForcedUpdate),
-                                ),
-                              ),
-                              if (_updateEnabled) ...[
-                                const SizedBox(width: 8),
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: Colors.white70,
-                                    side: const BorderSide(color: Color(0xFF3A4256)),
-                                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                  icon: const Icon(Icons.cancel_outlined, size: 18, color: Colors.redAccent),
-                                  label: const Text('إلغاء التحديث', style: TextStyle(fontSize: 11.5)),
-                                  onPressed: _isSavingUpdate ? null : _cancelAppUpdate,
-                                ),
                               ],
-                            ],
+                            ),
                           ),
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 20),
                     // Security Footer
                     Container(

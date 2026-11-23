@@ -1731,9 +1731,9 @@ private fun PlayerScreen(
             val bufferingForMs = bufferingSinceMs.takeIf { it > 0L }
                 ?.let { System.currentTimeMillis() - it } ?: 0L
 
-            // ── Auto Black Screen Detection (initial stall: 15s; stuck buffering during playback: 30s) ──
-            val isBlackScreen = !hasRenderedFirstFrame && elapsedMs >= 15_000L && p.currentPosition == 0L
-            val isEndlessBuffering = p.playWhenReady && p.playbackState == Player.STATE_BUFFERING && bufferingForMs >= 30_000L
+            // ── Auto Black Screen Detection (initial stall: 7s; stuck buffering during playback: 8s) ──
+            val isBlackScreen = !hasRenderedFirstFrame && elapsedMs >= 7_000L && p.currentPosition == 0L
+            val isEndlessBuffering = p.playWhenReady && p.playbackState == Player.STATE_BUFFERING && bufferingForMs >= 8_000L
 
             if (!bufferingFallbackUsed && (isBlackScreen || isEndlessBuffering)) {
                 bufferingFallbackUsed = true
@@ -5315,10 +5315,10 @@ private fun InPlayerPreRollOverlay(
                 .padding(24.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top Bar: Ad indicator & Skip Button
+            // Top Bar: Ad indicator ONLY (skip button moved to center)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Ad Badge
@@ -5347,36 +5347,6 @@ private fun InPlayerPreRollOverlay(
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 12.sp
                     )
-                }
-
-                // Skip Button with 5s countdown
-                Button(
-                    onClick = {
-                        if (countdown == 0) {
-                            onSkip()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (countdown == 0) Color(0xFF10B981) else Color(0xFF222B3D),
-                        contentColor = if (countdown == 0) Color.White else Color.White.copy(alpha = 0.6f)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = if (countdown == 0) 6.dp else 0.dp),
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    if (countdown > 0) {
-                        Text(
-                            text = "يمكنك التخطي بعد ( $countdown )",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Text(
-                            text = "تخطي الإعلان ⏩",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
             }
 
@@ -5468,6 +5438,55 @@ private fun InPlayerPreRollOverlay(
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
+            }
+
+            // ── CENTER Skip Button (prominent, full-width, cannot be hidden by top bar) ──
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Button(
+                    onClick = {
+                        if (countdown == 0) {
+                            onSkip()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (countdown == 0) Color(0xFF10B981) else Color(0xFF1A2235),
+                        contentColor = if (countdown == 0) Color.White else Color.White.copy(alpha = 0.65f)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = if (countdown == 0) 8.dp else 0.dp
+                    ),
+                    border = if (countdown == 0) null else BorderStroke(1.dp, Color(0xFF2E384D)),
+                    modifier = Modifier
+                        .fillMaxWidth(0.6f)
+                        .height(52.dp)
+                ) {
+                    if (countdown > 0) {
+                        Text(
+                            text = "⏳ يمكنك التخطي بعد ( $countdown )",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Text(
+                            text = "تخطي الإعلان ⏩",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+                if (countdown == 0) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "اضغط للبدء الآن 🎬",
+                        color = Color(0xFF10B981),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
 

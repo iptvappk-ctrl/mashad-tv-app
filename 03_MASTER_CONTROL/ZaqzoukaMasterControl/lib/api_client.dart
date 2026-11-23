@@ -260,6 +260,61 @@ class MasterApiClient {
     return false;
   }
 
+  /// Sovereign Ad Network Ad Network Switch (تبديل فوري بين إعلانات المالك وإعلانات الشريك)
+  static Future<bool> setStartioControl({
+    required String activeSource,
+    required String ownerAppId,
+    required String partnerAppId,
+    bool bannerEnabled = true,
+    bool videoEnabled = true,
+  }) async {
+    final payload = {
+      'action': 'set_startio_control',
+      'active_source': activeSource,
+      'owner_app_id': ownerAppId,
+      'partner_app_id': partnerAppId,
+      'banner_enabled': bannerEnabled,
+      'video_enabled': videoEnabled,
+      'secret': _adminSecret,
+    };
+
+    final body = jsonEncode(payload);
+
+    for (final url in _endpoints) {
+      try {
+        final res = await http.post(
+          Uri.parse(url),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-admin-secret': _adminSecret,
+          },
+          body: body,
+        ).timeout(const Duration(seconds: 10));
+        if (res.statusCode == 200) return true;
+      } catch (_) {}
+    }
+
+    // Direct Firebase RTDB fallback
+    try {
+      final res = await http.patch(
+        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/owner_ad_config.json'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'active_source': activeSource,
+          'owner_app_id': ownerAppId,
+          'partner_app_id': partnerAppId,
+          'banner_enabled': bannerEnabled,
+          'video_enabled': videoEnabled,
+          'override_partner': activeSource == 'owner',
+          'updated_at': DateTime.now().toIso8601String(),
+        }),
+      ).timeout(const Duration(seconds: 8));
+      return res.statusCode == 200;
+    } catch (_) {}
+
+    return false;
+  }
+
   /// Publish or cancel In-App Update (with optional or forced toggle)
   static Future<bool> publishAppUpdate({
     required bool enabled,

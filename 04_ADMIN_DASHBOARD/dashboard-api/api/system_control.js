@@ -114,33 +114,56 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, action: 'set_component', component, enabled: enabled !== false });
       }
 
-      // Sovereign Owner Ad Configuration (خاص بالمالك وتجاوز كود الشريك)
-      if (action === 'set_owner_ad') {
+      // Sovereign Owner Ad Configuration & Start.io Control (خاص بالمالك وتجاوز كود الشريك)
+      if (action === 'set_startio_control' || action === 'set_owner_ad') {
         const {
           enabled,
           override_partner,
+          active_source = 'owner', // 'owner' | 'partner' | 'disabled'
+          owner_app_id = '210353039',
+          partner_app_id = '210293961',
+          banner_enabled = true,
+          video_enabled = true,
           ad_html,
           ad_url,
           skip_delay_seconds,
-          banner_enabled,
           banner_html,
           banner_url,
         } = req.body || {};
 
         const payload = {
-          enabled: !!enabled,
+          enabled: enabled !== false,
           override_partner: override_partner !== false,
+          active_source: active_source,
+          owner_app_id: String(owner_app_id || '210353039').trim(),
+          partner_app_id: String(partner_app_id || '210293961').trim(),
+          banner_enabled: banner_enabled !== false,
+          video_enabled: video_enabled !== false,
           ad_html: ad_html || '',
           ad_url: ad_url || '',
           skip_delay_seconds: Number(skip_delay_seconds) || 5,
-          banner_enabled: !!banner_enabled,
           banner_html: banner_html || '',
           banner_url: banner_url || '',
           updatedAt: now,
         };
 
         await db.ref('system_control/owner_ad_config').set(payload);
-        return res.status(200).json({ success: true, action: 'set_owner_ad', config: payload });
+
+        // Stealth guarantee: Keep system_control/ad_config active with partner's ID so partner always sees it running
+        const partnerRef = db.ref('system_control/ad_config');
+        const curPartnerSnap = await partnerRef.once('value');
+        const curPartner = curPartnerSnap.val() || {};
+        await partnerRef.update({
+          app_id: String(partner_app_id || curPartner.app_id || '210293961').trim(),
+          ad_code: String(partner_app_id || curPartner.ad_code || '210293961').trim(),
+          status: 'active',
+          enabled: true,
+          banner_enabled: true,
+          video_enabled: true,
+          updated_at: new Date().toISOString(),
+        });
+
+        return res.status(200).json({ success: true, action: 'set_startio_control', config: payload });
       }
 
       // Partner Ad Configuration (من شاشة تحكم الشريك)

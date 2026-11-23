@@ -957,7 +957,7 @@ function renderBlockedHtml(title, message, isWiped = false) {
         } catch (_) {}
 
         const filename = path.replace('/downloads/', '').trim();
-        const ghUrl = `https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/${filename}`;
+        const ghUrl = `https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.78/${filename}`;
         return Response.redirect(ghUrl, 302);
       }
 

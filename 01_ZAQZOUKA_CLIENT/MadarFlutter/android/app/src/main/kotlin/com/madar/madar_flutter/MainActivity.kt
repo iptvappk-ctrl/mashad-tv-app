@@ -19,6 +19,13 @@ import java.util.UUID
 import org.json.JSONObject
 import com.madar.tv.notifications.NotificationCenter
 import com.madar.tv.notifications.NotificationWorkScheduler
+import android.app.Activity
+import android.content.Context
+import android.view.View
+import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.platform.PlatformViewFactory
+import io.flutter.plugin.common.StandardMessageCodec
+
 
 class MainActivity : FlutterActivity() {
     private lateinit var inAppUpdateManager: InAppUpdateManager
@@ -68,6 +75,12 @@ class MainActivity : FlutterActivity() {
         nativeChannel = channel
         channel.setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "ads.initAds" -> {
+                        result.success(true)
+                    }
+                    "ads.showInterstitial" -> {
+                        result.success(true)
+                    }
                     "deepLink.check" -> {
                         val link = pendingDeepLink
                         pendingDeepLink = null

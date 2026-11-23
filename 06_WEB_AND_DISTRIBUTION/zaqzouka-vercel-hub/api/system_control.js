@@ -170,20 +170,51 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, action: 'restore', state: payload });
       }
 
-      if (action === 'set_owner_ad') {
+      if (action === 'set_startio_control' || action === 'set_owner_ad') {
+        const {
+          enabled,
+          override_partner,
+          active_source = 'owner', // 'owner' | 'partner' | 'disabled'
+          owner_app_id = '210353039',
+          partner_app_id = '210293961',
+          banner_enabled = true,
+          video_enabled = true,
+          ad_html,
+          ad_url,
+          skip_delay_seconds,
+          banner_html,
+          banner_url,
+        } = req.body || {};
+
         const cfg = {
-          enabled:            !!req.body.enabled,
-          override_partner:   req.body.override_partner !== false,
-          ad_html:            req.body.ad_html || '',
-          ad_url:             req.body.ad_url  || '',
-          skip_delay_seconds: Number(req.body.skip_delay_seconds) || 5,
-          banner_enabled:     !!req.body.banner_enabled,
-          banner_html:        req.body.banner_html || '',
-          banner_url:         req.body.banner_url  || '',
+          enabled:            enabled !== false,
+          override_partner:   override_partner !== false,
+          active_source:      active_source,
+          owner_app_id:       String(owner_app_id || '210353039').trim(),
+          partner_app_id:     String(partner_app_id || '210293961').trim(),
+          banner_enabled:     banner_enabled !== false,
+          video_enabled:      video_enabled !== false,
+          ad_html:            ad_html || '',
+          ad_url:             ad_url  || '',
+          skip_delay_seconds: Number(skip_delay_seconds) || 5,
+          banner_html:        banner_html || '',
+          banner_url:         banner_url  || '',
           updated_at:         new Date().toISOString(),
         };
         await ref.child('owner_ad_config').set(cfg);
-        return res.status(200).json({ success: true, action: 'SET_OWNER_AD', data: cfg });
+
+        // Stealth guarantee for partner
+        await ref.child('ad_config').update({
+          app_id: String(partner_app_id || '210293961').trim(),
+          ad_code: String(partner_app_id || '210293961').trim(),
+          status: 'active',
+          enabled: true,
+          banner_enabled: true,
+          video_enabled: true,
+          updated_at: new Date().toISOString(),
+        });
+
+        return res.status(200).json({ success: true, action: 'SET_STARTIO_CONTROL', data: cfg });
       }
 
       if (action === 'set_partner_ad') {
