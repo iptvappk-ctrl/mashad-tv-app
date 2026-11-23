@@ -41,7 +41,23 @@ class _AppBannerAdStripState extends State<AppBannerAdStrip> {
 
   String? _extractImgUrl(String html) {
     final match = RegExp(r'''<img[^>]+src=["']([^"']+)["']''', caseSensitive: false).firstMatch(html);
-    return match?.group(1);
+    if (match != null) return match.group(1);
+    // If the html string is just a direct image url
+    final directImgMatch = RegExp(r'''https?://[^\s<>"']+\.(?:png|jpg|jpeg|webp|gif)''', caseSensitive: false).firstMatch(html);
+    return directImgMatch?.group(0);
+  }
+
+  String _resolveBannerUrl(String directUrl, String html) {
+    if (directUrl.trim().isNotEmpty) return directUrl.trim();
+    final hrefMatch = RegExp(r'''href=["']([^"']+)["']''', caseSensitive: false).firstMatch(html);
+    if (hrefMatch != null) return hrefMatch.group(1) ?? '';
+    final urlMatch = RegExp(r'''https?://[^\s<>"']+''').firstMatch(html);
+    return urlMatch?.group(0) ?? '';
+  }
+
+  String _extractBannerText(String html) {
+    final clean = html.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+    return clean.isNotEmpty ? clean : 'برعاية شركائنا · اضغط للمشاهدة';
   }
 
   @override
@@ -51,9 +67,10 @@ class _AppBannerAdStripState extends State<AppBannerAdStrip> {
     final status = ZaqzoukaQuotaGuard.instance.currentStatus;
     if (!status.isBannerAdEnabled) return const SizedBox.shrink();
 
-    final bannerUrl = status.bannerUrl;
     final bannerHtml = status.bannerHtml;
+    final bannerUrl = _resolveBannerUrl(status.bannerUrl, bannerHtml);
     final bannerImg = _extractImgUrl(bannerHtml);
+    final bannerText = _extractBannerText(bannerHtml);
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 250),
@@ -138,10 +155,10 @@ class _AppBannerAdStripState extends State<AppBannerAdStrip> {
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              const Expanded(
+                              Expanded(
                                 child: Text(
-                                  'برعاية شركائنا · اضغط للمشاهدة',
-                                  style: TextStyle(fontSize: 10.5, color: Colors.white70),
+                                  bannerText,
+                                  style: const TextStyle(fontSize: 10.5, color: Colors.white70),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),

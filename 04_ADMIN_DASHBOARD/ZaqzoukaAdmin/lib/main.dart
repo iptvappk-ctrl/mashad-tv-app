@@ -4675,7 +4675,9 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
               onPressed: () {
-                if (ctrl.text.trim().toUpperCase() == expected.trim().toUpperCase()) {
+                final txt = ctrl.text.trim().toUpperCase();
+                final exp = expected.trim().toUpperCase();
+                if (txt == exp || (expected == 'تأكيد' && (txt == 'CONFIRM' || txt == 'OK' || txt == 'YES'))) {
                   Navigator.pop(ctx, true);
                 } else {
                   ScaffoldMessenger.of(ctx2).showSnackBar(SnackBar(content: Text('الكلمة غير مطابقة لـ ($expected)', textAlign: TextAlign.center)));
@@ -4921,26 +4923,41 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
 
     bool saved = false;
     final payload = {
+      'action': 'set_partner_ad',
       'enabled': true,
       'ad_code': code,
       'banner_enabled': true,
       'banner_html': code,
       'ad_html': code,
+      'banner_url': '',
+      'skip_delay_seconds': 5,
+      'secret': _adminSecret,
       'updated_at': DateTime.now().toIso8601String(),
     };
 
-    try {
-      final res = await http.patch(
-        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(payload),
-      ).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) saved = true;
-    } catch (_) {}
+    final endpoints = [
+      'https://zaafilm.com/api/system_control',
+      'https://dashboard-api-indol-eight.vercel.app/api/system_control',
+      'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
+    ];
+
+    for (final url in endpoints) {
+      try {
+        final res = await http.post(
+          Uri.parse(url),
+          headers: {'Content-Type': 'application/json', 'x-admin-secret': _adminSecret},
+          body: json.encode(payload),
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) {
+          saved = true;
+          break;
+        }
+      } catch (_) {}
+    }
 
     if (!saved) {
       try {
-        final res = await http.put(
+        final res = await http.patch(
           Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json'),
           headers: {'Content-Type': 'application/json'},
           body: json.encode(payload),

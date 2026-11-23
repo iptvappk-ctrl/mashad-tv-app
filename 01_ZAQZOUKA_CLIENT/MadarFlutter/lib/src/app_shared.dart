@@ -543,6 +543,15 @@ Future<List<Map<String, dynamic>>> _fetchAlternativeServerRows({
   return _mergeServerRows(results.expand((rows) => rows));
 }
 
+String _cleanSeriesTitle(String raw) {
+  if (raw.trim().isEmpty) return '';
+  var text = raw.trim();
+  text = text.replaceFirst(RegExp(r'^(?:مشاهدة|مشاهده|تحميل|سلسلة)?\s*(?:مسلسل|فيلم|انمي|أنمي|برنامج)\s*', caseSensitive: false), '');
+  text = text.replaceFirst(RegExp(r'\s+(?:الموسم|موسم|season|الجزء|جزء|part|الحلقة|حلقة|episode|ep)\s+.*$', caseSensitive: false), '');
+  text = text.replaceFirst(RegExp(r'\s+(?:مترجم|مترجمة|مدبلج|مدبلجة|فيلم|مسلسل|WEB-DL|720p|1080p|HD|FHD|4K).*$', caseSensitive: false), '');
+  return text.trim().isNotEmpty ? text.trim() : raw.trim();
+}
+
 Future<List<Map<String, dynamic>>> _fetchProviderBackupServerRows({
   required String title,
   required String pageUrl,
@@ -551,7 +560,7 @@ Future<List<Map<String, dynamic>>> _fetchProviderBackupServerRows({
   int? episodeNumber,
   int? seasonNumber,
 }) async {
-  final cleanTitle = title.trim();
+  final cleanTitle = (isSeries ? _cleanSeriesTitle(title) : title).trim();
   final cleanUrl = pageUrl.trim();
   if (cleanTitle.isEmpty || !cleanUrl.startsWith('http')) return const [];
   try {

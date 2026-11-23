@@ -146,6 +146,9 @@ class _EpisodePageState extends State<EpisodePage> {
     appBar: AppBar(
       title: Text(_fullTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
     ),
+    bottomNavigationBar: const SafeArea(
+      child: AppBannerAdStrip(),
+    ),
     body: RefreshIndicator(
       color: _brick,
       onRefresh: _loadServers,

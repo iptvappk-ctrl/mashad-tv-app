@@ -118,6 +118,9 @@ class SystemStatus {
   bool get isOptionalUpdate => isUpdateActive && (appUpdate?['forced'] != true) && latestUpdateVersionCode > 84;
 
   bool get isBannerAdEnabled {
+    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
+      return ownerAdConfig!['banner_enabled'] == true;
+    }
     if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
       return true;
     }
@@ -128,6 +131,9 @@ class SystemStatus {
   }
 
   String get bannerHtml {
+    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
+      return ownerAdConfig!['banner_html']?.toString() ?? '';
+    }
     if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
       return ownerAdConfig!['banner_html']?.toString() ?? '';
     }
@@ -135,6 +141,9 @@ class SystemStatus {
   }
 
   String get bannerUrl {
+    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
+      return ownerAdConfig!['banner_url']?.toString() ?? '';
+    }
     if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
       return ownerAdConfig!['banner_url']?.toString() ?? '';
     }

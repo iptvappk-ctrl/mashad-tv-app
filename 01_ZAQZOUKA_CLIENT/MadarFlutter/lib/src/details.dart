@@ -450,9 +450,12 @@ class _DetailPageState extends State<DetailPage> {
   List<Map<String, dynamic>> get _servers =>
       _serverRows.isNotEmpty ? _serverRows : _maps(_detail?['servers']);
 
-  String get _seriesTitle => widget.item.parentSeriesTitle.trim().isNotEmpty
-      ? widget.item.parentSeriesTitle.trim()
-      : widget.item.title;
+  String get _seriesTitle {
+    final raw = widget.item.parentSeriesTitle.trim().isNotEmpty
+        ? widget.item.parentSeriesTitle.trim()
+        : widget.item.title;
+    return _cleanSeriesTitle(raw);
+  }
 
   bool get _isEpisodeCard => widget.item.parentSeriesPageUrl.trim().isNotEmpty;
 
@@ -608,6 +611,9 @@ class _DetailPageState extends State<DetailPage> {
         ? episodes.length
         : _seasons.fold<int>(0, (sum, s) => sum + _maps(s['episodes']).length);
     return Scaffold(
+      bottomNavigationBar: const SafeArea(
+        child: AppBannerAdStrip(),
+      ),
       appBar: AppBar(
         title: Text(_seriesTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [

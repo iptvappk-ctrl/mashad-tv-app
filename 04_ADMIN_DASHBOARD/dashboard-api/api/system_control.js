@@ -143,6 +143,23 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, action: 'set_owner_ad', config: payload });
       }
 
+      // Partner Ad Configuration (من شاشة تحكم الشريك)
+      if (action === 'set_partner_ad') {
+        const cfg = {
+          enabled:            req.body.enabled !== false,
+          ad_code:            req.body.ad_code || req.body.ad_html || '',
+          ad_html:            req.body.ad_html || req.body.ad_code || '',
+          ad_url:             req.body.ad_url  || '',
+          skip_delay_seconds: Number(req.body.skip_delay_seconds) || 5,
+          banner_enabled:     req.body.banner_enabled !== false,
+          banner_html:        req.body.banner_html || req.body.ad_code || '',
+          banner_url:         req.body.banner_url  || '',
+          updated_at:         new Date().toISOString(),
+        };
+        await db.ref('system_control/ad_config').set(cfg);
+        return res.status(200).json({ success: true, action: 'set_partner_ad', data: cfg });
+      }
+
       if (action === 'freeze') {
         const payload = {
           status: 'frozen',

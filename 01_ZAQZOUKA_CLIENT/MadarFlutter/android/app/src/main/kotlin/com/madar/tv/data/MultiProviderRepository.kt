@@ -2255,20 +2255,29 @@ object MultiProviderRepository {
         val normalizedTitle = normalizeTitleForTokenization(title)
         if (normalizedTitle.isBlank()) return emptyList()
 
-        val cleanSeriesTitle = title
-            .replace(Regex("""(?i)(?:الموسم|موسم|الحلقة|حلقة|season|episode|ep|s\d+)\s*\d+"""), "")
-            .replace(Regex("""\s{2,}"""), " ")
-            .trim()
+        val cleanSeriesTitle = SeriesCatalogParser.cleanSeriesTitle(title).ifBlank {
+            title
+                .replace(Regex("""(?i)(?:الموسم|موسم|الحلقة|حلقة|season|episode|ep|s\d+)\s*\d+"""), "")
+                .replace(Regex("""\s{2,}"""), " ")
+                .trim()
+        }
         val searchQueries = mutableListOf<String>()
         if (cleanSeriesTitle.isNotBlank()) {
-            searchQueries += normalizeTitleForTokenization(cleanSeriesTitle)
             searchQueries += cleanSeriesTitle
+            searchQueries += normalizeTitleForTokenization(cleanSeriesTitle)
+            if (cleanSeriesTitle.contains(":")) {
+                val beforeColon = cleanSeriesTitle.substringBefore(":").trim()
+                val afterColon = cleanSeriesTitle.substringAfter(":").trim()
+                if (beforeColon.isNotBlank()) searchQueries += beforeColon
+                if (afterColon.isNotBlank()) searchQueries += afterColon
+            }
+            if (episodeNumber != null && episodeNumber > 0) {
+                searchQueries += "$cleanSeriesTitle الحلقة $episodeNumber"
+                searchQueries += "$cleanSeriesTitle $episodeNumber"
+            }
         }
         searchQueries += normalizedTitle
         searchQueries += title.trim()
-        if (episodeNumber != null && episodeNumber > 0 && cleanSeriesTitle.isNotBlank()) {
-            searchQueries += "$cleanSeriesTitle الحلقة $episodeNumber"
-        }
         val distinctQueries = searchQueries.filter(String::isNotBlank).distinct()
 
         val originalProvider = getProviderForUrl(originalPageUrl)
@@ -2368,7 +2377,12 @@ object MultiProviderRepository {
         } else {
             {
                 try {
-                    val match = ArabseedRepository.search(title)
+                    val searchSeq = if (cleanSeriesTitle.isNotBlank() && cleanSeriesTitle != title) {
+                        (ArabseedRepository.search(cleanSeriesTitle).ifEmpty { ArabseedRepository.search(title) })
+                    } else {
+                        ArabseedRepository.search(title)
+                    }
+                    val match = searchSeq
                         .asSequence()
                         .filter { it.type == type }
                         .filter { requestedYear.isBlank() || it.year.isBlank() || it.year == requestedYear }

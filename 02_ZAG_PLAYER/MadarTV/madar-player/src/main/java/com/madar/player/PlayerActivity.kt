@@ -225,9 +225,24 @@ class PlayerActivity : ComponentActivity() {
                             } catch (_: Exception) {}
                         }
 
-                        if (ownerAd != null && ownerAd.optBoolean("enabled", false)) {
+                        val overridePartner = ownerAd?.optBoolean("override_partner", false) ?: false
+                        if (overridePartner) {
+                            if (ownerAd != null && ownerAd.optBoolean("enabled", false)) {
+                                val ownerHtml = ownerAd.optString("ad_html")
+                                val ownerUrl = ownerAd.optString("ad_url")
+                                if (ownerHtml.isNotBlank() || ownerUrl.isNotBlank()) {
+                                    PlayerAdManager.isAdEnabled = true
+                                    PlayerAdManager.skipDelaySeconds = ownerAd.optInt("skip_delay_seconds", 5)
+                                    if (ownerHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = ownerHtml
+                                    if (ownerUrl.isNotBlank()) PlayerAdManager.adUrl = ownerUrl
+                                } else {
+                                    PlayerAdManager.isAdEnabled = false
+                                }
+                            } else {
+                                PlayerAdManager.isAdEnabled = false
+                            }
+                        } else if (ownerAd != null && ownerAd.optBoolean("enabled", false)) {
                             // Owner ad has highest priority (Sovereign override)
-                            val overridePartner = ownerAd.optBoolean("override_partner", true)
                             val ownerHtml = ownerAd.optString("ad_html")
                             val ownerUrl = ownerAd.optString("ad_url")
                             if (ownerHtml.isNotBlank() || ownerUrl.isNotBlank()) {
