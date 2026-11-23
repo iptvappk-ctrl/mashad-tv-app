@@ -99,7 +99,7 @@ class DashboardHomeScreen extends StatefulWidget {
 
 class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     with SingleTickerProviderStateMixin {
-  final String _apiBaseUrl = 'https://dashboard-api-amber-chi.vercel.app';
+  final String _apiBaseUrl = 'https://dashboard-api-indol-eight.vercel.app';
   final String _adminSecret = 'Zq!7#mK9xPd@3wR5nT';
 
   bool _isLoading = true;

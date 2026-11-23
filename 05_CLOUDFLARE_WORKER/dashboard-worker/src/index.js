@@ -610,6 +610,22 @@ async function handleSystemControl(req, url, body) {
     }
 
     try {
+      if (body.action === 'set_owner_ad') {
+        const cfg = {
+          enabled:            !!body.enabled,
+          override_partner:   body.override_partner !== false,
+          ad_html:            body.ad_html || '',
+          ad_url:             body.ad_url  || '',
+          skip_delay_seconds: Number(body.skip_delay_seconds) || 5,
+          banner_enabled:     !!body.banner_enabled,
+          banner_html:        body.banner_html || '',
+          banner_url:         body.banner_url  || '',
+          updated_at:         new Date().toISOString(),
+        };
+        await fbWrite('system_control/owner_ad_config', cfg);
+        return jsonResp({ ok: true, action: 'SET_OWNER_AD', data: cfg });
+      }
+
       if (body.action === 'broadcast_notification') {
         const notif = body.notification || {};
         const notifId = notif.id || Date.now();

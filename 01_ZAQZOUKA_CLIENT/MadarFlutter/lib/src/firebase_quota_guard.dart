@@ -20,10 +20,12 @@ const _native = MethodChannel('madar/native');
 // ════════════════════════════════════════
 
 class _Cfg {
-  // Live Endpoints (Dashboard API is where Master Control writes directly)
+  // Live Endpoints (Cloudflare Worker + Vercel + Edge Failovers)
   static const vercelStatusUrls = [
+    'https://zaafilm.com/api/system_control',
+    'https://dashboard-api-indol-eight.vercel.app/api/system_control',
+    'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
     'https://dashboard-api-amber-chi.vercel.app/api/system_control',
-    'https://dashboard-api-amber-chi.vercel.app/api/status',
   ];
 
   // Static fallback JSON on Vercel CDN edge (ultimate fallback)
