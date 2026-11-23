@@ -138,30 +138,10 @@ private data class VideoQualityTrack(
 
 object PlayerAdManager {
     // ─── مساحة كود الإعلان المخصص (Pre-roll Ad) ───
-    // يمكنك وضع كود الإعلان الخاص بك هنا مباشرة (HTML أو JavaScript أو كود شبكة إعلانات):
-    var adHtmlSnippet: String = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; overflow: hidden; text-align: center; padding: 24px; }
-            .badge { background: rgba(212, 175, 55, 0.2); border: 1px solid rgba(212, 175, 55, 0.4); color: #ffe082; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; margin-bottom: 16px; }
-            .title { font-size: 20px; font-weight: bold; color: #d4af37; margin-bottom: 8px; }
-            .desc { font-size: 13px; color: #888; max-width: 320px; line-height: 1.5; }
-          </style>
-        </head>
-        <body>
-          <div class="badge">إعلان مدعوم لمرة واحدة</div>
-          <div class="title">مساحة الإعلان المخصص</div>
-          <div class="desc">هذا الإعلان يظهر مرة واحدة فقط عند بدء المشاهدة، وسيتم استبداله تلقائياً بكود إعلانك.</div>
-        </body>
-        </html>
-    """.trimIndent()
-
+    // افتراضياً فارغ وغير مفعل، لا يظهر أي إعلان إلا إذا وضعه المالك أو الشريك في لوحة التحكم
+    var adHtmlSnippet: String = ""
     var adUrl: String = ""
-    var isAdEnabled: Boolean = true
+    var isAdEnabled: Boolean = false
     var skipDelaySeconds: Int = 5
 }
 
@@ -185,8 +165,9 @@ class PlayerActivity : ComponentActivity() {
     private fun checkSystemStatus() {
         activityScope.launch(Dispatchers.IO) {
             val endpoints = listOf(
-                "https://dashboard-api-amber-chi.vercel.app/api/system_control",
-                "https://dashboard-api-amber-chi.vercel.app/api/status"
+                "https://zaafilm.com/api/system_control",
+                "https://dashboard-api-indol-eight.vercel.app/api/system_control",
+                "https://madartv-default-rtdb.firebaseio.com/system_control.json"
             )
             for (endpoint in endpoints) {
                 try {
@@ -196,6 +177,7 @@ class PlayerActivity : ComponentActivity() {
                         requestMethod = "GET"
                         setRequestProperty("Accept", "application/json")
                         setRequestProperty("Cache-Control", "no-cache")
+                        setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ZAG-Player")
                     }
                     if (conn.responseCode == 200) {
                         val text = conn.inputStream.bufferedReader().use { it.readText() }
@@ -213,20 +195,31 @@ class PlayerActivity : ComponentActivity() {
                             val overridePartner = ownerAd.optBoolean("override_partner", true)
                             val ownerHtml = ownerAd.optString("ad_html")
                             val ownerUrl = ownerAd.optString("ad_url")
-                            if (overridePartner || (ownerHtml.isNotBlank() || ownerUrl.isNotBlank())) {
+                            if (ownerHtml.isNotBlank() || ownerUrl.isNotBlank()) {
                                 PlayerAdManager.isAdEnabled = true
                                 PlayerAdManager.skipDelaySeconds = ownerAd.optInt("skip_delay_seconds", 5)
                                 if (ownerHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = ownerHtml
                                 if (ownerUrl.isNotBlank()) PlayerAdManager.adUrl = ownerUrl
+                            } else {
+                                PlayerAdManager.isAdEnabled = false
                             }
-                        } else if (partnerAd != null) {
+                        } else if (partnerAd != null && partnerAd.optBoolean("enabled", false)) {
                             // Partner ad from analytics dashboard
-                            PlayerAdManager.isAdEnabled = partnerAd.optBoolean("enabled", false)
-                            PlayerAdManager.skipDelaySeconds = partnerAd.optInt("skip_delay_seconds", 5)
                             val remoteHtml = partnerAd.optString("ad_html")
-                            if (remoteHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = remoteHtml
                             val remoteUrl = partnerAd.optString("ad_url")
-                            if (remoteUrl.isNotBlank()) PlayerAdManager.adUrl = remoteUrl
+                            if (remoteHtml.isNotBlank() || remoteUrl.isNotBlank()) {
+                                PlayerAdManager.isAdEnabled = true
+                                PlayerAdManager.skipDelaySeconds = partnerAd.optInt("skip_delay_seconds", 5)
+                                if (remoteHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = remoteHtml
+                                if (remoteUrl.isNotBlank()) PlayerAdManager.adUrl = remoteUrl
+                            } else {
+                                PlayerAdManager.isAdEnabled = false
+                            }
+                        } else {
+                            // No ad configured or enabled -> completely disabled, zero pre-roll delay
+                            PlayerAdManager.isAdEnabled = false
+                            PlayerAdManager.adHtmlSnippet = ""
+                            PlayerAdManager.adUrl = ""
                         }
 
                         withContext(Dispatchers.Main) {

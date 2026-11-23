@@ -1888,30 +1888,6 @@ Future<void> _showPlayerNotFoundDialog(
             ),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white24),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              icon: const Icon(Icons.open_in_new_rounded, size: 20),
-              label: const Text(
-                'تشغيل عبر تطبيق خارجي (VLC / MX)',
-                style: TextStyle(fontSize: 13.5),
-              ),
-              onPressed: () async {
-                Navigator.pop(ctx);
-                final extOpened = await NativeBridge.openExternalPlayer(url: url, title: title);
-                if (!extOpened && context.mounted) {
-                  _message(context, 'تعذر فتح مشغل خارجي، يرجى تثبيت مشغل زاغ.');
-                }
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
         ],
       ),
     ),
