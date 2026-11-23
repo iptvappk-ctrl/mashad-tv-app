@@ -6,15 +6,19 @@ class MasterApiClient {
     'https://zaafilm.com/api/system_control',
     'https://dashboard-api-indol-eight.vercel.app/api/system_control',
     'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
-    'https://dashboard-api-amber-chi.vercel.app/api/system_control',
   ];
   static const String _adminSecret = 'Zq!7#mK9xPd@3wR5nT';
+  static const Map<String, String> _defaultHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Android; ZaqzoukaMaster) Zaqzouka/1.0',
+    'x-admin-secret': _adminSecret,
+    'Accept': 'application/json',
+  };
 
   /// Fetch current system state from the cloud
   static Future<Map<String, dynamic>> fetchStatus() async {
     for (final url in _endpoints) {
       try {
-        final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 7));
+        final res = await http.get(Uri.parse(url), headers: _defaultHeaders).timeout(const Duration(seconds: 6));
         if (res.statusCode == 200) {
           final data = jsonDecode(res.body) as Map<String, dynamic>;
           // Ensure components map exists
@@ -27,6 +31,9 @@ class MasterApiClient {
               'player_enabled': true,
               'admin_enabled': true,
             };
+          }
+          if (!data.containsKey('status') || data['status'] == null) {
+            data['status'] = 'active';
           }
           return data;
         }

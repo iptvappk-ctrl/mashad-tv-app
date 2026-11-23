@@ -25,7 +25,6 @@ class _Cfg {
     'https://zaafilm.com/api/system_control',
     'https://dashboard-api-indol-eight.vercel.app/api/system_control',
     'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
-    'https://dashboard-api-amber-chi.vercel.app/api/system_control',
   ];
 
   // Static fallback JSON on Vercel CDN edge (ultimate fallback)

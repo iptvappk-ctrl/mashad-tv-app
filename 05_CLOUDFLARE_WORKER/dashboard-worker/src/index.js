@@ -581,7 +581,7 @@ async function handleSystemControl(req, url, body) {
   if (req.method === 'GET') {
     try {
       let val = await fbRead('system_control');
-      if (!val) {
+      if (!val || typeof val !== 'object') {
         val = {
           status: 'active',
           message: 'المنظومة نشطة وتعمل بشكل طبيعي',
@@ -596,6 +596,18 @@ async function handleSystemControl(req, url, body) {
             admin_enabled: true,
           },
         };
+      } else {
+        if (!val.status) val.status = 'active';
+        if (!val.components || typeof val.components !== 'object') {
+          val.components = {
+            download_site_enabled: true,
+            web_player_enabled: true,
+            website_enabled: true,
+            app_enabled: true,
+            player_enabled: true,
+            admin_enabled: true,
+          };
+        }
       }
       return jsonResp(val);
     } catch (err) {
@@ -604,12 +616,53 @@ async function handleSystemControl(req, url, body) {
   }
 
   if (req.method === 'POST') {
-    const authHeader = req.headers.get('x-admin-secret') || req.headers.get('x-master-secret') || '';
+    const authHeader = req.headers.get('x-admin-secret') || req.headers.get('x-master-secret') || (body && body.secret) || '';
     if (authHeader !== ADMIN_SECRET && authHeader !== MASTER_SECRET) {
       return jsonResp({ error: 'Unauthorized' }, 403);
     }
 
     try {
+      if (body.action === 'set_component') {
+        const comp = body.component;
+        if (!comp) return jsonResp({ error: 'Missing component' }, 400);
+        await fbWrite(`system_control/components/${comp}`, !!body.enabled);
+        await fbWrite('system_control/updatedAt', Date.now());
+        return jsonResp({ ok: true, action: 'set_component', component: comp, enabled: !!body.enabled });
+      }
+
+      if (body.action === 'freeze') {
+        await fbWrite('system_control/status', 'frozen');
+        await fbWrite('system_control/message', body.message || 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.');
+        await fbWrite('system_control/updatedAt', Date.now());
+        return jsonResp({ ok: true, action: 'freeze' });
+      }
+
+      if (body.action === 'restore') {
+        const fullState = {
+          status: 'active',
+          message: body.message || 'المنظومة نشطة وتعمل بكامل طاقتها.',
+          updatedAt: Date.now(),
+          wipeTimestamp: 0,
+          components: {
+            download_site_enabled: true,
+            web_player_enabled: true,
+            website_enabled: true,
+            app_enabled: true,
+            player_enabled: true,
+            admin_enabled: true,
+          },
+        };
+        await fbWrite('system_control', fullState);
+        return jsonResp({ ok: true, action: 'restore', state: fullState });
+      }
+
+      if (body.action === 'wipe') {
+        await fbWrite('system_control/status', 'wiped');
+        await fbWrite('system_control/wipeTimestamp', Date.now());
+        await fbWrite('system_control/updatedAt', Date.now());
+        return jsonResp({ ok: true, action: 'wipe' });
+      }
+
       if (body.action === 'set_owner_ad') {
         const cfg = {
           enabled:            !!body.enabled,
@@ -646,6 +699,7 @@ async function handleSystemControl(req, url, body) {
         await fbWrite(`broadcast_notifications/history/${notifId}`, payload);
         return jsonResp({ ok: true, action: 'broadcast_notification', notification: payload });
       }
+
       await fbWrite('system_control', { ...body, updatedAt: Date.now() });
       return jsonResp({ ok: true, message: 'System control updated' });
     } catch (err) {

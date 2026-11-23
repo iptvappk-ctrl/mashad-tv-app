@@ -65,14 +65,25 @@ export default async function handler(req, res) {
           }
         });
       }
+      // Ensure status exists
+      if (!val.status) val.status = 'active';
       // Ensure components exist in response
-      if (!val.components) {
+      if (!val.components || typeof val.components !== 'object') {
         val.components = {
+          download_site_enabled: true,
+          web_player_enabled: true,
           website_enabled: true,
           app_enabled: true,
           player_enabled: true,
           admin_enabled: true,
         };
+      } else {
+        if (val.components.download_site_enabled === undefined) val.components.download_site_enabled = true;
+        if (val.components.web_player_enabled === undefined) val.components.web_player_enabled = true;
+        if (val.components.website_enabled === undefined) val.components.website_enabled = true;
+        if (val.components.app_enabled === undefined) val.components.app_enabled = true;
+        if (val.components.player_enabled === undefined) val.components.player_enabled = true;
+        if (val.components.admin_enabled === undefined) val.components.admin_enabled = true;
       }
       return res.status(200).json(val);
     } catch (err) {
