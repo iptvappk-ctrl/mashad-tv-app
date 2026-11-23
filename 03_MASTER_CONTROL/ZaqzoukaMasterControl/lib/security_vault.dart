@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SecurityVault {
   static const String _kPinKey = 'zaqzouka_master_pin_hash';
   static const String _kVaultKey = 'zaqzouka_encrypted_servers_vault';
-  static const String _kDefaultPin = 'yomnaeid';
+  static const String _kDefaultPin = 'ADMIN_SECRET_REDACTED';
 
   /// Hash a string using SHA-256 with a salt
   static String hashPin(String pin) {
