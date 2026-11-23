@@ -1,17 +1,17 @@
 ﻿{
     "packageName": "com.madar.madar_flutter",
-    "versionCode": 85,
-    "versionName": "1.0.78",
-    "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.78-85/zaqzouka-1.0.78-85.apk",
-    "sha256": "eb8a62b6a0a13f187c197153b4b1ede86d6dd8e4ccbc898517bdafdb857bff9b",
+    "versionCode": 86,
+    "versionName": "1.0.79",
+    "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.79-86/zaqzouka-1.0.79-86.apk",
+    "sha256": "917c8c94e8caaaba10ffc08e832259dc43f539edfa85415d4a717eb605a99a30",
     "mandatory": false,
-    "releaseNotes": "تحديث زقزوقة الشامل 1.0.78: نقل زر تخطي الإعلانات إلى منتصف الشاشة، تسريع التشغيل والتبديل التلقائي بين السيرفرات خلال 7 ثوانٍ، وحل مشكلة مزامنة الحلقات للمسلسلات الآسيوية والقصيرة.",
+    "releaseNotes": "تحديث زقزوقة الشامل 1.0.79: نقل زر تخطي الإعلانات إلى يمين الشاشة، فتح الروابط الإعلانية داخل المتصفح المدمج مع زر إغلاق [✕] للعودة الفورية، وتحسين الأداء.",
     "player": {
         "packageName": "com.madar.player",
-        "versionCode": 30,
-        "versionName": "1.1.30",
-        "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.78-85/zag-player-1.1.30.apk",
-        "sha256": "d9325b98b69a040107fd9b733c5e041bd04dbe22b1f4a35f7affe20c7c4d371e",
-        "releaseNotes": "مشغل ZAG Player المحدث 1.1.30: وضع زر التخطي في المنتصف بشكل واضح وبارز، تسريع تخطي السيرفرات البطيئة والشاشات السوداء تلقائياً."
+        "versionCode": 31,
+        "versionName": "1.1.31",
+        "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.79-86/zag-player-1.1.31.apk",
+        "sha256": "96aa2654ce83120405f5158dbfeed58ade837d6136477bd0fc43abf5f0d3d34a",
+        "releaseNotes": "مشغل ZAG Player المحدث 1.1.31: زر التخطي على يمين الشاشة وزر إغلاق [✕] للعودة للمشغل، فتح الإعلانات داخل المشغل مباشرة بدون التحويل للخارج."
     }
 }

@@ -61,6 +61,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.rotate
@@ -414,6 +415,7 @@ class PlayerActivity : ComponentActivity() {
                     if (isPlaying) {
                         var isPreRollShowing by remember(url) { mutableStateOf(true) }
                         var skipCountdown by remember(url) { mutableStateOf(5) }
+                        var inAppWebAdUrl by remember(url) { mutableStateOf<String?>(null) }
 
                         LaunchedEffect(url) {
                             skipCountdown = 5
@@ -425,7 +427,9 @@ class PlayerActivity : ComponentActivity() {
                         }
 
                         BackHandler {
-                            if (isPreRollShowing) {
+                            if (inAppWebAdUrl != null) {
+                                inAppWebAdUrl = null
+                            } else if (isPreRollShowing) {
                                 isPreRollShowing = false
                             } else if (launchedFromExternalIntent) {
                                 finish()
@@ -468,10 +472,15 @@ class PlayerActivity : ComponentActivity() {
                                     countdown = skipCountdown,
                                     onSkip = { isPreRollShowing = false },
                                     onOpenAdUrl = { adUrl ->
-                                        try {
-                                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(adUrl)))
-                                        } catch (e: Exception) {}
+                                        inAppWebAdUrl = adUrl
                                     }
+                                )
+                            }
+
+                            if (inAppWebAdUrl != null) {
+                                InAppBrowserOverlay(
+                                    url = inAppWebAdUrl!!,
+                                    onClose = { inAppWebAdUrl = null }
                                 )
                             }
                         }
@@ -1110,13 +1119,8 @@ private fun PreRollAdOverlay(
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                             val url = request?.url?.toString().orEmpty()
                             if (url.startsWith("http://") || url.startsWith("https://")) {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    }
-                                    ctx.startActivity(intent)
-                                    return true
-                                } catch (e: Exception) {}
+                                view?.loadUrl(url)
+                                return true
                             }
                             return false
                         }
@@ -1131,59 +1135,192 @@ private fun PreRollAdOverlay(
             modifier = Modifier.fillMaxSize()
         )
 
-        Row(
+        // ── Top Left: Sponsored Ad Badge ──
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 24.dp, start = 20.dp, end = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .align(Alignment.TopStart)
+                .padding(top = 24.dp, start = 20.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xCC000000))
+                .border(1.dp, Color(0x66D4AF37), RoundedCornerShape(8.dp))
+                .padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0x99000000))
-                    .border(1.dp, Color(0x66D4AF37), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            Text(
+                text = "إعلان مدعوم",
+                color = Color(0xFFFFE082),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        // ── Top Right: Close / Return to Player Button [✕ عودة للمشغل] ──
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 24.dp, end = 20.dp)
+        ) {
+            Button(
+                onClick = onSkipAd,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xCC1E1420)),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Color(0xFFD4AF37).copy(alpha = 0.6f)),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
             ) {
                 Text(
-                    text = "إعلان مدعوم",
+                    text = "✕  عودة للمشغل",
                     color = Color(0xFFFFE082),
-                    fontSize = 12.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
+        }
 
+        // ── Center-Right (في نص الصفحة على اليمين): Prominent Skip Ad Button ──
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 28.dp)
+        ) {
             if (canSkip) {
                 Button(
                     onClick = onSkipAd,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD4AF37)),
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFD4AF37),
+                        contentColor = Color.Black
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 10.dp),
+                    border = BorderStroke(2.dp, Color(0xFFFFE082))
                 ) {
                     Text(
-                        text = "تخطي الإعلان ✕",
+                        text = "تخطي الإعلان ⏩",
                         color = Color.Black,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black
                     )
                 }
             } else {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xBB000000))
-                        .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xEE12151C))
+                        .border(1.5.dp, Color(0xFFD4AF37).copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 18.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFFD4AF37),
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "تخطي بعد ( $countdown )",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InAppBrowserOverlay(
+    url: String,
+    onClose: () -> Unit
+) {
+    BackHandler { onClose() }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(200f)
+            .background(Color(0xFF0E0B0E))
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .background(Color(0xFF161218))
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Badge
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF251D25))
+                        .border(1.dp, Color(0xFFE5A958), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = "تخطي الإعلان خلال $countdown ث",
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium
+                        text = "إعلان مدعوم • Ad",
+                        color = Color(0xFFE5A958),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // [✕ عودة للمشغل] Button
+                Button(
+                    onClick = onClose,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB94E3C)),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
+                ) {
+                    Text(
+                        text = "✕  عودة للمشغل",
+                        color = Color.White,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
+
+            // In-app WebView
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            loadWithOverviewMode = true
+                            useWideViewPort = true
+                            mediaPlaybackRequiresUserGesture = false
+                            allowFileAccess = false
+                            cacheMode = WebSettings.LOAD_DEFAULT
+                        }
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                val reqUrl = request?.url?.toString().orEmpty()
+                                if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
+                                    view?.loadUrl(reqUrl)
+                                    return true
+                                }
+                                return false
+                            }
+                        }
+                        loadUrl(url)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
@@ -2420,13 +2557,15 @@ private fun PlayerScreen(
         AnimatedVisibility(
             visible = showPreRollAd,
             enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(300))
+            exit = fadeOut(tween(300)),
+            modifier = Modifier.zIndex(100f)
         ) {
             PreRollAdOverlay(
                 adHtml = PlayerAdManager.adHtmlSnippet,
                 adUrl = PlayerAdManager.adUrl,
                 skipDelaySeconds = PlayerAdManager.skipDelaySeconds,
-                onSkipAd = { showPreRollAd = false }
+                onSkipAd = { showPreRollAd = false },
+                modifier = Modifier.fillMaxSize()
             )
         }
 
@@ -2542,7 +2681,7 @@ private fun PlayerScreen(
         // Media3 controller. Tapping the video only changes overlays; it never
         // pauses or recreates the active player.
         AnimatedVisibility(
-            visible = showControls,
+            visible = showControls && !showPreRollAd,
             enter = fadeIn(animationSpec = tween(180)),
             exit = fadeOut(animationSpec = tween(180)),
             modifier = Modifier
@@ -2738,7 +2877,7 @@ private fun PlayerScreen(
         // ── YouTube Native Center Controls ──────────────────────────────────
         if (isYouTube) {
             AnimatedVisibility(
-                visible = showControls,
+                visible = showControls && !showPreRollAd,
                 enter = fadeIn(animationSpec = tween(180)) + scaleIn(animationSpec = tween(180)),
                 exit = fadeOut(animationSpec = tween(180)) + scaleOut(animationSpec = tween(180)),
                 modifier = Modifier.align(Alignment.Center)
@@ -2843,7 +2982,7 @@ private fun PlayerScreen(
         // ── YouTube Native Bottom Controls (Seekbar + Speed + Rotate) ──────
         if (isYouTube) {
             AnimatedVisibility(
-                visible = showControls,
+                visible = showControls && !showPreRollAd,
                 enter = fadeIn(animationSpec = tween(180)) + slideInVertically(initialOffsetY = { it }),
                 exit = fadeOut(animationSpec = tween(180)) + slideOutVertically(targetOffsetY = { it }),
                 modifier = Modifier.align(Alignment.BottomCenter)
@@ -3057,7 +3196,7 @@ private fun PlayerScreen(
         // ── Zakzouka TV Watermark (Bottom-Start corner) ──
         // Unobtrusive, semi-transparent, branded, never covers score or channel logo
         AnimatedVisibility(
-            visible = showControls && !isYouTube,
+            visible = showControls && !isYouTube && !showPreRollAd,
             enter = fadeIn(animationSpec = tween(180)),
             exit = fadeOut(animationSpec = tween(180)),
             modifier = Modifier.align(Alignment.BottomStart),
@@ -5441,57 +5580,9 @@ private fun InPlayerPreRollOverlay(
                 }
             }
 
-            // ── CENTER Skip Button (prominent, full-width, cannot be hidden by top bar) ──
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Button(
-                    onClick = {
-                        if (countdown == 0) {
-                            onSkip()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (countdown == 0) Color(0xFF10B981) else Color(0xFF1A2235),
-                        contentColor = if (countdown == 0) Color.White else Color.White.copy(alpha = 0.65f)
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    elevation = ButtonDefaults.buttonElevation(
-                        defaultElevation = if (countdown == 0) 8.dp else 0.dp
-                    ),
-                    border = if (countdown == 0) null else BorderStroke(1.dp, Color(0xFF2E384D)),
-                    modifier = Modifier
-                        .fillMaxWidth(0.6f)
-                        .height(52.dp)
-                ) {
-                    if (countdown > 0) {
-                        Text(
-                            text = "⏳ يمكنك التخطي بعد ( $countdown )",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Text(
-                            text = "تخطي الإعلان ⏩",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-                if (countdown == 0) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "اضغط للبدء الآن 🎬",
-                        color = Color(0xFF10B981),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-
-            // Bottom Progress Bar
+            // ── BOTTOM ROW: Progress bar (left) + Skip Button (right) ──
             Column(modifier = Modifier.fillMaxWidth()) {
+                // Progress Bar
                 LinearProgressIndicator(
                     progress = { (5 - countdown) / 5f },
                     modifier = Modifier
@@ -5501,23 +5592,54 @@ private fun InPlayerPreRollOverlay(
                     color = accentColor,
                     trackColor = Color(0xFF222B3D)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Bottom row: status text (left) + skip button (right)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Left: status text
                     Text(
-                        text = "جاري تحميل محتوى المشاهدة في الخلفية...",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.sp
+                        text = if (countdown == 0) "جاهز للمشاهدة 🎬" else "جاري تحميل المحتوى...",
+                        color = if (countdown == 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.5f),
+                        fontSize = 11.sp,
+                        fontWeight = if (countdown == 0) FontWeight.Bold else FontWeight.Normal
                     )
-                    if (countdown == 0) {
-                        Text(
-                            text = "اضغط على تخطي لبدء الفيلم",
-                            color = Color(0xFF10B981),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+
+                    // Right: Skip button
+                    Button(
+                        onClick = {
+                            if (countdown == 0) {
+                                onSkip()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (countdown == 0) Color(0xFF10B981) else Color(0xFF1A2235),
+                            contentColor = if (countdown == 0) Color.White else Color.White.copy(alpha = 0.65f)
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        elevation = ButtonDefaults.buttonElevation(
+                            defaultElevation = if (countdown == 0) 8.dp else 0.dp
+                        ),
+                        border = if (countdown == 0) null else BorderStroke(1.dp, Color(0xFF2E384D)),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                        modifier = Modifier.height(42.dp)
+                    ) {
+                        if (countdown > 0) {
+                            Text(
+                                text = "⏳ تخطي بعد $countdown ث",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else {
+                            Text(
+                                text = "تخطي الإعلان ⏩",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
                     }
                 }
             }

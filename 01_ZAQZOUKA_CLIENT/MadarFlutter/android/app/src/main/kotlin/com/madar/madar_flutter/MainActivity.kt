@@ -20,8 +20,23 @@ import org.json.JSONObject
 import com.madar.tv.notifications.NotificationCenter
 import com.madar.tv.notifications.NotificationWorkScheduler
 import android.app.Activity
+import android.app.Dialog
 import android.content.Context
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.Window
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 import io.flutter.plugin.common.StandardMessageCodec
@@ -132,14 +147,8 @@ class MainActivity : FlutterActivity() {
                     "player.store" -> openPlayerStore(result)
                     "system.openUrl" -> {
                         val targetUrl = call.argument<String>("url").orEmpty()
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            startActivity(intent)
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.success(false)
-                        }
+                        openInAppBrowser(targetUrl)
+                        result.success(true)
                     }
                     "player.status" -> {
                         val code = inAppUpdateManager.getInstalledPlayerVersionCode()
@@ -473,6 +482,175 @@ class MainActivity : FlutterActivity() {
             result.success(true)
         } catch (_: Exception) {
             result.success(false)
+        }
+    }
+
+    private fun openInAppBrowser(url: String) {
+        if (url.isBlank()) return
+        runOnUiThread {
+            try {
+                val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+                dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+
+                val rootLayout = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    setBackgroundColor(Color.parseColor("#0E0B0E"))
+                }
+
+                // ── Top Bar with [✕ عودة للتطبيق] button ──
+                val topBar = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        (56 * resources.displayMetrics.density).toInt()
+                    )
+                    setBackgroundColor(Color.parseColor("#161218"))
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(
+                        (16 * resources.displayMetrics.density).toInt(),
+                        0,
+                        (16 * resources.displayMetrics.density).toInt(),
+                        0
+                    )
+                }
+
+                // Ad Indicator Label
+                val adLabel = TextView(this).apply {
+                    text = "إعلان مدعوم • Ad"
+                    setTextColor(Color.parseColor("#E5A958"))
+                    textSize = 13f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    val bg = GradientDrawable().apply {
+                        setColor(Color.parseColor("#251D25"))
+                        setStroke((1 * resources.displayMetrics.density).toInt(), Color.parseColor("#E5A958"))
+                        cornerRadius = 8 * resources.displayMetrics.density
+                    }
+                    background = bg
+                    setPadding(
+                        (10 * resources.displayMetrics.density).toInt(),
+                        (4 * resources.displayMetrics.density).toInt(),
+                        (10 * resources.displayMetrics.density).toInt(),
+                        (4 * resources.displayMetrics.density).toInt()
+                    )
+                }
+
+                val spacer = View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, 0, 1.0f)
+                }
+
+                // ── [✕ عودة للتطبيق] Button ──
+                val closeBtn = TextView(this).apply {
+                    text = "✕  عودة للتطبيق"
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    val bg = GradientDrawable().apply {
+                        setColor(Color.parseColor("#B94E3C"))
+                        cornerRadius = 10 * resources.displayMetrics.density
+                    }
+                    background = bg
+                    setPadding(
+                        (16 * resources.displayMetrics.density).toInt(),
+                        (8 * resources.displayMetrics.density).toInt(),
+                        (16 * resources.displayMetrics.density).toInt(),
+                        (8 * resources.displayMetrics.density).toInt()
+                    )
+                    setOnClickListener {
+                        dialog.dismiss()
+                    }
+                }
+
+                topBar.addView(adLabel)
+                topBar.addView(spacer)
+                topBar.addView(closeBtn)
+                rootLayout.addView(topBar)
+
+                // ── Progress Bar ──
+                val progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        (3 * resources.displayMetrics.density).toInt()
+                    )
+                    isIndeterminate = false
+                    max = 100
+                    progressDrawable?.setColorFilter(Color.parseColor("#E5A958"), android.graphics.PorterDuff.Mode.SRC_IN)
+                }
+                rootLayout.addView(progressBar)
+
+                // ── In-App WebView ──
+                val webView = WebView(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        0,
+                        1.0f
+                    )
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        loadWithOverviewMode = true
+                        useWideViewPort = true
+                        mediaPlaybackRequiresUserGesture = false
+                        allowFileAccess = false
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                    }
+                    setBackgroundColor(Color.parseColor("#0E0B0E"))
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                            progressBar.progress = newProgress
+                            progressBar.visibility = if (newProgress < 100) View.VISIBLE else View.GONE
+                        }
+                    }
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                            val reqUrl = request?.url?.toString().orEmpty()
+                            if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
+                                view?.loadUrl(reqUrl)
+                                return true
+                            }
+                            return false
+                        }
+                    }
+                    loadUrl(url)
+                }
+                rootLayout.addView(webView)
+
+                dialog.setContentView(rootLayout)
+
+                dialog.setOnKeyListener { _, keyCode, event ->
+                    if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                        if (webView.canGoBack()) {
+                            webView.goBack()
+                            true
+                        } else {
+                            dialog.dismiss()
+                            true
+                        }
+                    } else {
+                        false
+                    }
+                }
+
+                dialog.setOnDismissListener {
+                    try {
+                        webView.stopLoading()
+                        webView.loadUrl("about:blank")
+                        webView.destroy()
+                    } catch (_: Exception) {}
+                }
+
+                dialog.show()
+            } catch (e: Exception) {
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (_: Exception) {}
+            }
         }
     }
 
