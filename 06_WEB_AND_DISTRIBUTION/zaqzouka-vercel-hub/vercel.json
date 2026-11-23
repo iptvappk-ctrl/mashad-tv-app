@@ -2,6 +2,15 @@
   "version": 2,
   "routes": [
     {
+      "src": "/sw.js",
+      "dest": "/public/sw.js",
+      "headers": {
+        "Content-Type": "application/javascript",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Service-Worker-Allowed": "/"
+      }
+    },
+    {
       "src": "/api/status",
       "dest": "/api/status.js",
       "headers": {
