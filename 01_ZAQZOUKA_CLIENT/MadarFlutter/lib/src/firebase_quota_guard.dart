@@ -848,12 +848,12 @@ class _DefaultForcedUpdateScreenState extends State<_DefaultForcedUpdateScreen> 
       final res = await _native.invokeMapMethod<String, dynamic>('updates.install');
       if (res?['status'] != 'install_started') {
         final apkUrl = widget.status.updateApkUrl;
-        await _native.invokeMethod<bool>('browser.open', {'url': apkUrl});
+        await _native.invokeMethod<bool>('system.openUrl', {'url': apkUrl});
       }
     } catch (_) {
       try {
         final apkUrl = widget.status.updateApkUrl;
-        await _native.invokeMethod<bool>('browser.open', {'url': apkUrl});
+        await _native.invokeMethod<bool>('system.openUrl', {'url': apkUrl});
       } catch (_) {}
     }
 

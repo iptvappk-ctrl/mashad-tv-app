@@ -170,10 +170,10 @@ object MultiProviderRepository {
 
 
     private fun catalogCacheKey(type: ArabseedType?, page: Int): String = when (type) {
-        // Bumped to v6 so fixed mirrors and Arab/Turkish/Korean/Asian feeds refresh immediately.
-        ArabseedType.MOVIE -> "movies:v6:$page"
-        ArabseedType.SERIES -> "series:v6:$page"
-        null -> "catalog:v6:$page"
+        // Bumped to v8 so removed dead providers and fixed routes/posters refresh cleanly.
+        ArabseedType.MOVIE -> "movies:v8:$page"
+        ArabseedType.SERIES -> "series:v8:$page"
+        null -> "catalog:v8:$page"
     }
 
     fun loadCachedCatalog(type: ArabseedType?, page: Int = 1): List<ArabseedItem>? {
@@ -187,7 +187,7 @@ object MultiProviderRepository {
     }
 
     fun loadCachedSearch(query: String): List<ArabseedItem>? {
-        val key = "search:v9:" + query.trim().lowercase()
+        val key = "search:v10:" + query.trim().lowercase()
         if (query.isBlank()) return null
         searchCache[key]?.let { cached ->
             if (System.currentTimeMillis() - cached.first <= 14L * 24 * 60 * 60 * 1000) return cached.second
@@ -328,7 +328,10 @@ object MultiProviderRepository {
     }
 
     private fun isConfiguredProviderHost(provider: ProviderConfig, url: String): Boolean =
-        (listOf(provider.baseUrl) + provider.mirrorDomains).any { hostMatches(url, it) }
+        (listOf(provider.baseUrl) + provider.mirrorDomains).any { hostMatches(url, it) } ||
+            // faselhd.online redirects to dynamic CDN subdomains like vdXXXX.fasel4hdx.space;
+            // allow the redirect target without polling bare fasel4hdx.space directly.
+            (provider.id == "faselhd" && hostMatches(url, "https://fasel4hdx.space"))
 
     private fun providerRouteKey(provider: ProviderConfig, baseUrl: String): String {
         val host = runCatching { java.net.URI.create(baseUrl).host.orEmpty() }
@@ -411,7 +414,8 @@ object MultiProviderRepository {
             name = "وي سيما",
             baseUrl = "https://wecima.cc",
             mirrorDomains = emptyList(),
-            moviesPath = "/movies/page/{page}/",
+            // /movies/page/N/ returns an empty shell; /page/N/ returns live video cards.
+            moviesPath = "/page/{page}/",
             seriesPath = "/arabic-series/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
@@ -451,7 +455,7 @@ object MultiProviderRepository {
             id = "faselhd",
             name = "فاصل إعلاني",
             baseUrl = "https://faselhd.online",
-            mirrorDomains = listOf("https://fasel4hdx.space"),
+            mirrorDomains = emptyList(), // fasel4hdx.space: bare root 404 (vd*.fasel4hdx.space redirects allowed via isConfiguredProviderHost) — removed
             moviesPath = "/movies?page={page}",
             seriesPath = "/series?page={page}",
             searchPath = "/search?q={q}",
@@ -506,7 +510,7 @@ object MultiProviderRepository {
             id = "topcinema",
             name = "توب سينما",
             baseUrl = "https://topcinemaa.tv",
-            mirrorDomains = listOf("https://topcinema.cam"),
+            mirrorDomains = emptyList(), // topcinema.cam: 301 → topcinemaa.tv (redundant) — removed
             moviesPath = "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a-8/page/{page}/",
             seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/page/{page}/",
             searchPath = "/?s={q}",
@@ -520,7 +524,7 @@ object MultiProviderRepository {
             id = "shahid4u",
             name = "شاهد فور يو",
             baseUrl = "https://shahid4u.bid",
-            mirrorDomains = listOf("https://shahid4u.food"),
+            mirrorDomains = emptyList(), // shahid4u.food: only dead govid.live embeds & timed out — removed
             moviesPath = "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/page/{page}/",
             seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/page/{page}/",
             searchPath = "/?s={q}",
@@ -560,7 +564,7 @@ object MultiProviderRepository {
             id = "cima4u",
             name = "سيما فور يو",
             baseUrl = "https://c4u.cam",
-            mirrorDomains = listOf("https://cima4u.watch", "https://cima4u4k.site"),
+            mirrorDomains = emptyList(), // cima4u.watch: empty body; cima4u4k.site: 404 — both removed
             moviesPath = "/films?page={page}",
             seriesPath = "/seriestv?page={page}",
             searchPath = "/search?q={q}",
@@ -629,7 +633,7 @@ object MultiProviderRepository {
             id = "aradrama",
             name = "آرا دراما",
             baseUrl = "https://aradramatv.cc",
-            mirrorDomains = listOf("https://aradramatv.net"),
+            mirrorDomains = emptyList(), // aradramatv.net: 301 → aradramatv.cc (redundant) — removed
             moviesPath = "/category/%d8%a7%d9%84%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%84%d8%a2%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/page/{page}/",
             seriesPath = "/category/serie/korea/page/{page}/",
             searchPath = "/?s={q}",
@@ -663,7 +667,7 @@ object MultiProviderRepository {
             id = "esheeq",
             name = "قصة عشق",
             baseUrl = "https://qesset.net",
-            mirrorDomains = listOf("https://qeseh.net", "https://3sk.tv", "https://3sk.biz"),
+            mirrorDomains = emptyList(), // qeseh.net→qesset.net (redundant); 3sk.tv→qeseh.net (double redirect); 3sk.biz: JS interstitial — all removed
             moviesPath = "/category/yeni-filmler/page/{page}/",
             seriesPath = "/discover/page/{page}/",
             searchPath = "/?s={q}",
@@ -690,7 +694,7 @@ object MultiProviderRepository {
                 "a[href*='/movie/']", "a[href*='/series/']",
             ),
             titleSelectors = listOf("h3", "h2", ".Title", "strong.hasyear", "[title]", "img[alt]"),
-            enabled = true,
+            enabled = false, // movizland.life: HTTP 403/404 always, 0 cards parsed — disabled
             isPrimary = false,
         ),
 
@@ -699,7 +703,7 @@ object MultiProviderRepository {
             id = "prestige",
             name = "بريستيج",
             baseUrl = "https://hd1.brstej.com",
-            mirrorDomains = listOf("https://prstej.asia", "https://prstej.lat", "https://brstej.com"),
+            mirrorDomains = emptyList(), // prstej.asia, prstej.lat, brstej.com: 301 → hd1.brstej.com — removed
             moviesPath = "/cat03.php?cat=aflam02-2024&page={page}",
             seriesPath = "/cat03.php?cat=arab8-2025&page={page}",
             searchPath = "/search.php?keywords={q}",
@@ -714,21 +718,23 @@ object MultiProviderRepository {
             isPrimary = true,
         ),
 
-        // ── سيما كلوب (CimaClub - cimaclub.live + cimaclub1.ink) ───────
+        // ── سيما كلوب (CimaClub - cimaclub1.ink PHPMelody .php routes) ─
         ProviderConfig(
             id = "cimaclub",
             name = "سيما كلوب",
-            baseUrl = "https://cimaclub.live",
-            mirrorDomains = listOf("https://cimaclub1.ink", "https://cimaclub.living"),
-            moviesPath = "/category/movies/page/{page}/",
-            seriesPath = "/category/series/page/{page}/",
-            searchPath = "/search?q={q}",
+            baseUrl = "https://cimaclub1.ink",
+            mirrorDomains = emptyList(), // cimaclub.live: 403; cimaclub.living: 301 → cimaclub1.ink — removed
+            moviesPath = "/movies.php?page={page}",
+            seriesPath = "/all-series.php?page={page}",
+            searchPath = "/search.php?keywords={q}",
             cardSelectors = listOf(
-                "a.card", "article.MovieItem a", ".MovieItem a",
-                "div.GridItem a", "article a",
-                "h3.Title a", "a[href*='/watch/']", "a[href*='watch.php?vid=']",
+                "a[href*='watch.php?vid=']",
+                "a[href*='category.php?cat=']",
+                ".pm-video-thumb a",
+                "li.pm-li-video a",
+                "article a",
             ),
-            titleSelectors = listOf("h3.Title", "h3", "h2", ".Title", "[title]", "img[alt]"),
+            titleSelectors = listOf("[title]", "img[alt]", "h3.Title", "h3", "h2", ".Title"),
             enabled = true,
             isPrimary = true,
         ),
@@ -738,7 +744,7 @@ object MultiProviderRepository {
             id = "egydead",
             name = "إيجي ديد",
             baseUrl = "https://egydead.blog",
-            mirrorDomains = listOf("https://egidead.cam", "https://egydead.surf"),
+            mirrorDomains = emptyList(), // egidead.cam: 404 & empty servers; egydead.surf → egydead.christmas (403) — removed
             moviesPath = "/movies/page/{page}/",
             seriesPath = "/series/page/{page}/",
             searchPath = "/?s={q}",
@@ -746,7 +752,7 @@ object MultiProviderRepository {
                 "li.movieItem a", "article.post-item a",
                 "div.movie-card a", "a.box", "article a",
             ),
-            titleSelectors = listOf("h2.title", "span.movie-title", "h2", "h3", "[title]", "img[alt]"),
+            titleSelectors = listOf("p.title", ".title", "h2.title", "span.movie-title", "h2", "h3", "[title]", "img[alt]"),
         ),
         // ── سيما ناو / ماي سيد نايم (CimaNow via myseed.name) ──────────
         ProviderConfig(
@@ -754,14 +760,14 @@ object MultiProviderRepository {
             name = "سيما ناو",
             baseUrl = "https://myseed.name",
             mirrorDomains = emptyList(),
-            moviesPath = "/category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/page/{page}/",
-            seriesPath = "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/page/{page}/",
+            moviesPath = "/category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A?page={page}",
+            seriesPath = "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A?page={page}",
             searchPath = "/search?s={q}",
             cardSelectors = listOf(
                 "a.show-card", "a[href*='/film/']", "a[href*='/episode/']", "a[href*='/series/']",
                 "a[href*='film-']", "div.card a", "article a", "div.movie-box a",
             ),
-            titleSelectors = listOf("h3.card-title", "div.title", "h3", "h2", "[title]", "img[alt]"),
+            titleSelectors = listOf("p.title", ".title", "h3.card-title", "div.title", "h3", "h2", "[title]", "img[alt]"),
             enabled = true,
             isPrimary = true,
         ),
@@ -893,10 +899,9 @@ object MultiProviderRepository {
     private val providerContentHostRoots: List<String> by lazy {
         PROVIDERS.flatMap { provider -> listOf(provider.baseUrl) + provider.mirrorDomains }
             .mapNotNull { domain -> runCatching { java.net.URI(domain).host }.getOrNull() } + listOf(
-            "myseed.tv", "wecima.casa", "fasel4k.site", "topcinemaa.tv",
-            "wecima.cam", "c4u.cam", "cimaclub.live",
-            "shahid4u.to", "shahid4u.cam", "movizland.com",
-            "prstej.asia", "aflam.to", "mycima.work",
+            "myseed.tv", "wecima.casa", "fasel4k.site", "fasel4hdx.space", "topcinemaa.tv",
+            "wecima.cam", "c4u.cam", "cimaclub1.ink",
+            "aflam.to", "mycima.work",
         )
     }
 
@@ -999,6 +1004,9 @@ object MultiProviderRepository {
     private fun fetchHtml(url: String, referer: String = ""): String =
         fetchHtmlWithClient(url, referer, http)
 
+    private fun fetchJsonText(url: String, referer: String = ""): String =
+        fetchHtmlWithClient(url, referer, http, allowJson = true)
+
     private fun fetchHtmlAndFinalUrl(url: String, referer: String = ""): Pair<String, String> {
         var finalUrl = url
         val body = fetchHtmlWithClient(
@@ -1084,9 +1092,16 @@ object MultiProviderRepository {
         client: OkHttpClient,
         onFinalUrl: ((String) -> Unit)? = null,
         onHttpStatus: ((Int) -> Unit)? = null,
+        allowJson: Boolean = false,
     ): String {
 
         return try {
+
+            val acceptHeader = if (allowJson) {
+                "application/json, text/plain, */*"
+            } else {
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            }
 
             val req = Request.Builder()
 
@@ -1094,7 +1109,7 @@ object MultiProviderRepository {
 
                 .header("User-Agent", UA)
 
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept", acceptHeader)
 
                 .header("Accept-Language", "ar,en;q=0.9")
 
@@ -1111,10 +1126,11 @@ object MultiProviderRepository {
                     ""
                 } else {
                     val contentType = r.header("Content-Type").orEmpty().lowercase(java.util.Locale.ROOT)
-                    if (contentType.isNotBlank() &&
-                        !contentType.contains("text/html") &&
-                        !contentType.contains("application/xhtml+xml")
-                    ) {
+                    val expectedContentType = contentType.isBlank() ||
+                        contentType.contains("text/html") ||
+                        contentType.contains("application/xhtml+xml") ||
+                        (allowJson && contentType.contains("application/json"))
+                    if (!expectedContentType) {
                         android.util.Log.w(TAG, "Unexpected provider content type for host=$host type=$contentType")
                         return@use ""
                     }
@@ -1193,7 +1209,7 @@ object MultiProviderRepository {
                 }.getOrDefault(href.lowercase(java.util.Locale.ROOT))
 
                 val isLodynetSeriesCard = provider.id == "lodynet" && decodedHrefLower.contains("/category/مسلسل-")
-                val isIegybestSeriesCard = provider.id == "iegybest" && decodedHrefLower.contains("category.php?cat=") && !decodedHrefLower.contains("aflam-") && !decodedHrefLower.contains("mslslat") && !decodedHrefLower.contains("top-250")
+                val isIegybestSeriesCard = (provider.id == "iegybest" || provider.id == "cimaclub") && decodedHrefLower.contains("category.php?cat=") && !decodedHrefLower.contains("aflam-") && !decodedHrefLower.contains("mslslat") && !decodedHrefLower.contains("top-250") && !decodedHrefLower.contains("-movies") && !decodedHrefLower.contains("foreign-films")
                 if (!isLodynetSeriesCard && !isIegybestSeriesCard &&
                     (href.contains("/category") || href.contains("/tag/") || href.contains("/page/") || href.contains("category.php") || href.contains("topvideos") || href.contains("favicons"))
                 ) continue
@@ -1255,7 +1271,11 @@ object MultiProviderRepository {
                         ?: img?.attr("abs:src")?.let(::normalizePosterUrl)
                 }
 
-                // 3. Try background-image in style attribute (WeCima, Akwam)
+                // 3. Try data-bg (EgyDead) or background-image in style attribute (WeCima, Akwam)
+                if (poster == null) {
+                    val bgData = el.attr("data-bg").ifBlank { el.selectFirst("[data-bg]")?.attr("data-bg").orEmpty() }
+                    if (bgData.isNotBlank()) poster = normalizePosterUrl(bgData)
+                }
                 if (poster == null) {
                     val styleEl = el.selectFirst("[style*='background-image']")
                         ?: el.selectFirst(".br-thumb, .ak-poster, .imgSer, .poster, .pm-video-thumb")
@@ -1680,7 +1700,7 @@ object MultiProviderRepository {
         else -> emptyList()
     }
 
-    private fun categoryCacheKey(categoryId: String, page: Int): String = "category:v7:$categoryId:$page"
+    private fun categoryCacheKey(categoryId: String, page: Int): String = "category:v8:$categoryId:$page"
 
     fun loadCachedCategory(categoryId: String, page: Int = 1): List<ArabseedItem>? {
         val key = categoryCacheKey(categoryId, page)
@@ -1804,7 +1824,7 @@ object MultiProviderRepository {
         val q = normalizeSearchQueryPunctuation(query)
         if (q.isBlank()) return emptyList()
 
-        val key = "search:v9:${q.lowercase()}"
+        val key = "search:v10:${q.lowercase()}"
         val now = System.currentTimeMillis()
         if (!forceRefresh) {
             searchCache[key]?.let { (savedAt, items) ->
@@ -1866,7 +1886,7 @@ object MultiProviderRepository {
 
         try {
 
-            val html = fetchHtml(pageUrl)
+            val html = fetchHtml(pageUrl, pageOrigin(pageUrl))
 
             if (html.isBlank()) return "" to emptyList()
 
@@ -1995,9 +2015,11 @@ object MultiProviderRepository {
         val path = uri.path.orEmpty().lowercase(java.util.Locale.ROOT)
         if (uri.scheme !in setOf("http", "https") || host.isBlank() || isAdServerUrl(clean)) return false
         val deadOrScamHosts = listOf(
-            "egybest.live", "shahid4u.cam", "shahid4u.tv", "shahid4u.to",
+            "egybest.live", "shahid4u.cam", "shahid4u.tv", "shahid4u.to", "shahid4u.food",
             "cimanow.cc", "cimanow.info", "cimanow.net", "movies4u.icu", "spacemov.xyz",
-            "moviflex.net", "shot90.com", "cima4up-official.cyou",
+            "moviflex.net", "movizland.life", "cimaclub.live", "egydead.surf", "egydead.christmas",
+            "3sk.biz", "baalbeckfoodhub.com", "cima4u.watch", "cima4u4k.site",
+            "shot90.com", "cima4up-official.cyou",
             "moviewatcher-offcial.cyou", "asia2tv.com", "mycima.help",
             "govid.live", "luluvdo.com", "vidplayer.live", "shahied4u.vidplayer.live",
         )
@@ -2098,7 +2120,7 @@ object MultiProviderRepository {
                     variants += "$origin/watch/$slug"
                 }
             }
-            "shahid4u", "cimaclub", "topcinema" -> {
+            "shahid4u", "topcinema" -> {
                 val trimmed = pageUrl.trimEnd('/')
                 if (!trimmed.endsWith("/watch")) variants += "$trimmed/watch/"
             }
@@ -2116,7 +2138,7 @@ object MultiProviderRepository {
                     variants += "$trimmed/watch"
                 }
             }
-            "prestige", "iegybest", "cimawbas" -> {
+            "prestige", "iegybest", "cimawbas", "cimaclub" -> {
                 val vid = Regex("""vid=([A-Za-z0-9]+)""").find(pageUrl)?.groupValues?.getOrNull(1).orEmpty()
                 if (vid.isNotBlank()) {
                     val origin = pageOrigin(pageUrl, provider.baseUrl).trimEnd('/')
@@ -2350,7 +2372,7 @@ object MultiProviderRepository {
                         else -> ""
                     }
                     if (playApiPath.isNotBlank()) {
-                        val apiBody = fetchHtml("$siOrigin$playApiPath", pageUrl)
+                        val apiBody = fetchJsonText("$siOrigin$playApiPath", pageUrl)
                         val lines = JSONObject(apiBody).optJSONArray("lines")
                         if (lines != null) {
                             for (i in 0 until lines.length()) {
@@ -2358,7 +2380,7 @@ object MultiProviderRepository {
                                 val sName = line.optString("name", "سيرفر ${i + 1}").trim()
                                 var rawU = line.optString("url").trim()
                                 if (rawU.startsWith("/api/hls/")) {
-                                    val hlsMeta = fetchHtml("$siOrigin$rawU", pageUrl)
+                                    val hlsMeta = fetchJsonText("$siOrigin$rawU", pageUrl)
                                     val streamPath = runCatching { JSONObject(hlsMeta).optString("url") }.getOrDefault("")
                                     if (streamPath.isNotBlank()) rawU = "$siOrigin$streamPath"
                                 }
@@ -3969,6 +3991,7 @@ object MultiProviderRepository {
             val requestedSeasonPageNumber = seasonNumbersOnly?.singleOrNull()
                 ?.takeIf { pageSeasonNumber == it }
             val selectors = listOf(
+                ".SeasonsBoxUL a[href]", ".seasons-on-serie a[href]",
                 ".pwr-season-panel a[href]", ".epslist a[href]", "a.episode-card",
                 "a.sh-episode-tile", ".Small--Box a", ".episode a", ".episodes a",
                 ".episodes-list a", ".EpisodesList li a", ".eplister li a",
