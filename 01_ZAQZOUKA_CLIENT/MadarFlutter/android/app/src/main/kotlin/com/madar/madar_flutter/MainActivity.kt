@@ -139,10 +139,39 @@ class MainActivity : FlutterActivity() {
                     "player.open" -> openPlayer(call.argument("url"), call.argument("title"), call.argument("userAgent"), call.argument("referer"), call.argument("headers"), call.argument("backupSourcesJson"), call.argument<Boolean>("live") ?: false, result)
                     "player.openExternal" -> openExternalPlayer(call.argument("url"), call.argument("title"), result)
                     "player.store" -> openPlayerStore(result)
+                    "app.versionInfo" -> {
+                        val pkgInfo = runCatching {
+                            @Suppress("DEPRECATION")
+                            packageManager.getPackageInfo(packageName, 0)
+                        }.getOrNull()
+                        val code = if (pkgInfo != null) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pkgInfo.longVersionCode else @Suppress("DEPRECATION") pkgInfo.versionCode.toLong()
+                        } else 90L
+                        val name = pkgInfo?.versionName ?: "1.0.83"
+                        result.success(
+                            mapOf(
+                                "versionCode" to code,
+                                "versionName" to name,
+                            )
+                        )
+                    }
                     "system.openUrl" -> {
                         val targetUrl = call.argument<String>("url").orEmpty()
                         openInAppBrowser(targetUrl)
                         result.success(true)
+                    }
+                    "system.openExternalUrl" -> {
+                        val targetUrl = call.argument<String>("url").orEmpty()
+                        val opened = runCatching {
+                            if (targetUrl.isNotBlank()) {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                                true
+                            } else false
+                        }.getOrDefault(false)
+                        result.success(opened)
                     }
                     "player.status" -> {
                         val code = inAppUpdateManager.getInstalledPlayerVersionCode()
@@ -601,6 +630,14 @@ class MainActivity : FlutterActivity() {
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                             val reqUrl = request?.url?.toString().orEmpty()
+                            if (reqUrl.endsWith(".apk", ignoreCase = true) || reqUrl.contains(".apk?", ignoreCase = true)) {
+                                runCatching {
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(reqUrl)).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    })
+                                }
+                                return true
+                            }
                             if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
                                 view?.loadUrl(reqUrl)
                                 return true
@@ -614,6 +651,15 @@ class MainActivity : FlutterActivity() {
                                 return true
                             }
                             return true
+                        }
+                    }
+                    setDownloadListener { downloadUrl, _, _, _, _ ->
+                        if (downloadUrl.isNotBlank()) {
+                            runCatching {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl)).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                })
+                            }
                         }
                     }
                     loadUrl(url)

@@ -120,6 +120,15 @@ async function fbRead(path) {
   return resp.json();
 }
 
+async function fbReadLimited(path, limit) {
+  const token = await getFirebaseToken();
+  const q = encodeURIComponent('"$key"');
+  const url = `${DB_URL}/${path}.json?orderBy=${q}&limitToLast=${limit}&access_token=${token}`;
+  const resp = await fetch(url);
+  if (!resp.ok) return fbRead(path);
+  return resp.json();
+}
+
 async function fbWrite(path, data) {
   const token = await getFirebaseToken();
   const url = `${DB_URL}/${path}.json?access_token=${token}`;
@@ -174,26 +183,51 @@ function corsHeaders() {
   };
 }
 
-function jsonResp(data, status = 200) {
+function jsonResp(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    headers: {
+      ...corsHeaders(),
+      'Content-Type': 'application/json; charset=utf-8',
+      ...extraHeaders,
+    },
   });
 }
 
 // ─── Route Handlers ───────────────────────────────────────────────────────────
 
+let _healthCache = null;
+let _healthCacheTime = 0;
+
 async function handleHealth(req) {
+  const now = Date.now();
+  if (_healthCache && now - _healthCacheTime < 60000) {
+    return jsonResp(
+      { ..._healthCache, _source: 'memory_cache' },
+      200,
+      { 'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=120' }
+    );
+  }
   try {
-    const stats = await fbRead('stats');
-    return jsonResp({
+    const firstOpens = await fbRead('stats/firstOpens');
+    const payload = {
       status: 'online',
       serverTime: new Date().toISOString(),
-      totalSessions: (stats && stats.firstOpens) || 0,
+      totalSessions: firstOpens || 0,
       dataConnected: true,
       provider: 'cloudflare-workers',
+    };
+    _healthCache = payload;
+    _healthCacheTime = now;
+    return jsonResp(payload, 200, {
+      'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=120',
     });
   } catch (err) {
+    if (_healthCache) {
+      return jsonResp({ ..._healthCache, _source: 'stale' }, 200, {
+        'Cache-Control': 'public, max-age=15, s-maxage=30',
+      });
+    }
     return jsonResp({
       status: 'online',
       serverTime: new Date().toISOString(),
@@ -212,54 +246,28 @@ let _statusCacheTime = 0;
 async function handleStatus(req) {
   const now = Date.now();
   if (_statusCache && now - _statusCacheTime < 30000) {
-    return new Response(JSON.stringify({ ..._statusCache, _source: 'cache' }), {
-      status: 200,
-      headers: {
-        ...corsHeaders(),
-        'Content-Type': 'application/json',
-        'Cache-Control': 's-maxage=60, stale-while-revalidate=300',
-      },
+    const view = sanitizeSystemControl(_statusCache, true);
+    return jsonResp({ ...view, _source: 'cache' }, 200, {
+      'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
     });
   }
 
-  const FALLBACK = {
-    status: 'active',
-    message: 'المنظومة نشطة وتعمل بشكل طبيعي',
-    updatedAt: now,
-    wipeTimestamp: 0,
-    components: {
-      download_site_enabled: true,
-      web_player_enabled: true,
-      website_enabled: true,
-      app_enabled: true,
-      player_enabled: true,
-      admin_enabled: true,
-    },
-  };
+  const FALLBACK = sanitizeSystemControl(null, true);
 
   try {
-    let val = await fbRead('system_control');
-    if (!val) val = FALLBACK;
-
-    if (val && val.components) {
-      if (val.status === 'active' && val.components.app_enabled === false) {
-        val = { ...val, status: 'frozen', message: val.message || 'التطبيق متوقف حالياً للصيانة.' };
-      }
-    }
-
-    _statusCache = val;
+    const raw = await fbRead('system_control');
+    const stored = sanitizeSystemControl(raw, false);
+    _statusCache = stored;
     _statusCacheTime = now;
 
-    return new Response(JSON.stringify({ ...val, _source: 'firebase' }), {
-      status: 200,
-      headers: {
-        ...corsHeaders(),
-        'Content-Type': 'application/json',
-        'Cache-Control': 's-maxage=60, stale-while-revalidate=300',
-      },
+    const view = sanitizeSystemControl(stored, true);
+    return jsonResp({ ...view, _source: 'firebase' }, 200, {
+      'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
     });
   } catch (err) {
-    if (_statusCache) return jsonResp({ ..._statusCache, _source: 'stale', _error: err.message });
+    if (_statusCache) {
+      return jsonResp({ ...sanitizeSystemControl(_statusCache, true), _source: 'stale', _error: err.message });
+    }
     return jsonResp({ ...FALLBACK, _source: 'fallback', _error: err.message });
   }
 }
@@ -271,13 +279,13 @@ async function handleStats(req, url) {
   try {
     const [stats, sessionsObj, topContent, searches, errors, actLog, landing, landingVisitors] = await Promise.all([
       fbRead('stats'),
-      fbRead('sessions'),
-      fbRead('topContent'),
-      fbRead('searches'),
-      fbRead('errors'),
-      fbRead('activityLog'),
+      fbReadLimited('sessions', 600),
+      fbReadLimited('topContent', 500),
+      fbReadLimited('searches', 500),
+      fbReadLimited('errors', 50),
+      fbReadLimited('activityLog', 50),
       fbRead('landing_analytics'),
-      fbRead('landing_visitors'),
+      fbReadLimited('landing_visitors', 50),
     ]);
 
     const sessionsArr = sessionsObj ? Object.values(sessionsObj) : [];
@@ -575,63 +583,67 @@ async function handleAdmin(req, url, body) {
   return jsonResp({ error: 'Unknown admin route: ' + route }, 400);
 }
 
+function sanitizeSystemControl(raw, normalizeAppDisabled = true) {
+  const val = raw && typeof raw === 'object' ? { ...raw } : {};
+  delete val.secret;
+  delete val.action;
+  if (!val.status) val.status = 'active';
+  if (!val.message) val.message = 'المنظومة نشطة وتعمل بشكل طبيعي';
+  if (val.wipeTimestamp === undefined) val.wipeTimestamp = 0;
+  if (!val.components || typeof val.components !== 'object') {
+    val.components = {
+      download_site_enabled: true,
+      web_player_enabled: true,
+      website_enabled: true,
+      app_enabled: true,
+      player_enabled: true,
+      admin_enabled: true,
+    };
+  } else {
+    val.components = { ...val.components };
+    if (val.components.download_site_enabled === undefined) val.components.download_site_enabled = true;
+    if (val.components.web_player_enabled === undefined) val.components.web_player_enabled = true;
+    if (val.components.website_enabled === undefined) val.components.website_enabled = true;
+    if (val.components.app_enabled === undefined) val.components.app_enabled = true;
+    if (val.components.player_enabled === undefined) val.components.player_enabled = true;
+    if (val.components.admin_enabled === undefined) val.components.admin_enabled = true;
+  }
+  if (normalizeAppDisabled && val.status === 'active' && val.components.app_enabled === false) {
+    val.status = 'frozen';
+    val.message = val.message || 'عفواً، التطبيق متوقف حالياً للصيانة.';
+  }
+  return val;
+}
+
 async function readSystemControlCached() {
   const now = Date.now();
   if (_statusCache && now - _statusCacheTime < 30000) {
     return _statusCache;
   }
-  const val = await fbRead('system_control');
-  if (val && typeof val === 'object') {
-    _statusCache = val;
-    _statusCacheTime = now;
-  }
+  const val = sanitizeSystemControl(await fbRead('system_control'), false);
+  _statusCache = val;
+  _statusCacheTime = now;
   return val;
 }
 
 async function handleSystemControl(req, url, body) {
-  const isoNow = new Date().toISOString();
+  const isAdminReq = Boolean(
+    req.headers.get('x-admin-secret') ||
+    req.headers.get('x-master-secret') ||
+    url.searchParams.get('nocache') === '1'
+  );
 
   if (req.method === 'GET') {
     try {
-      let val = await readSystemControlCached();
-      if (!val || typeof val !== 'object') {
-        val = {
-          status: 'active',
-          message: 'المنظومة نشطة وتعمل بشكل طبيعي',
-          updatedAt: Date.now(),
-          wipeTimestamp: 0,
-          components: {
-            download_site_enabled: true,
-            web_player_enabled: true,
-            website_enabled: true,
-            app_enabled: true,
-            player_enabled: true,
-            admin_enabled: true,
-          },
-        };
-      } else {
-        if (!val.status) val.status = 'active';
-        if (!val.components || typeof val.components !== 'object') {
-          val.components = {
-            download_site_enabled: true,
-            web_player_enabled: true,
-            website_enabled: true,
-            app_enabled: true,
-            player_enabled: true,
-            admin_enabled: true,
-          };
-        }
-      }
-      return new Response(JSON.stringify(val), {
-        status: 200,
-        headers: {
-          ...corsHeaders(),
-          'Content-Type': 'application/json',
-          'Cache-Control': 'public, s-maxage=30, max-age=15, stale-while-revalidate=120',
-        },
+      const raw = isAdminReq ? await fbRead('system_control') : await readSystemControlCached();
+      const val = sanitizeSystemControl(raw, !isAdminReq);
+      return jsonResp(val, 200, {
+        'Cache-Control': isAdminReq
+          ? 'no-cache, no-store, must-revalidate'
+          : 'public, s-maxage=60, max-age=15, stale-while-revalidate=300',
       });
     } catch (err) {
-      return jsonResp({ status: 'active', error: err.message }, 500);
+      return jsonResp({ ...sanitizeSystemControl(null, true), error: err.message }, 200);
     }
   }
 
@@ -774,12 +786,13 @@ async function handleSystemControl(req, url, body) {
           enabled:           body.enabled !== false,
           latestVersionCode: Number(body.latestVersionCode || body.versionCode) || 0,
           latestVersionName: String(body.latestVersionName || body.versionName || ''),
-          apkUrl:            String(body.apkUrl || body.downloadUrl || 'https://zaafilm.com/downloads/zaqzouka-latest.apk'),
+          apkUrl:            String(body.apkUrl || body.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zaqzouka-1.0.83-90.apk'),
           releaseNotes:      String(body.releaseNotes || body.notes || ''),
           forced:            !!body.forced,
           updatedAt:         Date.now(),
         };
         await fbWrite('system_control/app_update', updateData);
+        await fbWrite('system_control/updatedAt', Date.now());
         return jsonResp({ ok: true, action: 'SET_APP_UPDATE', data: updateData });
       }
 
@@ -804,8 +817,7 @@ async function handleSystemControl(req, url, body) {
         return jsonResp({ ok: true, action: 'broadcast_notification', notification: payload });
       }
 
-      await fbWrite('system_control', { ...body, updatedAt: Date.now() });
-      return jsonResp({ ok: true, message: 'System control updated' });
+      return jsonResp({ ok: false, error: 'Invalid action.' }, 400);
     } catch (err) {
       return jsonResp({ ok: false, error: err.message }, 500);
     }
@@ -882,6 +894,35 @@ async function handleExport(req, url) {
   }
 }
 
+function renderBlockedHtml(title, message, isWiped = false) {
+  const accentColor = isWiped ? '#E50914' : '#D4AF37';
+  return `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui, -apple-system, sans-serif; }
+    body { background-color:#0A0D14; color:#F1F5F9; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+    .card { max-width:480px; width:100%; background:#141A29; border:1px solid ${accentColor}44; border-radius:24px; padding:36px 28px; text-align:center; box-shadow:0 20px 40px rgba(0,0,0,0.6); }
+    .icon { width:72px; height:72px; border-radius:50%; background:${accentColor}18; color:${accentColor}; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; font-size:32px; border:2px solid ${accentColor}55; }
+    h1 { font-size:22px; font-weight:800; color:${accentColor}; margin-bottom:12px; }
+    p { font-size:15px; color:#94A3B8; line-height:1.6; margin-bottom:24px; }
+    .badge { display:inline-block; padding:6px 16px; border-radius:99px; background:#0F131E; border:1px solid #2A334B; font-size:12px; color:#64748B; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${isWiped ? '⚠️' : '🔒'}</div>
+    <h1>${title}</h1>
+    <p>${message}</p>
+    <div class="badge">منظومة زقزوقة TV • الحماية المركزية</div>
+  </div>
+</body>
+</html>`;
+}
+
 // ─── Main Fetch Handler ───────────────────────────────────────────────────────
 
 export default {
@@ -913,6 +954,25 @@ self.addEventListener('activate', (event) => {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
+    const cache = typeof caches !== 'undefined' ? caches.default : null;
+    const isAdminReq = Boolean(
+      request.headers.get('x-admin-secret') ||
+      request.headers.get('x-master-secret') ||
+      url.searchParams.get('nocache') === '1'
+    );
+    const isPublicCacheableApi =
+      request.method === 'GET' &&
+      !isAdminReq &&
+      (path === '/api/status' || path === '/api/status/' ||
+       path === '/api/system_control' || path === '/api/system_control/' ||
+       path === '/api/health' || path === '/api/health/');
+
+    if (cache && isPublicCacheableApi) {
+      const cacheKey = new Request(url.origin + path.replace(/\/$/, ''), { method: 'GET' });
+      const cachedResp = await cache.match(cacheKey);
+      if (cachedResp) return cachedResp;
+    }
+
     // Parse JSON body if present
     let body = {};
     if (request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') {
@@ -922,45 +982,44 @@ self.addEventListener('activate', (event) => {
     }
 
     try {
-      if (path === '/api/health' || path === '/api/health/') return handleHealth(request);
-      if (path === '/api/status' || path === '/api/status/') return handleStatus(request);
+      if (cache && (path === '/api/system_control' || path.startsWith('/api/admin')) && request.method === 'POST') {
+        ctx.waitUntil(Promise.all([
+          cache.delete(new Request(url.origin + '/api/status', { method: 'GET' })),
+          cache.delete(new Request(url.origin + '/api/system_control', { method: 'GET' })),
+        ]));
+      }
+
+      if (path === '/api/health' || path === '/api/health/') {
+        const resp = await handleHealth(request);
+        if (cache && !isAdminReq) {
+          const cacheKey = new Request(url.origin + '/api/health', { method: 'GET' });
+          ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+        }
+        return resp;
+      }
+      if (path === '/api/status' || path === '/api/status/') {
+        const resp = await handleStatus(request);
+        if (cache && !isAdminReq) {
+          const cacheKey = new Request(url.origin + '/api/status', { method: 'GET' });
+          ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+        }
+        return resp;
+      }
       if (path === '/api/stats' || path === '/api/stats/') return handleStats(request, url);
       if (path.startsWith('/api/telemetry')) return handleTelemetry(request, url, body);
       if (path.startsWith('/api/admin')) return handleAdmin(request, url, body);
-      if (path === '/api/system_control' || path === '/api/system_control/') return handleSystemControl(request, url, body);
+      if (path === '/api/system_control' || path === '/api/system_control/') {
+        const resp = await handleSystemControl(request, url, body);
+        if (cache && request.method === 'GET' && !isAdminReq) {
+          const cacheKey = new Request(url.origin + '/api/system_control', { method: 'GET' });
+          ctx.waitUntil(cache.put(cacheKey, resp.clone()));
+        }
+        return resp;
+      }
       if (path === '/api/broadcast_notification' || path === '/api/broadcast_notification/') return handleBroadcastNotification(request, url, body);
       if (path.startsWith('/api/export')) return handleExport(request, url);
 
-function renderBlockedHtml(title, message, isWiped = false) {
-  const accentColor = isWiped ? '#E50914' : '#D4AF37';
-  return `<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
-  <style>
-    * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui, -apple-system, sans-serif; }
-    body { background-color:#0A0D14; color:#F1F5F9; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
-    .card { max-width:480px; width:100%; background:#141A29; border:1px solid ${accentColor}44; border-radius:24px; padding:36px 28px; text-align:center; box-shadow:0 20px 40px rgba(0,0,0,0.6); }
-    .icon { width:72px; height:72px; border-radius:50%; background:${accentColor}18; color:${accentColor}; display:flex; align-items:center; justify-content:center; margin:0 auto 20px; font-size:32px; border:2px solid ${accentColor}55; }
-    h1 { font-size:22px; font-weight:800; color:${accentColor}; margin-bottom:12px; }
-    p { font-size:15px; color:#94A3B8; line-height:1.6; margin-bottom:24px; }
-    .badge { display:inline-block; padding:6px 16px; border-radius:99px; background:#0F131E; border:1px solid #2A334B; font-size:12px; color:#64748B; font-weight:600; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="icon">${isWiped ? '⚠️' : '🔒'}</div>
-    <h1>${title}</h1>
-    <p>${message}</p>
-    <div class="badge">منظومة زقزوقة TV • الحماية المركزية</div>
-  </div>
-</body>
-</html>`;
-}
-
-      // APK Downloads — Check cached kill switch before redirecting
+      // APK Downloads — Check cached kill switch before redirecting directly to GitHub Releases
       if (path.startsWith('/downloads/')) {
         try {
           const sys = await readSystemControlCached();
@@ -979,12 +1038,20 @@ function renderBlockedHtml(title, message, isWiped = false) {
           }
         } catch (_) {}
 
-        const filename = path.replace('/downloads/', '').trim();
-        const ghUrl = `https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.78/${filename}`;
+        const rawName = path.replace('/downloads/', '').trim();
+        const lowerName = rawName.toLowerCase();
+        let ghUrl;
+        if (lowerName === 'zaqzouka-app.apk' || lowerName === 'zaqzouka-latest.apk' || lowerName.startsWith('zaqzouka-1.0.')) {
+          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zaqzouka-1.0.83-90.apk';
+        } else if (lowerName === 'zag-player.apk' || lowerName === 'zaqzouka-player.apk' || lowerName.startsWith('zag-player-')) {
+          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zag-player-1.1.35.apk';
+        } else {
+          ghUrl = `https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.83/${rawName}`;
+        }
         return Response.redirect(ghUrl, 302);
       }
 
-      // Landing page HTML and static assets: Proxy to the active Vercel deployment
+      // Landing page HTML and static assets: Proxy to the active Vercel deployment with CF edge cache
       const UPSTREAM_WEB = 'https://download-landing-page-beta.vercel.app';
       const isHtmlRequest = path === '/' || path === '' || path.endsWith('.html');
       const isStaticAsset = path.startsWith('/assets') || path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.svg') || path.endsWith('.ico') || path.endsWith('.webp');
@@ -1013,19 +1080,27 @@ function renderBlockedHtml(title, message, isWiped = false) {
           } catch (_) {}
         }
 
+        const assetCacheKey = cache ? new Request(request.url, { method: 'GET' }) : null;
+        if (cache && assetCacheKey && request.method === 'GET') {
+          const cachedAsset = await cache.match(assetCacheKey);
+          if (cachedAsset) return cachedAsset;
+        }
+
         const upstreamUrl = new URL((path === '/' || path === '' ? '/index.html' : path) + url.search, UPSTREAM_WEB);
         try {
           const resp = await fetch(upstreamUrl.toString(), {
             headers: { 'User-Agent': request.headers.get('User-Agent') || 'Cloudflare-Worker' }
           });
           const headers = new Headers(resp.headers);
-          headers.set('Cache-Control', isStaticAsset ? 'public, max-age=86400' : 'public, max-age=60, s-maxage=60');
+          headers.set('Cache-Control', isStaticAsset ? 'public, max-age=86400, s-maxage=86400' : 'public, max-age=60, s-maxage=60');
           headers.set('Access-Control-Allow-Origin', '*');
-          if (isHtmlRequest) {
-            const html = await resp.text();
-            return new Response(html, { status: resp.status, headers });
+          const finalResp = isHtmlRequest
+            ? new Response(await resp.text(), { status: resp.status, headers })
+            : new Response(resp.body, { status: resp.status, headers });
+          if (cache && assetCacheKey && resp.ok && request.method === 'GET') {
+            ctx.waitUntil(cache.put(assetCacheKey, finalResp.clone()));
           }
-          return new Response(resp.body, { status: resp.status, headers });
+          return finalResp;
         } catch (fetchErr) {
           // Fallback below
         }

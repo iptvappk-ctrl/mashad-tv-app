@@ -399,12 +399,90 @@ class InAppUpdateManager(private val activity: MainActivity) {
     }
 
     fun downloadAndInstall(result: MethodChannel.Result) {
-        val release = latestRelease
-        if (release == null) {
-            respond(result, mapOf("status" to "no_update"))
+        val cached = latestRelease
+        if (cached != null) {
+            startDownloadForRelease(cached, result)
             return
         }
 
+        // If forced update screen or manual button bypassed updates.check, fetch latest feed inline first.
+        val request = Request.Builder()
+            .url(FIREBASE_UPDATE_URL)
+            .header("Accept", "application/json")
+            .header("Cache-Control", "no-cache")
+            .header("User-Agent", "Zaqzouka-Android")
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, error: IOException) {
+                fetchGitHubThenInstall(result)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) {
+                        fetchGitHubThenInstall(result)
+                        return
+                    }
+                    val rel = runCatching {
+                        val payload = it.body?.string()
+                            ?.takeIf { body -> body.length <= MAX_RELEASE_RESPONSE_CHARS }
+                            ?: throw IOException("Invalid Firebase update response")
+                        UpdateRelease.fromFirebase(JSONObject(payload))
+                    }.getOrNull()
+                    if (rel == null) {
+                        fetchGitHubThenInstall(result)
+                        return
+                    }
+                    if (rel.versionCode > installedVersionCode()) {
+                        latestRelease = rel
+                        startDownloadForRelease(rel, result)
+                    } else {
+                        respond(result, mapOf("status" to "no_update"))
+                    }
+                }
+            }
+        })
+    }
+
+    private fun fetchGitHubThenInstall(result: MethodChannel.Result) {
+        val ghReq = Request.Builder()
+            .url(LATEST_RELEASE_URL)
+            .header("Accept", "application/vnd.github+json")
+            .header("Cache-Control", "no-cache")
+            .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+            .header("User-Agent", "Zaqzouka-Android")
+            .build()
+
+        client.newCall(ghReq).enqueue(object : Callback {
+            override fun onFailure(call: Call, error: IOException) {
+                respond(result, mapOf("status" to "no_update"))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!it.isSuccessful) {
+                        respond(result, mapOf("status" to "no_update"))
+                        return
+                    }
+                    val rel = runCatching {
+                        val payload = it.body?.string()
+                            ?.takeIf { body -> body.length <= MAX_RELEASE_RESPONSE_CHARS }
+                            ?: throw IOException("Invalid release response")
+                        UpdateRelease.fromGitHub(JSONObject(payload))
+                    }.getOrNull()
+                    if (rel != null && rel.versionCode > installedVersionCode()) {
+                        latestRelease = rel
+                        startDownloadForRelease(rel, result)
+                    } else {
+                        respond(result, mapOf("status" to "no_update"))
+                    }
+                }
+            }
+        })
+    }
+
+    private fun startDownloadForRelease(release: UpdateRelease, result: MethodChannel.Result) {
         val updateDirectory = File(activity.cacheDir, "updates")
         val apkFile = File(updateDirectory, "zaqzouka-${release.versionCode}.apk")
         val partFile = File(updateDirectory, "zaqzouka-${release.versionCode}.apk.part")

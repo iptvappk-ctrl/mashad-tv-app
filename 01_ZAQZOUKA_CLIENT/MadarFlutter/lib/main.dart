@@ -163,6 +163,7 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
   int? _shownVersionCode;
   int? _shownPlayerVersionCode;
   StreamSubscription<dynamic>? _progressSub;
+  StreamSubscription<SystemStatus>? _guardSub;
 
   @override
   void initState() {
@@ -181,7 +182,7 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
     });
 
     // Listen to real-time quota guard updates for optional in-app updates
-    ZaqzoukaQuotaGuard().statusStream.listen((sys) {
+    _guardSub = ZaqzoukaQuotaGuard().statusStream.listen((sys) {
       if (!mounted) return;
       if (sys.isOptionalUpdate && sys.latestUpdateVersionCode > 0 && sys.latestUpdateVersionCode != _shownVersionCode) {
         _shownVersionCode = sys.latestUpdateVersionCode;
@@ -239,27 +240,28 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
 
   Future<void> _checkForUpdate() async {
     try {
-      final sys = ZaqzoukaQuotaGuard().currentStatus;
-      if (sys.isOptionalUpdate && sys.latestUpdateVersionCode > 0 && sys.latestUpdateVersionCode != _shownVersionCode) {
-        _shownVersionCode = sys.latestUpdateVersionCode;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _showUpdateDialog({
-              'available': true,
-              'versionCode': sys.latestUpdateVersionCode,
-              'versionName': sys.latestUpdateVersionName,
-              'releaseNotes': sys.updateReleaseNotes,
-              'downloadUrl': sys.updateApkUrl,
-            });
-          }
-        });
-        return;
-      }
-
       final update = await _native.invokeMapMethod<String, dynamic>(
         'updates.check',
       );
-      if (!mounted || update == null) return;
+      if (!mounted) return;
+      final sys = ZaqzoukaQuotaGuard().currentStatus;
+      if (update == null || update['available'] != true) {
+        if (sys.isOptionalUpdate && sys.latestUpdateVersionCode > 0 && sys.latestUpdateVersionCode != _shownVersionCode) {
+          _shownVersionCode = sys.latestUpdateVersionCode;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _showUpdateDialog({
+                'available': true,
+                'versionCode': sys.latestUpdateVersionCode,
+                'versionName': sys.latestUpdateVersionName,
+                'releaseNotes': sys.updateReleaseNotes,
+                'downloadUrl': sys.updateApkUrl,
+              });
+            }
+          });
+        }
+        return;
+      }
       final appUpdateAvailable = update['available'] == true;
       final appDownloaded = update['appDownloaded'] == true;
 
@@ -394,9 +396,33 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
                         } else {
                           await progressSubscription?.cancel();
                           progressSubscription = null;
+                          final fallbackUrl =
+                              (update['downloadUrl'] as String? ?? '').trim();
+                          var openedFallback = false;
+                          if (status == 'no_update' && fallbackUrl.isNotEmpty) {
+                            try {
+                              openedFallback =
+                                  await _native.invokeMethod<bool>(
+                                        'system.openExternalUrl',
+                                        {'url': fallbackUrl},
+                                      ) ??
+                                  false;
+                              if (!openedFallback) {
+                                openedFallback =
+                                    await _native.invokeMethod<bool>(
+                                          'system.openUrl',
+                                          {'url': fallbackUrl},
+                                        ) ??
+                                    false;
+                              }
+                            } catch (_) {}
+                          }
+                          if (!dialogContext.mounted) return;
                           setDialogState(() {
                             busy = false;
-                            hint = status == 'permission_required'
+                            hint = openedFallback
+                                ? 'تم فتح رابط تنزيل التحديث المباشر.'
+                                : status == 'permission_required'
                                 ? 'اسمح للتطبيق بتثبيت التحديث من شاشة Android التي فتحت، ثم اضغط «تحديث الآن» مرة أخرى.'
                                 : status == 'permission_unavailable'
                                 ? 'تعذر فتح إعداد التثبيت. افتح إعدادات التطبيق واسمح بتثبيت التطبيقات.'
@@ -427,6 +453,7 @@ class _UpdatePromptGateState extends State<_UpdatePromptGate> {
   void dispose() {
     _checkTimer?.cancel();
     _progressSub?.cancel();
+    _guardSub?.cancel();
     super.dispose();
   }
 

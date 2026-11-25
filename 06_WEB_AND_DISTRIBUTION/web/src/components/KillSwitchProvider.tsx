@@ -11,14 +11,14 @@ interface SystemState {
 }
 
 const STATUS_ENDPOINTS = [
-  "https://zaafilm.com/api/system_control",
-  "https://dashboard-api-indol-eight.vercel.app/api/system_control",
-  "https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control",
+  "https://dashboard-api-indol-eight.vercel.app/api/status",
+  "https://dashboard-api-amber-chi.vercel.app/api/system_control",
+  "https://zaafilm.com/api/status",
   "https://madartv-default-rtdb.firebaseio.com/system_control.json",
 ];
 
 const STORAGE_KEY = "zaq_sys_state_v2";
-const CACHE_TTL_MS = 5000; // 5 seconds client cache for fast reactivity
+const CACHE_TTL_MS = 120000; // 2 minutes client cache to preserve server & Firebase quota
 
 export default function KillSwitchProvider({ children }: { children: React.ReactNode }) {
   // Read initial cache to avoid blocking UI for returning users
@@ -73,7 +73,7 @@ export default function KillSwitchProvider({ children }: { children: React.React
   const checkStatus = useCallback(async (force = false) => {
     const now = Date.now();
     // Throttle checks if not forced
-    if (!force && now - lastCheckTimeRef.current < 5000) {
+    if (!force && now - lastCheckTimeRef.current < 60000) {
       setChecking(false);
       return;
     }
@@ -145,8 +145,8 @@ export default function KillSwitchProvider({ children }: { children: React.React
     let timer: NodeJS.Timeout | null = null;
 
     const scheduleNextPoll = () => {
-      // Jitter between 40s and 60s to prevent 1M users syncing on the exact same second
-      const jitter = 40000 + Math.floor(Math.random() * 20000);
+      // Jitter between 180s and 240s (3-4 min) to keep Vercel & Cloudflare quotas safe
+      const jitter = 180000 + Math.floor(Math.random() * 60000);
       timer = setTimeout(() => {
         if (typeof document !== "undefined" && document.visibilityState === "visible") {
           checkStatus(false);

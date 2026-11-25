@@ -43,6 +43,7 @@ async function sessionStart(req, res) {
         await db.ref(`sessions/${sessionId}`).update({
           device,
           osVersion: body.osVersion || existing.osVersion || 'Android',
+          appVersion: body.appVersion || existing.appVersion || '',
           country: geo.country || existing.country,
           city: geo.city || existing.city,
           region: geo.region || existing.region,

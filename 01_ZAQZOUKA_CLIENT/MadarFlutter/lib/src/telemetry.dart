@@ -22,6 +22,7 @@ class AppTelemetry {
   static String _currentSection = 'الرئيسية 🏠';
   static String _currentContent = '';
   static Timer? _heartbeatTimer;
+  static DateTime? _lastSectionSyncAt;
   static bool _initialized = false;
 
   // Candidate telemetry endpoints:
@@ -31,17 +32,28 @@ class AppTelemetry {
   // 4. Localhost
   static const List<String> _candidateHosts = [
     'https://dashboard-api-amber-chi.vercel.app',
+    'https://dashboard-api-indol-eight.vercel.app',
     'http://192.168.100.2:4040',
     'http://10.0.2.2:4040',
     'http://127.0.0.1:4040',
   ];
 
   static String _resolvedBaseUrl = 'https://dashboard-api-amber-chi.vercel.app';
+  static String _appVersion = '1.0.83+90';
 
   /// Initializes device telemetry and reports session start.
   static Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
+
+    try {
+      final vInfo = await _native.invokeMapMethod<String, dynamic>('app.versionInfo');
+      if (vInfo != null) {
+        final vName = vInfo['versionName']?.toString() ?? '1.0.83';
+        final vCode = vInfo['versionCode']?.toString() ?? '90';
+        _appVersion = '$vName+$vCode';
+      }
+    } catch (_) {}
 
     try {
       final info = await _native.invokeMapMethod<String, dynamic>(
@@ -125,15 +137,19 @@ class AppTelemetry {
   }
 
   static Future<void> _discoverHostAndStartSession() async {
-    for (final host in _candidateHosts) {
-      final ok = await _pingHost(host);
-      if (ok) {
-        _resolvedBaseUrl = host;
-        break;
+    // Try primary Vercel endpoint directly to avoid extra /api/health RTDB reads on startup
+    final primaryOk = await _startSession();
+    if (!primaryOk && _sessionId == null) {
+      for (final host in _candidateHosts) {
+        if (host == _resolvedBaseUrl) continue;
+        final ok = await _pingHost(host);
+        if (ok) {
+          _resolvedBaseUrl = host;
+          await _startSession();
+          break;
+        }
       }
     }
-
-    await _startSession();
     _startHeartbeatTimer();
   }
 
@@ -149,7 +165,7 @@ class AppTelemetry {
     }
   }
 
-  static Future<void> _startSession() async {
+  static Future<bool> _startSession() async {
     try {
       // ── Deduplication: check if we have a recent session saved locally ──
       // The server also deduplicates by deviceId, but we avoid unnecessary calls.
@@ -169,7 +185,7 @@ class AppTelemetry {
           if (age.inMinutes < 20) {
             // Reuse existing session — server already has it
             _sessionId = savedSessionId;
-            return; // skip creating a new session
+            return true; // skip creating a new session
           }
         }
       }
@@ -179,6 +195,7 @@ class AppTelemetry {
         'device': _deviceModel,
         'deviceType': _deviceType,
         'osVersion': _osVersion,
+        'appVersion': _appVersion,
         'countryCode': _countryCode,
         'city': _city,
         'region': _region,
@@ -197,8 +214,10 @@ class AppTelemetry {
         final nowIso = DateTime.now().toIso8601String();
         await _native.invokeMethod('cache.write', {'key': '_zq_session_ts', 'value': nowIso}).catchError((_) => null);
         await _native.invokeMethod('cache.write', {'key': '_zq_session_id', 'value': _sessionId}).catchError((_) => null);
+        return true;
       }
     } catch (_) {}
+    return false;
   }
 
   static void _startHeartbeatTimer() {
@@ -220,10 +239,17 @@ class AppTelemetry {
     } catch (_) {}
   }
 
-  /// Call when user switches tabs or visits a new section.
+  /// Call when user switches tabs or visits a new section (throttled to reduce quota writes).
   static void updateSection(String sectionName) {
+    final changed = _currentSection != sectionName;
     _currentSection = sectionName;
-    if (_sessionId == null) return;
+    if (_sessionId == null || !changed) return;
+    final now = DateTime.now();
+    if (_lastSectionSyncAt != null &&
+        now.difference(_lastSectionSyncAt!) < const Duration(seconds: 45)) {
+      return;
+    }
+    _lastSectionSyncAt = now;
     unawaited(_postJson('$_resolvedBaseUrl/api/telemetry/action', {
       'sessionId': _sessionId,
       'section': sectionName,

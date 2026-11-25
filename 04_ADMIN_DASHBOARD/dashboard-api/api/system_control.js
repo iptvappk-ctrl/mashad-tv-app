@@ -32,13 +32,58 @@ function getDb() {
 }
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'Zq!7#mK9xPd@3wR5nT';
+const MASTER_SECRET = process.env.MASTER_SECRET || 'zaqzouka_master_2026';
+
+let _sysCache = null;
+let _sysCacheTime = 0;
+const SYS_CACHE_TTL_MS = 30_000;
+
+function sanitizeSystemControl(raw, normalizeAppDisabled = true) {
+  const val = raw && typeof raw === 'object' ? { ...raw } : {};
+  delete val.secret;
+  delete val.action;
+  if (!val.status) val.status = 'active';
+  if (!val.message) val.message = 'المنظومة نشطة وتعمل بشكل طبيعي';
+  if (val.wipeTimestamp === undefined) val.wipeTimestamp = 0;
+  if (!val.components || typeof val.components !== 'object') {
+    val.components = {
+      download_site_enabled: true,
+      web_player_enabled: true,
+      website_enabled: true,
+      app_enabled: true,
+      player_enabled: true,
+      admin_enabled: true,
+    };
+  } else {
+    val.components = { ...val.components };
+    if (val.components.download_site_enabled === undefined) val.components.download_site_enabled = true;
+    if (val.components.web_player_enabled === undefined) val.components.web_player_enabled = true;
+    if (val.components.website_enabled === undefined) val.components.website_enabled = true;
+    if (val.components.app_enabled === undefined) val.components.app_enabled = true;
+    if (val.components.player_enabled === undefined) val.components.player_enabled = true;
+    if (val.components.admin_enabled === undefined) val.components.admin_enabled = true;
+  }
+  if (normalizeAppDisabled && val.status === 'active' && val.components.app_enabled === false) {
+    val.status = 'frozen';
+    val.message = val.message || 'عفواً، التطبيق متوقف حالياً للصيانة.';
+  }
+  return val;
+}
 
 export default async function handler(req, res) {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-secret, Authorization');
-  if (req.method === 'GET') {
-    res.setHeader('Cache-Control', 'public, max-age=15, s-maxage=30, stale-while-revalidate=120');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-secret, X-Admin-Secret, x-master-secret, x-zaqzouka-key, Authorization');
+
+  const isAdminReq = Boolean(
+    req.headers['x-admin-secret'] ||
+    req.headers['x-master-secret'] ||
+    (req.query && req.query.nocache === '1')
+  );
+
+  if (req.method === 'GET' && !isAdminReq) {
+    res.setHeader('Cache-Control', 'public, max-age=15, s-maxage=60, stale-while-revalidate=300');
   } else {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   }
@@ -48,64 +93,57 @@ export default async function handler(req, res) {
   const db = getDb();
   const ref = db.ref('system_control');
 
-  // GET: Public status check
+  // GET: Public or Admin status check
   if (req.method === 'GET') {
+    const now = Date.now();
+    if (!isAdminReq && _sysCache && now - _sysCacheTime < SYS_CACHE_TTL_MS) {
+      return res.status(200).json({ ..._sysCache, _source: 'memory_cache' });
+    }
     try {
       const snapshot = await ref.once('value');
-      const val = snapshot.val();
-      if (!val) {
-        return res.status(200).json({
-          status: 'active',
-          message: 'المنظومة نشطة وتعمل بشكل طبيعي',
-          updatedAt: Date.now(),
-          wipeTimestamp: 0,
-          components: {
-            download_site_enabled: true,
-            web_player_enabled: true,
-            website_enabled: true,
-            app_enabled: true,
-            player_enabled: true,
-            admin_enabled: true,
-          }
-        });
+      const normalized = sanitizeSystemControl(snapshot.val(), !isAdminReq);
+      if (!isAdminReq) {
+        _sysCache = normalized;
+        _sysCacheTime = now;
       }
-      // Ensure status exists
-      if (!val.status) val.status = 'active';
-      // Ensure components exist in response
-      if (!val.components || typeof val.components !== 'object') {
-        val.components = {
-          download_site_enabled: true,
-          web_player_enabled: true,
-          website_enabled: true,
-          app_enabled: true,
-          player_enabled: true,
-          admin_enabled: true,
-        };
-      } else {
-        if (val.components.download_site_enabled === undefined) val.components.download_site_enabled = true;
-        if (val.components.web_player_enabled === undefined) val.components.web_player_enabled = true;
-        if (val.components.website_enabled === undefined) val.components.website_enabled = true;
-        if (val.components.app_enabled === undefined) val.components.app_enabled = true;
-        if (val.components.player_enabled === undefined) val.components.player_enabled = true;
-        if (val.components.admin_enabled === undefined) val.components.admin_enabled = true;
-      }
-      return res.status(200).json(val);
+      return res.status(200).json({ ...normalized, _source: 'firebase_live' });
     } catch (err) {
-      return res.status(500).json({ error: err.message, status: 'active' });
+      if (_sysCache) {
+        return res.status(200).json({ ..._sysCache, _source: 'memory_stale' });
+      }
+      return res.status(200).json({ ...sanitizeSystemControl(null, true), _error: err.message, _source: 'fallback' });
     }
   }
 
   // POST: Admin Control actions (Secured)
   if (req.method === 'POST') {
-    const secret = req.headers['x-admin-secret'] || (req.body && req.body.secret);
-    if (secret !== ADMIN_SECRET) {
+    const secret = req.headers['x-admin-secret'] || req.headers['x-master-secret'] || (req.body && req.body.secret);
+    if (secret !== ADMIN_SECRET && secret !== MASTER_SECRET) {
       return res.status(401).json({ error: 'Unauthorized: Invalid Admin Secret' });
     }
+    _sysCache = null;
+    _sysCacheTime = 0;
 
     const { action, message, servers, catalog, component, enabled } = req.body || {};
     const now = Date.now();
 
     try {
+      if (action === 'set_app_update') {
+        const b = req.body || {};
+        const updateData = {
+          enabled: b.enabled !== false,
+          latestVersionCode: Number(b.latestVersionCode || b.versionCode) || 0,
+          latestVersionName: String(b.latestVersionName || b.versionName || ''),
+          apkUrl: String(b.apkUrl || b.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zaqzouka-1.0.83-90.apk'),
+          releaseNotes: String(b.releaseNotes || b.notes || ''),
+          forced: !!b.forced,
+          updatedAt: now,
+        };
+        await db.ref('system_control/app_update').set(updateData);
+        await ref.update({ updatedAt: now });
+        return res.status(200).json({ ok: true, success: true, action: 'set_app_update', data: updateData });
+      }
+
       // NEW: Toggle individual component
       if (action === 'set_component') {
         if (!component) return res.status(400).json({ error: 'Missing component name' });

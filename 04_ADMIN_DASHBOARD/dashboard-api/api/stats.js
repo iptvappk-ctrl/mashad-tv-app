@@ -17,8 +17,8 @@ module.exports = async (req, res) => {
     const [statsSnap, sessionsSnap, topContentSnap, searchesSnap, errorsSnap, actLogSnap, landingSnap, landingVisitorsSnap] = await Promise.all([
       db.ref('stats').once('value'),
       db.ref('sessions').orderByChild('openedAt').limitToLast(600).once('value'),
-      db.ref('topContent').once('value'),
-      db.ref('searches').once('value'),
+      db.ref('topContent').limitToLast(500).once('value'),
+      db.ref('searches').limitToLast(500).once('value'),
       db.ref('errors').orderByChild('timestamp').limitToLast(50).once('value'),
       db.ref('activityLog').orderByChild('timestamp').limitToLast(50).once('value'),
       db.ref('landing_analytics').once('value'),
@@ -106,16 +106,20 @@ module.exports = async (req, res) => {
       new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime()
     );
 
-    // Auto-expire stale active sessions (no heartbeat > 4 min)
+    // Auto-expire stale active sessions (no heartbeat > 6 min, synced with 3m heartbeat interval)
     const now = Date.now();
+    const staleUpdates = [];
     for (const s of sessions) {
       if (s.status === 'active') {
         const lastSeen = new Date(s.lastSeen || s.openedAt).getTime();
-        if (now - lastSeen > 4 * 60 * 1000) {
+        if (now - lastSeen > 6 * 60 * 1000) {
           s.status = 'closed';
-          await db.ref(`sessions/${s.id}`).update({ status: 'closed' }).catch(() => {});
+          staleUpdates.push(db.ref(`sessions/${s.id}`).update({ status: 'closed' }).catch(() => {}));
         }
       }
+    }
+    if (staleUpdates.length > 0) {
+      await Promise.all(staleUpdates);
     }
 
     const activeNow = sessions.filter((s) => s.status === 'active').length;

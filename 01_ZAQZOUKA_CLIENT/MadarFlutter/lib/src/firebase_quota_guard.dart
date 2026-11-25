@@ -20,16 +20,18 @@ const _native = MethodChannel('madar/native');
 // ════════════════════════════════════════
 
 class _Cfg {
-  // Primary read endpoints (Vercel CDN + Firebase RTDB directly -> offloads Cloudflare Workers 100k/day free limit)
+  // Primary read endpoints (both Vercel CDNs -> Cloudflare Worker CDN fallback)
+  // Keeps Cloudflare Worker & Firebase RTDB well below free-tier limits at massive scale.
   static const vercelStatusUrls = [
     'https://dashboard-api-indol-eight.vercel.app/api/system_control',
-    'https://madartv-default-rtdb.firebaseio.com/system_control.json',
+    'https://dashboard-api-amber-chi.vercel.app/api/system_control',
     'https://zaafilm.com/api/status',
   ];
 
   // Fallback endpoints if primary read endpoints fail
   static const staticFallbackUrls = [
     'https://zaafilm.com/api/system_control',
+    'https://dashboard-api-indol-eight.vercel.app/api/status',
   ];
 
   // Firebase RTDB direct (last resort / rate-limited)
@@ -138,8 +140,14 @@ class SystemStatus {
   String get latestUpdateVersionName => appUpdate?['latestVersionName']?.toString() ?? '';
   String get updateApkUrl => appUpdate?['apkUrl']?.toString() ?? 'https://zaafilm.com/downloads/zaqzouka-latest.apk';
   String get updateReleaseNotes => appUpdate?['releaseNotes']?.toString() ?? '';
-  bool get isForcedUpdate => isUpdateActive && (appUpdate?['forced'] == true) && latestUpdateVersionCode > 84;
-  bool get isOptionalUpdate => isUpdateActive && (appUpdate?['forced'] != true) && latestUpdateVersionCode > 84;
+  bool get isForcedUpdate =>
+      isUpdateActive &&
+      (appUpdate?['forced'] == true) &&
+      latestUpdateVersionCode > ZaqzoukaQuotaGuard.installedVersionCode;
+  bool get isOptionalUpdate =>
+      isUpdateActive &&
+      (appUpdate?['forced'] != true) &&
+      latestUpdateVersionCode > ZaqzoukaQuotaGuard.installedVersionCode;
 
   bool get isBannerAdEnabled {
     if (status != 'active') return false;
@@ -232,6 +240,11 @@ class ZaqzoukaQuotaGuard {
   factory ZaqzoukaQuotaGuard() => instance;
   ZaqzoukaQuotaGuard._internal();
 
+  /// Actual installed APK versionCode (queried from Android PackageManager on init).
+  /// Never hardcode an old version threshold or the updated app would lock itself out!
+  static int installedVersionCode = 90;
+  static bool _versionLoaded = false;
+
   // In-memory cache (fastest layer)
   SystemStatus? _memCache;
   DateTime? _memCacheTime;
@@ -253,8 +266,21 @@ class ZaqzoukaQuotaGuard {
   // Public API
   // ─────────────────────────────────────
 
+  Future<void> _ensureVersionLoaded() async {
+    if (_versionLoaded) return;
+    _versionLoaded = true;
+    try {
+      final info = await _native.invokeMapMethod<String, dynamic>('app.versionInfo');
+      final code = (info?['versionCode'] as num?)?.toInt();
+      if (code != null && code > 0) {
+        installedVersionCode = code;
+      }
+    } catch (_) {}
+  }
+
   /// Initialize the guard, perform immediate check, and start polling
   Future<void> initialize() async {
+    await _ensureVersionLoaded();
     _startPolling();
     final status = await getStatus(force: true);
     _statusController.add(status);
@@ -760,7 +786,7 @@ class _DefaultFrozenScreenState extends State<_DefaultFrozenScreen> {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'جاري التحقق التلقائي كل 8 ثوانٍ...',
+                  'يتم التحقق التلقائي دورياً، أو اضغط إعادة التحقق الآن',
                   style: TextStyle(color: Colors.white30, fontSize: 11),
                 ),
               ],
@@ -845,15 +871,29 @@ class _DefaultForcedUpdateScreenState extends State<_DefaultForcedUpdateScreen> 
     });
 
     try {
-      final res = await _native.invokeMapMethod<String, dynamic>('updates.install');
-      if (res?['status'] != 'install_started') {
+      var res = await _native.invokeMapMethod<String, dynamic>('updates.install');
+      if (res?['status'] == 'no_update') {
+        // Check update manifest first when forced screen bypassed _UpdatePromptGate
+        await _native.invokeMapMethod<String, dynamic>('updates.check');
+        res = await _native.invokeMapMethod<String, dynamic>('updates.install');
+      }
+      final st = res?['status']?.toString();
+      if (st != 'install_started' && st != 'permission_required') {
         final apkUrl = widget.status.updateApkUrl;
-        await _native.invokeMethod<bool>('system.openUrl', {'url': apkUrl});
+        final opened = await _native.invokeMethod<bool>('system.openExternalUrl', {'url': apkUrl}) ?? false;
+        if (!opened) {
+          await _native.invokeMethod<bool>('system.openUrl', {'url': apkUrl});
+        }
+      } else if (st == 'permission_required' && mounted) {
+        setState(() => _hint = 'اسمح بتثبيت التطبيقات من الإعدادات ثم اضغط تحديث الآن مرة أخرى.');
       }
     } catch (_) {
       try {
         final apkUrl = widget.status.updateApkUrl;
-        await _native.invokeMethod<bool>('system.openUrl', {'url': apkUrl});
+        final opened = await _native.invokeMethod<bool>('system.openExternalUrl', {'url': apkUrl}) ?? false;
+        if (!opened) {
+          await _native.invokeMethod<bool>('system.openUrl', {'url': apkUrl});
+        }
       } catch (_) {}
     }
 

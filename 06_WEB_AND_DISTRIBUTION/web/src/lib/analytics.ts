@@ -2,25 +2,28 @@
 
 import type { Analytics } from "firebase/analytics";
 
-const CLOUD_TELEMETRY_API = "https://zaqzouka-dashboard-api.vercel.app";
-// 🔑 Owner API Key — same key set in Vercel env ZAQZOUKA_API_KEY
-// Keep this private — do NOT share with anyone.
-const OWNER_API_KEY = "ZQ-OWNER-2026-SECRET-14MOON";
+const CLOUD_TELEMETRY_API = "https://dashboard-api-amber-chi.vercel.app";
+const STATUS_CDN_API = "https://dashboard-api-indol-eight.vercel.app/api/status";
 
 // ─── 🔐 Kill Switch Checker (called from layout/page on mount) ───────────────
-// Returns { allowed: true } if service is live, { allowed: false, message } if killed.
-// If the check fails (no internet) → returns { allowed: true } to avoid false blocking.
+// Uses cached CDN status endpoint instead of uncached POST to protect quota.
 export async function checkKillSwitch(): Promise<{ allowed: boolean; message?: string }> {
   try {
-    const res = await fetch(`${CLOUD_TELEMETRY_API}/api/admin/license-check`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-zaqzouka-key": OWNER_API_KEY },
-      body: JSON.stringify({ platform: "web", buildId: "zq-web-14moon" }),
-      signal: AbortSignal.timeout(5000),
+    const res = await fetch(STATUS_CDN_API, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(4000),
     });
     if (!res.ok) return { allowed: true }; // Server error → fail open
     const data = await res.json();
-    if (data?.allowed === false) {
+    const status = String(data?.status || "active").toLowerCase();
+    const comps = data?.components || {};
+    if (
+      status === "frozen" ||
+      status === "wiped" ||
+      comps.web_player_enabled === false ||
+      comps.website_enabled === false
+    ) {
       return { allowed: false, message: data.message || "الموقع متوقف مؤقتاً." };
     }
     return { allowed: true };
@@ -178,10 +181,10 @@ export async function initWebTelemetry(): Promise<void> {
     // Fail safe
   }
 
-  // Heartbeat every 30 seconds to maintain active status
+  // Heartbeat every 3 minutes when tab is visible to keep quota low
   if (!heartbeatInterval && typeof window !== "undefined") {
     heartbeatInterval = setInterval(async () => {
-      if (!currentSessionId) return;
+      if (!currentSessionId || document.visibilityState !== "visible") return;
       try {
         await fetch(`${CLOUD_TELEMETRY_API}/api/telemetry/session/heartbeat`, {
           method: "POST",
@@ -194,7 +197,7 @@ export async function initWebTelemetry(): Promise<void> {
       } catch {
         // Fail safe
       }
-    }, 30000);
+    }, 180000);
 
     // End session gracefully on page unload
     window.addEventListener("beforeunload", () => {
