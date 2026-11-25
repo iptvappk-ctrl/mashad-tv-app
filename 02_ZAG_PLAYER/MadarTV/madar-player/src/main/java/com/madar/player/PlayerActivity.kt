@@ -1,8 +1,9 @@
-﻿package com.madar.player
+package com.madar.player
 
 import android.annotation.SuppressLint
 import android.content.pm.ActivityInfo
 import android.content.Intent
+import android.util.Base64
 import android.util.Log
 import android.net.Uri
 import android.graphics.Color as AndroidColor
@@ -115,6 +116,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -122,6 +124,9 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 private data class PlaybackSource(
     val url: String,
@@ -138,12 +143,41 @@ private data class VideoQualityTrack(
 )
 
 object PlayerAdManager {
-    // ─── مساحة كود الإعلان المخصص (Pre-roll Ad) ───
-    // افتراضياً فارغ وغير مفعل، لا يظهر أي إعلان إلا إذا وضعه المالك أو الشريك في لوحة التحكم
+    // Smart Direct ad endpoint (new ad network)
+    const val DEFAULT_SMART_DIRECT_URL =
+        "https://asiafilm.org/4/01e00aeb7c4b214f9e9469bcfc2b0486"
+
+    private val legacyMarkers = listOf(
+        "uplcm.com",
+        "nap5k.com",
+        "3nbf4.com",
+        "monetag",
+        "propellerads",
+        "12335206",
+        "12333968",
+        "12335194",
+        "12335228",
+        "12335268",
+        "12335274",
+    )
+
     var adHtmlSnippet: String = ""
-    var adUrl: String = ""
-    var isAdEnabled: Boolean = false
+    var adUrl: String = DEFAULT_SMART_DIRECT_URL
+    var isAdEnabled: Boolean = true
     var skipDelaySeconds: Int = 5
+    @Volatile var lastStatusSyncMs: Long = 0L
+
+    fun sanitizeAdValue(raw: String): String {
+        val cleaned = raw.trim()
+        if (cleaned.isEmpty()) return ""
+        val lower = cleaned.lowercase(Locale.ROOT)
+        return if (legacyMarkers.any(lower::contains)) "" else cleaned
+    }
+
+    fun resolvedDirectAdUrl(): String {
+        if (!isAdEnabled) return ""
+        return sanitizeAdValue(adUrl).ifBlank { DEFAULT_SMART_DIRECT_URL }
+    }
 }
 
 class PlayerActivity : ComponentActivity() {
@@ -157,18 +191,23 @@ class PlayerActivity : ComponentActivity() {
     private val currentFallbackReferer = mutableStateOf("")
     private val currentIsLive = mutableStateOf(false)
     private val currentBackupSources = androidx.compose.runtime.mutableStateListOf<PlaybackSource>()
+    private val playbackSessionToken = mutableIntStateOf(0)
     private var launchedFromExternalIntent = false
     private val isPlayerBlocked = mutableStateOf(false)
     private val blockMessage = mutableStateOf("عفواً، المشغل متوقف حالياً للصيانة.")
     private var statusPollingJob: Job? = null
     private val activityScope = CoroutineScope(Dispatchers.Main)
 
-    private fun checkSystemStatus() {
+    private fun checkSystemStatus(force: Boolean = false) {
+        val nowMs = System.currentTimeMillis()
+        if (!force && PlayerAdManager.lastStatusSyncMs > 0L && (nowMs - PlayerAdManager.lastStatusSyncMs) < 120_000L) {
+            return
+        }
         activityScope.launch(Dispatchers.IO) {
             val endpoints = listOf(
-                "https://zaafilm.com/api/system_control",
                 "https://dashboard-api-indol-eight.vercel.app/api/system_control",
-                "https://madartv-default-rtdb.firebaseio.com/system_control.json"
+                "https://madartv-default-rtdb.firebaseio.com/system_control.json",
+                "https://zaafilm.com/api/status"
             )
             for (endpoint in endpoints) {
                 try {
@@ -177,7 +216,6 @@ class PlayerActivity : ComponentActivity() {
                         readTimeout = 3000
                         requestMethod = "GET"
                         setRequestProperty("Accept", "application/json")
-                        setRequestProperty("Cache-Control", "no-cache")
                         setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ZAG-Player")
                     }
                     if (conn.responseCode == 200) {
@@ -227,52 +265,27 @@ class PlayerActivity : ComponentActivity() {
                         }
 
                         val overridePartner = ownerAd?.optBoolean("override_partner", false) ?: false
-                        if (overridePartner) {
-                            if (ownerAd != null && ownerAd.optBoolean("enabled", false)) {
-                                val ownerHtml = ownerAd.optString("ad_html")
-                                val ownerUrl = ownerAd.optString("ad_url")
-                                if (ownerHtml.isNotBlank() || ownerUrl.isNotBlank()) {
-                                    PlayerAdManager.isAdEnabled = true
-                                    PlayerAdManager.skipDelaySeconds = ownerAd.optInt("skip_delay_seconds", 5)
-                                    if (ownerHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = ownerHtml
-                                    if (ownerUrl.isNotBlank()) PlayerAdManager.adUrl = ownerUrl
-                                } else {
-                                    PlayerAdManager.isAdEnabled = false
-                                }
-                            } else {
-                                PlayerAdManager.isAdEnabled = false
-                            }
-                        } else if (ownerAd != null && ownerAd.optBoolean("enabled", false)) {
-                            // Owner ad has highest priority (Sovereign override)
-                            val ownerHtml = ownerAd.optString("ad_html")
-                            val ownerUrl = ownerAd.optString("ad_url")
-                            if (ownerHtml.isNotBlank() || ownerUrl.isNotBlank()) {
-                                PlayerAdManager.isAdEnabled = true
-                                PlayerAdManager.skipDelaySeconds = ownerAd.optInt("skip_delay_seconds", 5)
-                                if (ownerHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = ownerHtml
-                                if (ownerUrl.isNotBlank()) PlayerAdManager.adUrl = ownerUrl
-                            } else {
-                                PlayerAdManager.isAdEnabled = false
-                            }
-                        } else if (partnerAd != null && partnerAd.optBoolean("enabled", false)) {
-                            // Partner ad from analytics dashboard
-                            val remoteHtml = partnerAd.optString("ad_html")
-                            val remoteUrl = partnerAd.optString("ad_url")
-                            if (remoteHtml.isNotBlank() || remoteUrl.isNotBlank()) {
-                                PlayerAdManager.isAdEnabled = true
-                                PlayerAdManager.skipDelaySeconds = partnerAd.optInt("skip_delay_seconds", 5)
-                                if (remoteHtml.isNotBlank()) PlayerAdManager.adHtmlSnippet = remoteHtml
-                                if (remoteUrl.isNotBlank()) PlayerAdManager.adUrl = remoteUrl
-                            } else {
-                                PlayerAdManager.isAdEnabled = false
-                            }
-                        } else {
-                            // No ad configured or enabled -> completely disabled, zero pre-roll delay
+                        val activeSource = ownerAd?.optString("active_source", "owner")?.lowercase(Locale.ROOT).orEmpty()
+                        val selectedAd = when {
+                            activeSource == "disabled" -> null
+                            overridePartner || ownerAd?.optBoolean("enabled", false) == true -> ownerAd
+                            partnerAd?.optBoolean("enabled", false) == true -> partnerAd
+                            else -> ownerAd ?: partnerAd
+                        }
+                        if (activeSource == "disabled" || (selectedAd != null && !selectedAd.optBoolean("enabled", true))) {
                             PlayerAdManager.isAdEnabled = false
                             PlayerAdManager.adHtmlSnippet = ""
                             PlayerAdManager.adUrl = ""
+                        } else {
+                            PlayerAdManager.isAdEnabled = true
+                            PlayerAdManager.skipDelaySeconds = (selectedAd?.optInt("skip_delay_seconds", 5) ?: 5).coerceIn(3, 15)
+                            val cleanHtml = PlayerAdManager.sanitizeAdValue(selectedAd?.optString("ad_html").orEmpty())
+                            val cleanUrl = PlayerAdManager.sanitizeAdValue(selectedAd?.optString("ad_url").orEmpty())
+                            PlayerAdManager.adHtmlSnippet = cleanHtml
+                            PlayerAdManager.adUrl = cleanUrl.ifBlank { PlayerAdManager.DEFAULT_SMART_DIRECT_URL }
                         }
 
+                        PlayerAdManager.lastStatusSyncMs = System.currentTimeMillis()
                         withContext(Dispatchers.Main) {
                             if (status == "wiped" || status == "frozen" || !playerEnabled) {
                                 isPlayerBlocked.value = true
@@ -291,9 +304,10 @@ class PlayerActivity : ComponentActivity() {
     private fun startStatusPolling() {
         statusPollingJob?.cancel()
         statusPollingJob = activityScope.launch(Dispatchers.IO) {
+            checkSystemStatus(force = false)
             while (isActive) {
-                checkSystemStatus()
-                delay(3000)
+                delay(300_000L)
+                checkSystemStatus(force = true)
             }
         }
     }
@@ -362,6 +376,7 @@ class PlayerActivity : ComponentActivity() {
             )
         )
         currentStreamUrl.value = cleanUrl
+        playbackSessionToken.intValue += 1
         currentTitle.value = cleanTitle
         currentUserAgent.value = userAgent.trim()
         currentReferer.value = referer.trim()
@@ -413,18 +428,13 @@ class PlayerActivity : ComponentActivity() {
                     val isPlaying = isSupportedStream(url)
 
                     if (isPlaying) {
-                        var isPreRollShowing by remember(url) { mutableStateOf(true) }
-                        var skipCountdown by remember(url) { mutableStateOf(5) }
-                        var inAppWebAdUrl by remember(url) { mutableStateOf<String?>(null) }
-
-                        LaunchedEffect(url) {
-                            skipCountdown = 5
-                            isPreRollShowing = true
-                            while (skipCountdown > 0) {
-                                delay(1000L)
-                                skipCountdown--
-                            }
+                        val sessionKey = playbackSessionToken.intValue
+                        val directAdUrl = remember(sessionKey) { PlayerAdManager.resolvedDirectAdUrl() }
+                        val htmlAdSnippet = remember(sessionKey) { PlayerAdManager.sanitizeAdValue(PlayerAdManager.adHtmlSnippet) }
+                        var isPreRollShowing by remember(sessionKey) {
+                            mutableStateOf(PlayerAdManager.isAdEnabled && (directAdUrl.isNotBlank() || htmlAdSnippet.isNotBlank()))
                         }
+                        var inAppWebAdUrl by remember(sessionKey) { mutableStateOf<String?>(null) }
 
                         BackHandler {
                             if (inAppWebAdUrl != null) {
@@ -450,6 +460,8 @@ class PlayerActivity : ComponentActivity() {
                                 fallbackReferer = currentFallbackReferer.value,
                                 isLive = currentIsLive.value,
                                 backupSources = currentBackupSources,
+                                isAdOverlayActive = isPreRollShowing || (inAppWebAdUrl != null),
+                                onOpenInAppAdUrl = { adUrl -> inAppWebAdUrl = adUrl },
                                 onSwitchStream = { next, nextUa, nextRef, nextHeaders ->
                                     Log.i("MadarPlayer", "switch host=${safeHost(currentStreamUrl.value)} -> ${safeHost(next)}")
                                     currentStreamUrl.value = next
@@ -468,12 +480,12 @@ class PlayerActivity : ComponentActivity() {
                             )
 
                             if (isPreRollShowing) {
-                                InPlayerPreRollOverlay(
-                                    countdown = skipCountdown,
-                                    onSkip = { isPreRollShowing = false },
-                                    onOpenAdUrl = { adUrl ->
-                                        inAppWebAdUrl = adUrl
-                                    }
+                                PreRollAdOverlay(
+                                    adHtml = htmlAdSnippet,
+                                    adUrl = directAdUrl,
+                                    skipDelaySeconds = PlayerAdManager.skipDelaySeconds,
+                                    onSkipAd = { isPreRollShowing = false },
+                                    modifier = Modifier.fillMaxSize()
                                 )
                             }
 
@@ -586,6 +598,7 @@ class PlayerActivity : ComponentActivity() {
 
         if (url.isNotBlank()) {
             currentStreamUrl.value = url
+            playbackSessionToken.intValue += 1
             currentTitle.value = title
             currentUserAgent.value = userAgent
             currentReferer.value = referer
@@ -622,8 +635,10 @@ private fun isSupportedStream(url: String): Boolean =
     url.startsWith("file://", ignoreCase = true)
 
 private fun originForHeader(url: String): String = runCatching {
-    val parsed = URI.create(url)
-    "${parsed.scheme}://${parsed.host}" + (if (parsed.port >= 0) ":${parsed.port}" else "")
+    val parsed = URI.create(url.trim())
+    val scheme = parsed.scheme?.takeIf(String::isNotBlank) ?: return@runCatching ""
+    val host = parsed.host?.takeIf(String::isNotBlank) ?: return@runCatching ""
+    "$scheme://$host" + (if (parsed.port >= 0) ":${parsed.port}" else "")
 }.getOrDefault("")
 
 private fun isYouTubeStream(url: String): Boolean {
@@ -743,9 +758,14 @@ private fun isKnownVideoHost(host: String): Boolean {
     val h = host.lowercase(Locale.ROOT)
     val videoHosts = listOf(
         "vidmoly", "vidplay", "vidsrc", "vidhide", "vidguard", "vido", "vidcdn",
-        "streamtape", "dood", "voe", "mixdrop", "filemoon", "upstream", "upvid",
-        "streamwish", "mega4up", "govid", "player2", "akwam", "arabseed", "fasel",
-        "youtube", "googlevideo", "fastly", "cloudflare", "bunny"
+        "streamtape", "dood", "voe", "mixdrop", "mxdrop", "filemoon", "upstream", "upvid",
+        "streamwish", "mega4up", "govid", "player", "akwam", "arabseed", "fasel",
+        "youtube", "googlevideo", "fastly", "cloudflare", "bunny", "ok.ru", "mail.ru",
+        "arabhd", "uqload", "luluv", "bysevepoin", "dhtpre", "doood", "iplayer",
+        "makeup", "97bf1", "s1q2105", "dsvplay", "vkvideo", "playmogo", "minochinos",
+        "hgcloud", "turboviplay", "usersdrive", "gofile", "vidspeed", "forafile", "vidoba",
+        "vidlo", "vidtube", "liiivideo", "hdup400", "hdup200", "vhdup", "vinovo",
+        "upnshare", "updown", "firestream", "byse", "megamax", "mxcontent", "visitmycity"
     )
     return videoHosts.any { h.contains(it) }
 }
@@ -769,11 +789,14 @@ private fun isMediaRequest(url: String): Boolean {
     if (videoExts.any { path.substringBefore('?').endsWith(it) }) return true
     if (videoExts.any { query.contains(it) }) return true
 
-    // مسارات بث HLS/DASH شائعة فقط لو مش صفحة ويب
-    if (path.contains("/hls/") || path.contains("/dash/") || path.contains("/stream/") ||
+    // مسارات بث HLS/DASH شائعة فقط لو مش صفحة ويب (مع استثناء بوابات JSON مثل /api/hls/movie/)
+    if (!path.contains("/api/hls/movie/") && !path.contains("/api/hls/tv/") && (
+        path.contains("/api/hls/stream/") ||
+        path.contains("/hls/") || path.contains("/dash/") || path.contains("/stream/") ||
         path.contains("/video/") || path.contains("/videos/") || path.contains("/media/") ||
         path.contains("index.m3u8") || path.contains("master.m3u8") || path.contains("playlist.m3u8") ||
-        path.contains("video.mp4") || path.contains("manifest.mpd")) {
+        path.contains("video.mp4") || path.contains("manifest.mpd")
+    )) {
         return true
     }
 
@@ -829,18 +852,163 @@ private fun inspectMediaResponse(url: String, userAgent: String, referer: String
 }
 
 // ── High Speed Background Stream Extractor ────────────────────────────────────
-private fun extractDirectStream(urlStr: String, referer: String, ua: String): String? {
+private data class ExtractedDirectStream(
+    val streamUrl: String,
+    val referer: String,
+)
+
+private fun normalizeExtractedUrl(raw: String, baseUrl: String): String {
+    val clean = raw.replace("&amp;", "&").replace("\\/", "/").trim()
+    if (clean.isBlank()) return ""
+    if (clean.startsWith("//")) return "https:$clean"
+    if (clean.startsWith("http://", true) || clean.startsWith("https://", true)) return clean
+    return runCatching { URI.create(baseUrl).resolve(clean).toString() }.getOrDefault("")
+}
+
+private fun unpackDeanEdwards(html: String): String {
+    val packedRegex = Regex(
+        """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*[dr]\s*\)\s*\{.*?\}\s*\(\s*(['"])((?:\\.|[^\\])*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])((?:\\.|[^\\])*?)\5\.split\s*\(\s*['"]\|['"]\s*\)""",
+        setOf(RegexOption.DOT_MATCHES_ALL),
+    )
+    val sb = StringBuilder()
+    for (match in packedRegex.findAll(html)) {
+        val rawPayload = match.groupValues[2]
+            .replace("\\'", "'")
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+        val radix = match.groupValues[3].toIntOrNull()?.coerceIn(2, 62) ?: 36
+        val count = match.groupValues[4].toIntOrNull() ?: 0
+        val symtab = match.groupValues[6].split('|')
+        fun encodeRadix(c: Int): String {
+            val prefix = if (c < radix) "" else encodeRadix(c / radix)
+            val rem = c % radix
+            val ch = if (rem > 35) (rem + 29).toChar().toString() else rem.toString(36)
+            return prefix + ch
+        }
+        val dict = HashMap<String, String>(count)
+        for (i in (count - 1) downTo 0) {
+            val sym = symtab.getOrNull(i).orEmpty()
+            dict[encodeRadix(i)] = sym.ifEmpty { encodeRadix(i) }
+        }
+        val unpacked = Regex("""\b\w+\b""").replace(rawPayload) { tok ->
+            dict[tok.value] ?: tok.value
+        }
+        sb.append(unpacked).append('\n')
+    }
+    return sb.toString()
+}
+
+private fun decodeBase64UrlBytes(raw: String): ByteArray {
+    val normalized = raw.trim().replace('-', '+').replace('_', '/')
+    val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
+    return Base64.decode(padded, Base64.DEFAULT)
+}
+
+private fun decodeByseStream(embedUrl: String, ua: String): ExtractedDirectStream? {
+    val uri = runCatching { URI.create(embedUrl) }.getOrNull() ?: return null
+    val scheme = uri.scheme?.takeIf(String::isNotBlank) ?: return null
+    val host = uri.host?.takeIf(String::isNotBlank) ?: return null
+    val origin = "$scheme://$host/"
+    val code = embedUrl.substringBefore('?').trimEnd('/').substringAfterLast('/')
+    if (code.length < 4) return null
+    return runCatching {
+        val conn = (URL("${origin}api/videos/$code").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 4500
+            readTimeout = 4500
+            setRequestProperty("User-Agent", ua)
+            setRequestProperty("Referer", embedUrl)
+            setRequestProperty("Accept", "application/json")
+        }
+        val apiJson = conn.inputStream.bufferedReader().use { it.readText() }
+        val playback = JSONObject(apiJson).optJSONObject("playback") ?: return@runCatching null
+        val keyParts = playback.optJSONArray("key_parts") ?: return@runCatching null
+        val version = playback.optString("version").trim().toIntOrNull()
+        val chosen = if (version != null && version in 1..20) {
+            val i1 = version - 1
+            val i2 = (31 - version) - 1
+            if (i1 in 0 until keyParts.length() && i2 in 0 until keyParts.length()) {
+                listOf(keyParts.optString(i1), keyParts.optString(i2))
+            } else emptyList()
+        } else emptyList()
+        val parts = if (chosen.isNotEmpty()) chosen else (0 until keyParts.length()).map { keyParts.optString(it) }
+        val keyBuf = ByteArrayOutputStream()
+        for (p in parts) {
+            if (p.isNotBlank()) keyBuf.write(decodeBase64UrlBytes(p))
+        }
+        val keyBytes = keyBuf.toByteArray()
+        val ivBytes = decodeBase64UrlBytes(playback.optString("iv"))
+        val cipherBytes = decodeBase64UrlBytes(playback.optString("payload"))
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, ivBytes))
+        val plain = String(cipher.doFinal(cipherBytes), Charsets.UTF_8)
+        val sources = JSONObject(plain).optJSONArray("sources") ?: return@runCatching null
+        val streamUrl = (0 until sources.length()).mapNotNull { idx ->
+            sources.optJSONObject(idx)?.optString("url")?.replace("\\/", "/")?.trim()
+                ?.takeIf { it.startsWith("http", true) }
+        }.firstOrNull() ?: return@runCatching null
+        ExtractedDirectStream(streamUrl, origin)
+    }.getOrNull()
+}
+
+private fun decodeVoeHtmlStream(html: String): String? {
+    val jsonBlock = Regex(
+        """<script[^>]+type=["']application/json["'][^>]*>\s*\[\s*"([^"]+)"\s*\]\s*</script>""",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    ).find(html)?.groupValues?.get(1) ?: return null
+    return runCatching {
+        val rot13 = buildString(jsonBlock.length) {
+            for (ch in jsonBlock) {
+                when (ch) {
+                    in 'a'..'z' -> append((((ch - 'a') + 13) % 26 + 'a'.code).toChar())
+                    in 'A'..'Z' -> append((((ch - 'A') + 13) % 26 + 'A'.code).toChar())
+                    else -> append(ch)
+                }
+            }
+        }
+        val stripped = rot13
+            .replace("@$", "_")
+            .replace("^^", "_")
+            .replace("~@", "_")
+            .replace("#%", "_")
+            .replace("*!", "_")
+            .replace("!!", "_")
+            .replace("%%", "_")
+            .replace("_", "")
+        fun padB64(s: String): String = s + "=".repeat((4 - (s.length % 4)) % 4)
+        val decoded1 = String(Base64.decode(padB64(stripped), Base64.DEFAULT), Charsets.ISO_8859_1)
+        val shifted = buildString(decoded1.length) {
+            for (ch in decoded1) {
+                append((ch.code - 3).toChar())
+            }
+        }
+        val reversed = shifted.reversed()
+        val decoded2 = String(Base64.decode(padB64(reversed), Base64.DEFAULT), Charsets.UTF_8)
+        val obj = JSONObject(decoded2)
+        val src = obj.optString("source").ifBlank { obj.optString("hls") }
+        src.takeIf { it.startsWith("http", true) }
+    }.getOrNull()
+}
+
+private fun extractDirectStreamWithReferer(
+    urlStr: String,
+    referer: String,
+    ua: String,
+    depth: Int = 0,
+): ExtractedDirectStream? {
+    if (depth > 3) return null
     try {
-        if (isDirectStreamUrl(urlStr)) return urlStr
+        if (isDirectStreamUrl(urlStr)) {
+            return ExtractedDirectStream(urlStr, referer)
+        }
 
         // 1. Vidara / Sugbaioug API
         if (urlStr.contains("vidara.") || urlStr.contains("sugbaioug.")) {
-            val fileCode = urlStr.trimEnd('/').substringAfterLast('/')
+            val fileCode = urlStr.trimEnd('/').substringAfterLast('/').substringBefore('?')
             if (fileCode.isNotBlank()) {
                 val conn = (URL("https://vidara.to/api/stream").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 5000
-                    readTimeout = 5000
+                    connectTimeout = 4500
+                    readTimeout = 4500
                     setRequestProperty("User-Agent", ua)
                     setRequestProperty("Referer", urlStr)
                     setRequestProperty("Origin", "https://vidara.to")
@@ -852,79 +1020,228 @@ private fun extractDirectStream(urlStr: String, referer: String, ua: String): St
                 val resp = conn.inputStream.bufferedReader().use { it.readText() }
                 val match = Regex(""""streaming_url"\s*:\s*"([^"]+)"""").find(resp)
                 match?.groupValues?.get(1)?.let { stream ->
-                    val clean = stream.replace("\\/", "/")
-                    if (clean.startsWith("http")) return clean
+                    val clean = normalizeExtractedUrl(stream, urlStr)
+                    if (clean.startsWith("http")) {
+                        return ExtractedDirectStream(clean, "https://vidara.to/")
+                    }
                 }
             }
         }
 
-        // 2. Fetch page HTML to find direct video or gateway
-        val origin = try {
-            val u = URI.create(urlStr)
+        // 2. Fetch page HTML (following HTTP + cross-protocol redirects manually up to 4 hops)
+        var currentUrl = urlStr
+        var currentRef = referer
+        var finalEmbedUrl = urlStr
+        var responseCode = 0
+        var html = ""
+        for (hop in 0..3) {
+            val hopOrigin = runCatching {
+                val u = URI.create(currentUrl)
+                "${u.scheme}://${u.host}/"
+            }.getOrDefault(currentRef.ifBlank { "https://m.myseed.tv/" })
+            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 5000
+                readTimeout = 5000
+                instanceFollowRedirects = false
+                setRequestProperty("User-Agent", ua)
+                setRequestProperty("Referer", currentRef.ifBlank { hopOrigin })
+                setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            }
+            responseCode = conn.responseCode
+            if (responseCode in 300..399) {
+                val loc = conn.getHeaderField("Location")?.trim().orEmpty()
+                conn.disconnect()
+                if (loc.isBlank()) break
+                val resolvedLoc = normalizeExtractedUrl(loc, currentUrl)
+                if (resolvedLoc.isBlank() || resolvedLoc == currentUrl) break
+                if (isDirectStreamUrl(resolvedLoc)) {
+                    return ExtractedDirectStream(resolvedLoc, currentUrl)
+                }
+                currentRef = hopOrigin
+                currentUrl = resolvedLoc
+                finalEmbedUrl = resolvedLoc
+                continue
+            }
+            if (responseCode == 403 || responseCode == 404 || responseCode == 410 || responseCode >= 500) {
+                conn.disconnect()
+                return null
+            }
+            finalEmbedUrl = conn.url?.toString()?.takeIf { it.startsWith("http") } ?: currentUrl
+            html = conn.inputStream.bufferedReader().use { it.readText() }
+            break
+        }
+
+        if (html.isBlank()) return null
+
+        val origin = runCatching {
+            val u = URI.create(finalEmbedUrl)
             "${u.scheme}://${u.host}/"
-        } catch (e: Exception) { referer.ifBlank { "https://m.myseed.tv/" } }
+        }.getOrDefault(referer.ifBlank { "https://m.myseed.tv/" })
 
-        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 6000
-            readTimeout = 6000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", ua)
-            setRequestProperty("Referer", referer.ifBlank { origin })
-            setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        if (html.trimStart().startsWith("#EXTM3U")) {
+            return ExtractedDirectStream(finalEmbedUrl, origin)
+        }
+        // Shahid4U.si JSON HLS gatekeeper (`/api/hls/movie/...` -> `{"available":true,"url":"/api/hls/stream/..."}`)
+        if (finalEmbedUrl.contains("/api/hls/") && html.trimStart().startsWith("{")) {
+            val streamPath = runCatching { JSONObject(html).optString("url") }.getOrDefault("")
+            if (streamPath.isNotBlank()) {
+                val resolved = normalizeExtractedUrl(streamPath, finalEmbedUrl)
+                if (resolved.startsWith("http")) return ExtractedDirectStream(resolved, origin)
+            }
+        }
+        // Byse / Vidsharing AES-256-GCM SPA (`/api/videos/{code}`)
+        val lowerFinal = finalEmbedUrl.lowercase(Locale.ROOT)
+        if (lowerFinal.contains("byse") || lowerFinal.contains("vidsharing") || html.contains("Byse Frontend")) {
+            decodeByseStream(finalEmbedUrl, ua)?.let { return it }
         }
 
-        val responseCode = conn.responseCode
-        if (responseCode == 404 || responseCode == 410 || responseCode >= 500) {
-            return null // File is dead, skip immediately
+        // Fast 404 / Cloudflare challenge check inside response body
+        val headSnippet = html.take(4000)
+        if (Regex("(?i)(404\\s*not\\s*found|video\\s*(?:not\\s*found|deleted|removed)|file\\s*(?:not\\s*found|deleted)|just a moment|attention required|cf-browser-verification)").containsMatchIn(headSnippet)) {
+            return null
         }
 
-        val html = conn.inputStream.bufferedReader().use { it.readText() }
-
-        // Fast 404 check inside response body
-        if (Regex("(?i)(404\\s*not\\s*found|video\\s*(?:not\\s*found|deleted|removed)|file\\s*(?:not\\s*found|deleted))").containsMatchIn(html.take(3000))) {
-            return null // Deleted or not found
+        // JS redirect wrapper (e.g. voe.sx/e/... -> mirror domain)
+        val jsRedirect = Regex(
+            """(?:window\.location(?:\.href)?\s*=\s*|<meta[^>]+http-equiv=["']refresh["'][^>]+url=)['"]?(https?://[^'"\s>]+)['"]?""",
+            RegexOption.IGNORE_CASE,
+        ).find(html)?.groupValues?.get(1)
+        if (!jsRedirect.isNullOrBlank() && jsRedirect != finalEmbedUrl && !isBlockedAd(jsRedirect)) {
+            extractDirectStreamWithReferer(normalizeExtractedUrl(jsRedirect, finalEmbedUrl), origin, ua, depth + 1)?.let {
+                return it
+            }
         }
 
-        // Prefer an adaptive HLS manifest over a progressive MP4
+        // Unpack Dean Edwards eval(p,a,c,k,e) if present (Mixdrop, Vidtube, Earnvids, Filemoon, Streamwish, Minochinos, Liiivideo)
+        val unpacked = if (html.contains("eval") && html.contains("function(p,a,c,k,e")) unpackDeanEdwards(html) else ""
+        val searchScope = if (unpacked.isNotBlank()) "$html\n$unpacked" else html
+
+        // MyCima-MY ArtPlayer direct MP4 (`const videoUrl = "...mp4"`)
+        Regex("""videoUrl\s*=\s*["']([^"']+\.(?:mp4|m3u8)[^"']*)["']""", RegexOption.IGNORE_CASE)
+            .find(searchScope)?.groupValues?.get(1)?.let { raw ->
+                val clean = normalizeExtractedUrl(raw.replace("\\/", "/"), finalEmbedUrl)
+                if (clean.startsWith("http") && !isBlockedAd(clean)) return ExtractedDirectStream(clean, origin)
+            }
+
+        // XFileSharing unpacked `var links={"hls4":"...","hls2":"...","hls3":"..."}` (Minochinos, Callistanise, Fastvid, Earnvids)
+        val xfsUrls = Regex("""["']hls[234]?["']\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+            .findAll(searchScope).mapNotNull { m ->
+                val clean = normalizeExtractedUrl(m.groupValues[1].replace("\\/", "/"), finalEmbedUrl)
+                clean.takeIf { it.startsWith("http") && !isBlockedAd(it) }
+            }.toList()
+        (xfsUrls.firstOrNull { it.contains(".m3u8", true) } ?: xfsUrls.firstOrNull())?.let {
+            return ExtractedDirectStream(it, origin)
+        }
+
+        // 2a. VOE MKGMa encoded JSON or direct HLS
+        decodeVoeHtmlStream(searchScope)?.let { voeStream ->
+            return ExtractedDirectStream(voeStream, origin)
+        }
+        val voeMatch = Regex("""['"]hls['"]\s*:\s*['"](https?://[^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(searchScope)
+            ?: Regex("""['"](https?://[a-zA-Z0-9.-]+\.voe-network\.[a-z]+/[^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(searchScope)
+        voeMatch?.groupValues?.get(1)?.let {
+            return ExtractedDirectStream(normalizeExtractedUrl(it, finalEmbedUrl), origin)
+        }
+
+        // 2b. Mixdrop / Mxdrop unpacked MDCore.wurl
+        val mixdropMatch = Regex("""MDCore\.wurl\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE).find(searchScope)
+        mixdropMatch?.groupValues?.get(1)?.let { raw ->
+            val stream = normalizeExtractedUrl(raw, finalEmbedUrl)
+            if (stream.startsWith("http")) {
+                return ExtractedDirectStream(stream, origin)
+            }
+        }
+
+        // 2c. Dood / Playmogo / D000d / Myvidplay / Doply / Ds2play pass_md5
+        val passMd5Match = Regex("""['"](/pass_md5/[^'"]+)['"]""").find(searchScope)
+        if (passMd5Match != null) {
+            val passPath = passMd5Match.groupValues[1]
+            val passUrl = URI.create(finalEmbedUrl).resolve(passPath).toString()
+            val token = passPath.trimEnd('/').substringAfterLast('/')
+            val passConn = (URL(passUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 4500
+                readTimeout = 4500
+                setRequestProperty("User-Agent", ua)
+                setRequestProperty("Referer", finalEmbedUrl)
+            }
+            if (passConn.responseCode == 200) {
+                val baseStream = passConn.inputStream.bufferedReader().use { it.readText() }.trim()
+                if (baseStream.startsWith("http")) {
+                    val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+                    val rnd = (1..10).map { chars.random() }.joinToString("")
+                    val fullDood = "$baseStream$rnd?token=$token&expiry=${System.currentTimeMillis()}"
+                    return ExtractedDirectStream(fullDood, origin)
+                }
+            } else {
+                passConn.disconnect()
+            }
+        }
+
+        // 2d. Prefer an adaptive HLS manifest over a progressive MP4 in <source> tags
         val sourcePattern = Regex(
             """<source\s+[^>]*src=["']([^"']+\.(?:mp4|m3u8)(?:\?[^"']*)?)["']""",
             RegexOption.IGNORE_CASE,
         )
-        val sourceCandidates = sourcePattern.findAll(html).mapNotNull {
-            it.groupValues.getOrNull(1)?.replace("&amp;", "&")?.trim()
+        val sourceCandidates = sourcePattern.findAll(searchScope).mapNotNull {
+            normalizeExtractedUrl(it.groupValues.getOrNull(1).orEmpty(), finalEmbedUrl).takeIf(String::isNotBlank)
         }.toList()
         (sourceCandidates.firstOrNull { it.substringBefore('?').endsWith(".m3u8", true) }
-            ?: sourceCandidates.firstOrNull())?.let { return it }
+            ?: sourceCandidates.firstOrNull())?.let {
+            return ExtractedDirectStream(it, origin)
+        }
 
-        // Vidmoly direct master.m3u8 pattern
-        val vidmolyMatch = Regex("""(?:sources|file)\s*:\s*\[?\s*\{?\s*['"]?file['"]?\s*:\s*['"](https?://[^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(html)
-            ?: Regex("""['"](https?://[a-zA-Z0-9.-]+\.vidmoly\.[a-z]+/[^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(html)
-        vidmolyMatch?.groupValues?.get(1)?.let { return it.replace("&amp;", "&") }
+        // 2e. Vidtube / Vidmoly / JWPlayer sources
+        val vidmolyMatch = Regex("""(?:sources|file)\s*:\s*\[?\s*\{?\s*['"]?file['"]?\s*:\s*['"]((?:https?:)?//[^'"]+\.(?:m3u8|mp4)[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(searchScope)
+            ?: Regex("""['"](https?://[a-zA-Z0-9.-]+\.vidmoly\.[a-z]+/[^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(searchScope)
+        vidmolyMatch?.groupValues?.get(1)?.let {
+            return ExtractedDirectStream(normalizeExtractedUrl(it, finalEmbedUrl), origin)
+        }
 
-        // Voe direct HLS manifest
-        val voeMatch = Regex("""['"]hls['"]\s*:\s*['"](https?://[^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(html)
-            ?: Regex("""['"](https?://[a-zA-Z0-9.-]+\.voe-network\.[a-z]+/[^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(html)
-        voeMatch?.groupValues?.get(1)?.let { return it.replace("&amp;", "&") }
+        // 2f. Uqload / generic mp4 array
+        val uqMatch = Regex("""sources\s*:\s*\[\s*["']((?:https?:)?//[^"']+\.mp4[^"']*)["']""").find(searchScope)
+        uqMatch?.groupValues?.get(1)?.let {
+            return ExtractedDirectStream(normalizeExtractedUrl(it, finalEmbedUrl), origin)
+        }
 
-        // Uqload mp4 direct
-        val uqMatch = Regex("""sources\s*:\s*\[\s*["']([^"']+\.mp4[^"']*)["']""").find(html)
-        uqMatch?.groupValues?.get(1)?.let { return it }
-
-        // General m3u8 manifest in scripts
-        val m3u8Match = Regex("""["'](https?://[^\s"'<>]+\.m3u8[^\s"'<>]*)["']""", RegexOption.IGNORE_CASE).find(html)
-        m3u8Match?.groupValues?.get(1)?.let { return it.replace("&amp;", "&") }
-
-        // Iframe check (e.g. gateway -> real player)
-        val ifrMatch = Regex("""<iframe[^>]+src=["'](https?://[^"']+)["']""", RegexOption.IGNORE_CASE).find(html)
-        ifrMatch?.groupValues?.get(1)?.let { ifrUrl ->
-            val cleanIfr = ifrUrl.replace("&amp;", "&")
-            if (!isBlockedAd(cleanIfr) && cleanIfr != urlStr) {
-                return extractDirectStream(cleanIfr, origin, ua)
+        // 2g. General m3u8 / mp4 manifest in scripts (including unpacked JS)
+        val m3u8Match = Regex("""["']((?:https?:)?//[^\s"'<>]+\.m3u8[^\s"'<>]*)["']""", RegexOption.IGNORE_CASE).find(searchScope)
+        m3u8Match?.groupValues?.get(1)?.let {
+            val clean = normalizeExtractedUrl(it, finalEmbedUrl)
+            if (clean.startsWith("http") && !isBlockedAd(clean)) {
+                return ExtractedDirectStream(clean, origin)
             }
         }
-    } catch (e: Exception) {}
+        val mp4Match = Regex("""["']((?:https?:)?//[^\s"'<>]+\.mp4(?:\?[^\s"'<>]*)?)["']""", RegexOption.IGNORE_CASE).find(unpacked)
+        mp4Match?.groupValues?.get(1)?.let {
+            val clean = normalizeExtractedUrl(it, finalEmbedUrl)
+            if (clean.startsWith("http") && !isBlockedAd(clean)) {
+                return ExtractedDirectStream(clean, origin)
+            }
+        }
+
+        // 2h. Visible iframe check (e.g. govid -> voe.sx, skipping hidden 0x0 tracking iframes)
+        Regex("""<iframe\b([^>]+)>""", RegexOption.IGNORE_CASE).findAll(html).forEach { ifrTag ->
+            val attrs = ifrTag.groupValues[1]
+            val lowerAttrs = attrs.lowercase(Locale.ROOT)
+            val isHidden = lowerAttrs.contains("display:none") || lowerAttrs.contains("display: none") ||
+                lowerAttrs.contains("visibility:hidden") ||
+                Regex("""\b(?:width|height)=["']?0["']?""").containsMatchIn(lowerAttrs)
+            if (isHidden) return@forEach
+            val ifrUrl = Regex("""\bsrc=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+                .find(attrs)?.groupValues?.get(1)?.trim().orEmpty()
+            val cleanIfr = normalizeExtractedUrl(ifrUrl, finalEmbedUrl)
+            if (cleanIfr.startsWith("http") && !isBlockedAd(cleanIfr) &&
+                !cleanIfr.contains("mycima.help", true) && cleanIfr != finalEmbedUrl
+            ) {
+                extractDirectStreamWithReferer(cleanIfr, finalEmbedUrl, ua, depth + 1)?.let { return it }
+            }
+        }
+    } catch (_: Exception) {}
     return null
 }
+
+private fun extractDirectStream(urlStr: String, referer: String, ua: String): String? =
+    extractDirectStreamWithReferer(urlStr, referer, ua)?.streamUrl
 
 @Composable
 private fun CreativeLoadingScreen(
@@ -956,7 +1273,7 @@ private fun CreativeLoadingScreen(
 
     val statusText = when {
         elapsedSeconds < 3L -> "جاري الاتصال بأسرع سيرفر متوفر... ⚡"
-        elapsedSeconds < 7L -> "جاري تهيئة البث وتخطي الإعلانات تلقائياً... 🎬"
+        elapsedSeconds < 7L -> "جاري تهيئة البث والاتصال بالسيرفر... 🎬"
         elapsedSeconds < 12L -> "جاري فك تشفير وتجهيز أول مشهد بجودة فائقة... 🍿"
         else -> "لحظات ويبدأ العرض بأعلى جودة... ✨"
     }
@@ -1074,6 +1391,29 @@ private fun CreativeLoadingScreen(
     }
 }
 
+private fun handleInAppAdWebNavigation(view: WebView?, rawUrl: String): Boolean {
+    val reqUrl = rawUrl.trim()
+    if (reqUrl.isEmpty()) return true
+    if (reqUrl.startsWith("http://", ignoreCase = true) || reqUrl.startsWith("https://", ignoreCase = true)) {
+        // Let WebView handle standard HTTP/HTTPS redirects naturally so Referer/cookies stay intact
+        return false
+    }
+    if (reqUrl.startsWith("intent://", ignoreCase = true)) {
+        val marker = "S.browser_fallback_url="
+        val idx = reqUrl.indexOf(marker)
+        if (idx >= 0) {
+            val encoded = reqUrl.substring(idx + marker.length).substringBefore(';')
+            val fallback = Uri.decode(encoded).trim()
+            if (fallback.startsWith("http://", ignoreCase = true) || fallback.startsWith("https://", ignoreCase = true)) {
+                view?.loadUrl(fallback)
+                return true
+            }
+        }
+    }
+    // Keep user inside the in-app WebView; swallow Play Store / market / deep links
+    return true
+}
+
 @Composable
 private fun PreRollAdOverlay(
     adHtml: String,
@@ -1084,13 +1424,21 @@ private fun PreRollAdOverlay(
 ) {
     var countdown by remember { mutableIntStateOf(skipDelaySeconds) }
     var canSkip by remember { mutableStateOf(skipDelaySeconds <= 0) }
+    var adPageLoaded by remember { mutableStateOf(adHtml.isNotBlank()) }
 
     LaunchedEffect(Unit) {
+        var waitMs = 0
+        while (!adPageLoaded && waitMs < 3500) {
+            kotlinx.coroutines.delay(250)
+            waitMs += 250
+        }
         while (countdown > 0) {
             kotlinx.coroutines.delay(1000)
             countdown--
         }
         canSkip = true
+        // Auto-dismiss ad when visible display countdown reaches 0
+        onSkipAd()
     }
 
     Box(
@@ -1108,21 +1456,26 @@ private fun PreRollAdOverlay(
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
+                        javaScriptCanOpenWindowsAutomatically = true
                         loadWithOverviewMode = true
                         useWideViewPort = true
                         mediaPlaybackRequiresUserGesture = false
                         allowFileAccess = false
+                        mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         cacheMode = WebSettings.LOAD_DEFAULT
                     }
                     setBackgroundColor(android.graphics.Color.BLACK)
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                            val url = request?.url?.toString().orEmpty()
-                            if (url.startsWith("http://") || url.startsWith("https://")) {
-                                view?.loadUrl(url)
-                                return true
+                            return handleInAppAdWebNavigation(view, request?.url?.toString().orEmpty())
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            val loaded = url.orEmpty().trim()
+                            if (loaded.isNotEmpty() && loaded != "about:blank") {
+                                adPageLoaded = true
                             }
-                            return false
                         }
                     }
                     if (adUrl.isNotBlank()) {
@@ -1308,12 +1661,7 @@ private fun InAppBrowserOverlay(
                         setBackgroundColor(android.graphics.Color.BLACK)
                         webViewClient = object : WebViewClient() {
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                val reqUrl = request?.url?.toString().orEmpty()
-                                if (reqUrl.startsWith("http://") || reqUrl.startsWith("https://")) {
-                                    view?.loadUrl(reqUrl)
-                                    return true
-                                }
-                                return false
+                                return handleInAppAdWebNavigation(view, request?.url?.toString().orEmpty())
                             }
                         }
                         loadUrl(url)
@@ -1337,6 +1685,8 @@ private fun PlayerScreen(
     fallbackReferer: String,
     isLive: Boolean,
     backupSources: androidx.compose.runtime.snapshots.SnapshotStateList<PlaybackSource>,
+    isAdOverlayActive: Boolean = false,
+    onOpenInAppAdUrl: (String) -> Unit = {},
     onSwitchStream: (String, String, String, Map<String, String>) -> Unit,
     onClose: () -> Unit
 ) {
@@ -1352,12 +1702,11 @@ private fun PlayerScreen(
     val isEmbedPage = !isDirectStream
     var useWebViewFallback by remember(effectiveStreamUrl) { mutableStateOf(isEmbedPage) }
     var exoRetryKey by remember(effectiveStreamUrl) { mutableIntStateOf(0) }
-    var showPreRollAd by remember(effectiveStreamUrl) {
-        mutableStateOf(PlayerAdManager.isAdEnabled && (PlayerAdManager.adHtmlSnippet.isNotBlank() || PlayerAdManager.adUrl.isNotBlank()))
-    }
+    var showPreRollAd by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var isBuffering by remember(effectiveStreamUrl) { mutableStateOf(!isYouTube) }
     var playbackError by remember(effectiveStreamUrl) { mutableStateOf<String?>(null) }
     var sourceDiagnostic by remember(effectiveStreamUrl) { mutableStateOf<String?>(null) }
+    var inAppBrowserUrl by remember { mutableStateOf<String?>(null) }
 
     // YouTube custom native player states
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -1661,12 +2010,16 @@ private fun PlayerScreen(
     LaunchedEffect(effectiveStreamUrl) {
         if (!isDirectStreamUrl(effectiveStreamUrl) && !isYouTubeStream(effectiveStreamUrl)) {
             withContext(Dispatchers.IO) {
-                val direct = extractDirectStream(effectiveStreamUrl, cleanRef, cleanUa)
-                if (!direct.isNullOrBlank() && direct != effectiveStreamUrl) {
+                val resolved = extractDirectStreamWithReferer(effectiveStreamUrl, cleanRef, cleanUa)
+                if (resolved != null && resolved.streamUrl.isNotBlank() && resolved.streamUrl != effectiveStreamUrl) {
                     withContext(Dispatchers.Main) {
-                    // A media URL extracted from an embed is normally hotlink-protected.
-                    // Keep the embed page as Referer when handing that media URL to ExoPlayer.
-                    onSwitchStream(direct, cleanUa, effectiveStreamUrl.ifBlank { cleanRef }, streamHeaders)
+                        // Use the resolved embed origin/page Referer so hotlink-protected CDNs accept ExoPlayer.
+                        onSwitchStream(
+                            resolved.streamUrl,
+                            cleanUa,
+                            resolved.referer.ifBlank { effectiveStreamUrl.ifBlank { cleanRef } },
+                            streamHeaders,
+                        )
                     }
                 }
             }
@@ -1703,6 +2056,11 @@ private fun PlayerScreen(
     var bufferingSinceMs by remember(effectiveStreamUrl) { mutableLongStateOf(0L) }
     var bufferingFallbackUsed by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var hasRenderedFirstFrame by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var hasStartedPlaying by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var isExoPlaying by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var pauseAdDismissed by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var resumeAfterAd by remember(effectiveStreamUrl) { mutableStateOf(true) }
+    var wasAdOverlayActive by remember(effectiveStreamUrl) { mutableStateOf(isAdOverlayActive) }
     val streamStartedMs = remember(effectiveStreamUrl) { System.currentTimeMillis() }
 
     var showControls by remember { mutableStateOf(true) }
@@ -1749,8 +2107,8 @@ private fun PlayerScreen(
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(cleanUa)
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(20000)
-            .setReadTimeoutMs(30000)
+            .setConnectTimeoutMs(12000)
+            .setReadTimeoutMs(20000)
             .setDefaultRequestProperties(headers)
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
 
@@ -1775,10 +2133,10 @@ private fun PlayerScreen(
 
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 3_000,
-                /* maxBufferMs = */ 30_000,
-                /* bufferForPlaybackMs = */ 1_000,
-                /* bufferForPlaybackAfterRebufferMs = */ 1_500
+                /* minBufferMs = */ 2_500,
+                /* maxBufferMs = */ 25_000,
+                /* bufferForPlaybackMs = */ 500,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_200
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
@@ -1793,6 +2151,15 @@ private fun PlayerScreen(
                         hasRenderedFirstFrame = true
                         isBuffering = false
                         playbackError = null
+                    }
+
+                    override fun onIsPlayingChanged(playing: Boolean) {
+                        isExoPlaying = playing
+                        if (playing) {
+                            hasRenderedFirstFrame = true
+                            hasStartedPlaying = true
+                            pauseAdDismissed = false
+                        }
                     }
 
                     override fun onPlaybackStateChanged(state: Int) {
@@ -1812,7 +2179,8 @@ private fun PlayerScreen(
 
                     override fun onPlayerError(error: PlaybackException) {
                         if (backupSources.isNotEmpty()) {
-                            val next = backupSources.removeAt(0)
+                            val directIdx = backupSources.indexOfFirst { isDirectStreamUrl(it.url) }
+                            val next = backupSources.removeAt(if (directIdx >= 0) directIdx else 0)
                             onSwitchStream(
                                 next.url,
                                 next.userAgent.ifBlank { cleanUa },
@@ -1848,8 +2216,21 @@ private fun PlayerScreen(
                 })
                 setMediaSource(mediaSource)
                 prepare()
-                playWhenReady = true
+                playWhenReady = !isAdOverlayActive
             }
+    }
+
+    LaunchedEffect(player, isAdOverlayActive) {
+        val p = player ?: return@LaunchedEffect
+        if (isAdOverlayActive && !wasAdOverlayActive) {
+            resumeAfterAd = p.playWhenReady || !hasRenderedFirstFrame
+            p.playWhenReady = false
+        } else if (!isAdOverlayActive && wasAdOverlayActive) {
+            if (resumeAfterAd) {
+                p.playWhenReady = true
+            }
+        }
+        wasAdOverlayActive = isAdOverlayActive
     }
 
     DisposableEffect(player) {
@@ -1858,26 +2239,31 @@ private fun PlayerScreen(
 
     LaunchedEffect(player) {
         val p = player ?: return@LaunchedEffect
+        var activePlayWaitMs = 0L
         while (true) {
             kotlinx.coroutines.delay(1000)
             val format = p.videoFormat
             val br = if (format != null && format.bitrate > 0) format.bitrate else if (format != null && format.averageBitrate > 0) format.averageBitrate else null
             if (br != null) currentBitrateKbps = br / 1000
 
+            if (p.playWhenReady && !isAdOverlayActive) {
+                activePlayWaitMs += 1000L
+            }
             val elapsedMs = System.currentTimeMillis() - streamStartedMs
             val bufferingForMs = bufferingSinceMs.takeIf { it > 0L }
                 ?.let { System.currentTimeMillis() - it } ?: 0L
 
-            // ── Auto Black Screen Detection (initial stall: 7s; stuck buffering during playback: 8s) ──
-            val isBlackScreen = !hasRenderedFirstFrame && elapsedMs >= 7_000L && p.currentPosition == 0L
-            val isEndlessBuffering = p.playWhenReady && p.playbackState == Player.STATE_BUFFERING && bufferingForMs >= 8_000L
+            // ── Auto Black Screen Detection (initial active stall: 5s; stuck buffering during playback: 6s) ──
+            val isBlackScreen = !hasRenderedFirstFrame && !isAdOverlayActive && p.playWhenReady && activePlayWaitMs >= 5_000L && p.currentPosition == 0L
+            val isEndlessBuffering = !isAdOverlayActive && p.playWhenReady && p.playbackState == Player.STATE_BUFFERING && bufferingForMs >= 6_000L
 
             if (!bufferingFallbackUsed && (isBlackScreen || isEndlessBuffering)) {
                 bufferingFallbackUsed = true
                 Log.w("MadarPlayer", "Auto Black Screen / Buffer Recovery triggered (elapsed=${elapsedMs}ms, buffering=${bufferingForMs}ms). Backups left: ${backupSources.size}")
-                val canSwitch = backupSources.isNotEmpty() && (!hasRenderedFirstFrame || isDirectStreamUrl(backupSources.first().url))
+                val directIdx = backupSources.indexOfFirst { isDirectStreamUrl(it.url) }
+                val canSwitch = backupSources.isNotEmpty() && (!hasRenderedFirstFrame || directIdx >= 0)
                 if (canSwitch) {
-                    val next = backupSources.removeAt(0)
+                    val next = backupSources.removeAt(if (directIdx >= 0) directIdx else 0)
                     Log.i("MadarPlayer", "Switching to next backup: ${safeHost(next.url)}")
                     onSwitchStream(
                         next.url,
@@ -2224,6 +2610,7 @@ private fun PlayerScreen(
                                         val isSameHost = host.endsWith(originalHost) || originalHost.endsWith(host)
                                         if (!isSameHost && !isMediaRequest(reqUrl) && !isKnownVideoHost(host)) {
                                             Log.w("MadarPlayer", "Blocked main frame navigation to foreign host: $host")
+                                            handleMainFrameFailure("تم إيقاف توجيه غير صالح، جارٍ تجربة سيرفر آخر...")
                                             return true
                                         }
                                     }
@@ -2255,16 +2642,17 @@ private fun PlayerScreen(
                                         "(function(){ try { window.open=function(){return null;}; window.alert=function(){}; window.confirm=function(){return false;}; } catch(e){} })();",
                                         null
                                     )
-                                    // ── Black Screen Watchdog 1: 8 seconds (if no video playing) ──
+                                    // ── Black Screen Watchdog 1: 5.5s when backups exist, else 8s ──
+                                    val watchdog1Ms = if (backupSources.isNotEmpty()) 5_500L else 8_000L
                                     pageProbeHandler.postDelayed({
                                         if (pageStartedAt.get() != startedAt || pageFailureScheduled.get() ||
                                             pagePlayableObserved.get() || !webViewActive.get()
                                         ) return@postDelayed
-                                        Log.w("MadarPlayer", "WebView black screen watchdog 8s. Backups left: ${backupSources.size}")
+                                        Log.w("MadarPlayer", "WebView black screen watchdog ${watchdog1Ms}ms. Backups left: ${backupSources.size}")
                                         handleMainFrameFailure(
-                                            "شاشة سوداء: السيرفر لم يبث فيديو خلال 8 ثوانٍ. جارٍ التبديل لسيرفر آخر تلقائياً..."
+                                            "شاشة سوداء: السيرفر لم يبث فيديو خلال المهلة. جارٍ التبديل لسيرفر آخر تلقائياً..."
                                         )
-                                    }, 8_000L)
+                                    }, watchdog1Ms)
 
                                     // ── Black Screen Watchdog 2: 14 seconds (maximum fallback threshold) ──
                                     pageProbeHandler.postDelayed({
@@ -2304,11 +2692,11 @@ private fun PlayerScreen(
                                        try{Array.prototype.forEach.call(document.querySelectorAll('iframe'),function(fr){try{var fd=fr.contentDocument||(fr.contentWindow&&fr.contentWindow.document);if(fd){var fvids=Array.prototype.slice.call(fd.querySelectorAll('video'));videos=videos.concat(fvids);}}catch(e){}});}catch(e){}
                                        var v=videos.find(function(x){return !!(x.currentSrc||x.src);})||videos[0];
                                        var body=(document.body&&document.body.innerText||'').slice(0,5000).toLowerCase();
-                                       var challenge=/captcha|human verification|verify.{0,40}(human|you are)|checking your browser|security check/.test(body);
+                                       var docTitle=(document.title||'').toLowerCase();
+                                       var challenge=/captcha|human verification|verify.{0,40}(human|you are)|checking your browser|security check|just a moment|attention required|cf-browser-verification|enable javascript and cookies/.test(body) || /just a moment|attention required/.test(docTitle);
                                        var frames=Array.prototype.slice.call(document.querySelectorAll('iframe')).map(function(x){return x.src||x.getAttribute('data-src')||'';});
                                        var challengeFrame=frames.some(function(src){return /captcha|challenge|watchadsontape\.com|lumbarssweepup\.com/i.test(src);});
                                        var adLanding=videos.length===0&&frames.length===0&&/welcome bonus|free spins|بونص ترحيبي|مكافأة الترحيب|روابط الموقع الجديدة/.test(body);
-                                       var docTitle=(document.title||'').toLowerCase();
                                        var is404Text=/404\s*(not\s*found)?|page\s*not\s*found|video\s*(?:not\s*found|unavailable|removed|deleted)|file\s*(?:not\s*found|deleted|removed)|no\s*such\s*file|couldn'?t\s*find|video\s*has\s*been\s*removed|تم\s*حذف|الملف\s*غير\s*موجود|تعذر\s*العثور/i.test(body) || /404|not found|deleted|removed/i.test(docTitle);
                                        var unavailable=videos.length===0 && is404Text;
                                        var hasJsPlayer=!!(window.jwplayer||window.videojs||window.Plyr||document.querySelector('.jw-video,.video-js,.plyr,.vjs-tech,div[id*=player],div[class*=player]'));
@@ -2347,8 +2735,9 @@ private fun PlayerScreen(
                                             )
                                         } else if (payload.optInt("count", 0) == 0 &&
                                             payload.optInt("frameCount", 0) == 0 &&
-                                            !hasJsPlayer && // لو فيه JS player نستنى أكتر
-                                            System.currentTimeMillis() - pageStartedAt.get() >= 25_000L
+                                            !hasJsPlayer &&
+                                            mediaUrl.isBlank() &&
+                                            System.currentTimeMillis() - pageStartedAt.get() >= (if (backupSources.isNotEmpty()) 4_000L else 25_000L)
                                         ) {
                                             handleMainFrameFailure(
                                                 "صفحة المصدر لا تحتوي مشغل فيديو. جارٍ تجربة سيرفر آخر."
@@ -2652,12 +3041,23 @@ private fun PlayerScreen(
 
                         Button(
                             onClick = {
-                                try {
-                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(effectiveStreamUrl)).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                val urlToOpen = effectiveStreamUrl
+                                if (isDirectStreamUrl(urlToOpen)) {
+                                    // Direct stream → open with video player chooser
+                                    try {
+                                        val videoIntent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(Uri.parse(urlToOpen), "video/*")
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(Intent.createChooser(videoIntent, "فتح بـ..."))
+                                    } catch (e: Exception) {
+                                        // Fallback: open in in-app browser
+                                        inAppBrowserUrl = urlToOpen
                                     }
-                                    context.startActivity(browserIntent)
-                                } catch (e: Exception) {}
+                                } else {
+                                    // Embed/webpage URL → open in in-app WebView
+                                    inAppBrowserUrl = urlToOpen
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2980B9)),
                             shape = RoundedCornerShape(12.dp)
@@ -2675,6 +3075,14 @@ private fun PlayerScreen(
                     }
                 }
             }
+        }
+
+        // In-app browser overlay (opened from "بالمتصفح" button or ad tap)
+        inAppBrowserUrl?.let { browserUrl ->
+            InAppBrowserOverlay(
+                url = browserUrl,
+                onClose = { inAppBrowserUrl = null }
+            )
         }
 
         // Keep custom controls in the same tap-to-show/hide cycle as the
@@ -3203,7 +3611,7 @@ private fun PlayerScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .padding(start = 18.dp, bottom = 18.dp)
+                    .padding(start = 18.dp, bottom = 54.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.Black.copy(alpha = 0.35f))
                     .border(0.5.dp, Color(0xFFD4AF37).copy(alpha = 0.35f), RoundedCornerShape(8.dp))
@@ -3228,6 +3636,7 @@ private fun PlayerScreen(
                 }
             }
         }
+
         }
     }
 }
@@ -5359,289 +5768,6 @@ private fun PlayerBlockedScreen(
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) {
                 Text(text = "إغلاق المشغل", fontSize = 14.sp)
-            }
-        }
-    }
-}
-
-
-// ═════════════════════════════════════════════════════════════════════════════
-// IN-PLAYER PRE-ROLL AD SYSTEM WITH 5-SECOND SKIP & DIVERSE AD FORMATS
-// ═════════════════════════════════════════════════════════════════════════════
-
-private data class PreRollAdItem(
-    val title: String,
-    val subtitle: String,
-    val category: String,
-    val sponsor: String,
-    val cta: String,
-    val url: String,
-    val primaryColor: Long,
-    val iconEmoji: String
-)
-
-private val DiversePreRollAds = listOf(
-    PreRollAdItem(
-        title = "PUBG Mobile 3.5 🎮",
-        subtitle = "تحدي الشتاء والجليد الأسطوري - حمّل اللعبة الأكثر إثارة الآن والعب مع أصدقائك مجاناً!",
-        category = "ألعاب ومغامرات • مجاناً",
-        sponsor = "Tencent Games",
-        cta = "تثبيت اللعبة الآن ⬇",
-        url = "https://uplcm.com/4/12335194",
-        primaryColor = 0xFF10B981,
-        iconEmoji = "🎮"
-    ),
-    PreRollAdItem(
-        title = "نون للتسوق الإلكتروني 🛍️",
-        subtitle = "أكبر تخفيضات الموسم تصل إلى 70% على الشاشات والإلكترونيات مع شحن فوري بكود VIP10",
-        category = "عروض تسوق حصرية",
-        sponsor = "Noon Shopping",
-        cta = "تسوق أفضل العروض ↗",
-        url = "https://uplcm.com/4/12335228",
-        primaryColor = 0xFFF59E0B,
-        iconEmoji = "🛍️"
-    ),
-    PreRollAdItem(
-        title = "منصة إكسنس العالمية 📈",
-        subtitle = "تداول الذهب والأسهم العالمية بأمان وبدون عمولة خفية - ابدأ بحساب تجريبي مجاني 10,000$",
-        category = "تداول واستثمار مالي",
-        sponsor = "Exness Global",
-        cta = "فتح حساب مجاني ↗",
-        url = "https://uplcm.com/4/12335268",
-        primaryColor = 0xFF00E5FF,
-        iconEmoji = "📈"
-    ),
-    PreRollAdItem(
-        title = "تطبيق شاهد VIP 🎬",
-        subtitle = "استمتع بمشاهدة أضخم إنتاجات السينما والدراما العربية والعالمية بجودة 4K أصلية بدون إعلانات",
-        category = "سينما وترفيه VIP",
-        sponsor = "Shahid VIP",
-        cta = "اشترك للمزيد ↗",
-        url = "https://uplcm.com/4/12335274",
-        primaryColor = 0xFFEC4899,
-        iconEmoji = "🎬"
-    ),
-    PreRollAdItem(
-        title = "AliExpress عروض حصرية 🔥",
-        subtitle = "شحن مجاني وتخفيضات تصل إلى 90% على آلاف المنتجات للمشتركين الجدد",
-        category = "تسوق دولي • عروض VIP",
-        sponsor = "AliExpress Deals",
-        cta = "اكتشف العروض ↗",
-        url = "https://uplcm.com/4/12335194",
-        primaryColor = 0xFFEF4444,
-        iconEmoji = "🔥"
-    )
-)
-
-@Composable
-private fun InPlayerPreRollOverlay(
-    countdown: Int,
-    onSkip: () -> Unit,
-    onOpenAdUrl: (String) -> Unit
-) {
-    val adIndex = remember { (0 until DiversePreRollAds.size).random() }
-    val ad = DiversePreRollAds[adIndex]
-    val accentColor = Color(ad.primaryColor)
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF070A10))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Top Bar: Ad indicator ONLY (skip button moved to center)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Start,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Ad Badge
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .background(Color(0xFF161B26), RoundedCornerShape(8.dp))
-                        .border(1.dp, Color(0xFF2E384D), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .background(Color(0xFFD4AF37), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "إعلان فيديو • Ad",
-                            color = Color.Black,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "يبدأ الفيديو بعد قليل...",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            // Center: Rich Ad Creative Card
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenAdUrl(ad.url) },
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF111622)),
-                shape = RoundedCornerShape(20.dp),
-                border = BorderStroke(1.5.dp, accentColor.copy(alpha = 0.4f))
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Category & Sponsor
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .background(accentColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                .border(1.dp, accentColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = ad.category,
-                                color = accentColor,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Text(
-                            text = "برعاية: ${ad.sponsor}",
-                            color = Color.White.copy(alpha = 0.5f),
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // Ad Icon & Title
-                    Text(
-                        text = ad.iconEmoji,
-                        fontSize = 44.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = ad.title,
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = ad.subtitle,
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 13.5.sp,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 20.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Large Call to Action Button
-                    Button(
-                        onClick = { onOpenAdUrl(ad.url) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = accentColor,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth(0.7f)
-                            .height(48.dp)
-                    ) {
-                        Text(
-                            text = ad.cta,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-            // ── BOTTOM ROW: Progress bar (left) + Skip Button (right) ──
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // Progress Bar
-                LinearProgressIndicator(
-                    progress = { (5 - countdown) / 5f },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp)),
-                    color = accentColor,
-                    trackColor = Color(0xFF222B3D)
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Bottom row: status text (left) + skip button (right)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Left: status text
-                    Text(
-                        text = if (countdown == 0) "جاهز للمشاهدة 🎬" else "جاري تحميل المحتوى...",
-                        color = if (countdown == 0) Color(0xFF10B981) else Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.sp,
-                        fontWeight = if (countdown == 0) FontWeight.Bold else FontWeight.Normal
-                    )
-
-                    // Right: Skip button
-                    Button(
-                        onClick = {
-                            if (countdown == 0) {
-                                onSkip()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (countdown == 0) Color(0xFF10B981) else Color(0xFF1A2235),
-                            contentColor = if (countdown == 0) Color.White else Color.White.copy(alpha = 0.65f)
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        elevation = ButtonDefaults.buttonElevation(
-                            defaultElevation = if (countdown == 0) 8.dp else 0.dp
-                        ),
-                        border = if (countdown == 0) null else BorderStroke(1.dp, Color(0xFF2E384D)),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
-                        modifier = Modifier.height(42.dp)
-                    ) {
-                        if (countdown > 0) {
-                            Text(
-                                text = "⏳ تخطي بعد $countdown ث",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        } else {
-                            Text(
-                                text = "تخطي الإعلان ⏩",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                    }
-                }
             }
         }
     }

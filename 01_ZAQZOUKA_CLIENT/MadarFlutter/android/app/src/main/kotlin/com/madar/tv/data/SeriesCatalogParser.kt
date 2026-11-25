@@ -1,4 +1,4 @@
-﻿package com.madar.tv.data
+package com.madar.tv.data
 
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Document
@@ -10,9 +10,15 @@ import java.util.concurrent.TimeUnit
 
 /** Shared, conservative parsing for episode/season/part labels found in provider pages. */
 internal object SeriesCatalogParser {
-    private val episodePaginationPool = Executors.newFixedThreadPool(4)
+    private val episodePaginationPool = Executors.newFixedThreadPool(8)
     private val episodeNumberPattern = Regex(
         """(?i)(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)[\s._#=/:-]*([0-9]{1,4})(?![0-9])""",
+    )
+    private val trailingEpisodeNumberPattern = Regex(
+        """(?i)(?<![0-9])([0-9]{1,4})[\s._:-]*(?:حلقة|حلقات|episode|ep)(?![a-z0-9])""",
+    )
+    private val compactArabicEpisodePattern = Regex(
+        """(?:^|[\s|/\\-])ح[\s._:-]*([0-9]{1,4})(?![0-9])""",
     )
     private val seasonNumberPattern = Regex(
         """(?i)(?:الموسم|موسم|(?<![a-z])season)[\s._#=/:-]*([0-9]{1,2})(?![0-9])""",
@@ -91,6 +97,16 @@ internal object SeriesCatalogParser {
         }
     }
 
+    fun normalizeArabicSearchQuery(value: String): String = value
+        .replace(Regex("""[\u064B-\u065F\u0670\u0640]"""), "")
+        .replace('أ', 'ا')
+        .replace('إ', 'ا')
+        .replace('آ', 'ا')
+        .replace('ٱ', 'ا')
+        .replace('ى', 'ي')
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+
     fun episodeNumber(title: String, url: String, allowNumericTitle: Boolean = false): Int? {
         val titleText = normalizeText(title)
         val urlText = normalizeText(url)
@@ -98,6 +114,14 @@ internal object SeriesCatalogParser {
             .mapNotNull { episodeNumberPattern.find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
             .firstOrNull { it > 0 }
         if (labeled != null) return labeled
+
+        val trailing = sequenceOf(titleText, urlText)
+            .mapNotNull { trailingEpisodeNumberPattern.find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
+            .firstOrNull { it > 0 }
+        if (trailing != null) return trailing
+
+        val compact = compactArabicEpisodePattern.find(titleText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        if (compact != null && compact > 0) return compact
 
         if (allowNumericTitle) {
             return normalizeDigits(titleText).trim().toIntOrNull()?.takeIf { it in 1..9999 }
@@ -159,19 +183,23 @@ internal object SeriesCatalogParser {
                     .containsMatchIn(marker)
             val isEpisodeList = node.tagName() !in setOf("a", "li", "button") &&
                 episodeContainerMarker.containsMatchIn(marker)
-            val label = listOf(node.id(), node.className(), node.attr("title"), node.attr("aria-label"))
-                .joinToString(" ")
             // A season number found on an arbitrary ancestor (for example a
             // recommendation wrapper or a page-wide season selector) is not
             // enough to assign every episode beneath it. Only trust an
             // explicitly season-scoped container.
-            if (isSeasonContainer) seasonNumber(label, "")?.let { return it }
             for (attribute in seasonAttributes) {
                 val value = node.attr(attribute).trim()
                 if (value.isNotBlank()) {
                     value.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
                     seasonNumber(value, "")?.let { return it }
                 }
+            }
+
+            val explicitAriaLabel = listOf(node.attr("title"), node.attr("aria-label"))
+                .filter(String::isNotBlank)
+                .joinToString(" ")
+            if (isSeasonContainer && explicitAriaLabel.isNotBlank()) {
+                seasonNumber(explicitAriaLabel, "")?.let { return it }
             }
 
             if (isSeasonContainer) {
@@ -181,6 +209,8 @@ internal object SeriesCatalogParser {
                     .firstNotNullOfOrNull { seasonNumber(it.text().take(100), "") }
                     ?.let { return it }
             }
+
+            if (isSeasonContainer) seasonNumber(marker, "")?.let { return it }
 
             if (isEpisodeList || isSeasonContainer) {
                 var sibling = node.previousElementSibling()
@@ -286,14 +316,14 @@ internal object SeriesCatalogParser {
             // context or is explicitly carried in a data-season attribute.
             val explicitSeasonNumber = explicitLabelNumber ?: explicitUrlNumber
             val number = dataSeason ?: inheritedSeasonNumber
-                ?: explicitSeasonNumber?.takeIf { seasonTabContext || explicitLabelNumber != null }
+                ?: explicitSeasonNumber?.takeIf { seasonTabContext }
                 ?: numericTab
                 ?: return@mapNotNull null
             number to href
         }
             .distinctBy { normalizedUrl(it.second) }
             .sortedBy { it.first }
-            .take(30)
+            .take(50)
     }
 
     /** Finds pagination links that belong to an episode list, without following season tabs. */
@@ -367,8 +397,10 @@ internal object SeriesCatalogParser {
         isAllowedContentUrl: (String) -> Boolean,
     ): List<Triple<String, String, Int?>> {
         val selectors = listOf(
+            ".pwr-season-panel a[href]", ".epslist a[href]", "a.episode-card",
             ".episodes-list a", ".EpisodesList li a", ".eplister li a",
             ".eps-list li a", ".eps a", "a.episode__item", ".episode__item a", "a.ep-item",
+            "div.block-post a[href*='/clarus/']", "a[href*='/clarus/']",
             "a[href*='الحلقة']", "a[href*='episode']", "a[href*='ep-']",
             ".postDiv a[href*='serie']",
             ".episodes-list [data-url], .episodes-list [data-href]",
@@ -394,7 +426,7 @@ internal object SeriesCatalogParser {
             val title = element.text().trim().ifBlank { element.attr("title").trim() }
             val isEpisodeListEntry = element.parents().any { ancestor ->
                 val marker = "${ancestor.className()} ${ancestor.id()}".lowercase()
-                listOf("episode", "episodes", "eplist", "eps-list", "episodeslist", "eps", "episodios")
+                listOf("episode", "episodes", "eplist", "eps-list", "episodeslist", "epslist", "eps", "episodios", "pwr-season-panel")
                     .any(marker::contains)
             } || element.classNames().any { className ->
                 className.contains("episode", ignoreCase = true) || className.contains("ep-item", ignoreCase = true)
@@ -462,8 +494,8 @@ internal object SeriesCatalogParser {
         firstPageUrl: String,
         fetchDocument: (String) -> Document?,
         parseEpisodes: (Document) -> List<Triple<String, String, Int?>>,
-        maxPages: Int = 60,
-        timeoutSeconds: Long = 24,
+        maxPages: Int = 25,
+        timeoutSeconds: Long = 14,
     ): List<Triple<String, String, Int?>> {
         val byUrl = linkedMapOf<String, Triple<String, String, Int?>>()
         fun merge(rows: List<Triple<String, String, Int?>>) {
@@ -487,7 +519,7 @@ internal object SeriesCatalogParser {
         while (pending.isNotEmpty() && visitedPages < maxPages) {
             val batch = pending.asSequence()
                 .filter { visited.add(normalizedUrl(it)) }
-                .take(minOf(4, maxPages - visitedPages))
+                .take(minOf(6, maxPages - visitedPages))
                 .toList()
             pending.removeAll(batch.toSet())
             if (batch.isEmpty()) break
@@ -535,6 +567,7 @@ internal object SeriesCatalogParser {
     /** Excludes recommendation/sidebar cards that happen to contain season or episode links. */
     fun isInsideUnrelatedContentContainer(element: Element): Boolean =
         (listOf(element) + element.parents()).take(7).any { node ->
+            if (node.tagName() in setOf("aside", "footer")) return@any true
             val markers = listOf(node.id(), node.className(), node.attr("role"), node.attr("aria-label"))
                 .joinToString(" ")
             unrelatedContentContainerPattern.containsMatchIn(markers)
@@ -634,7 +667,10 @@ internal object SeriesCatalogParser {
                     if (validEpisodes.isNotEmpty()) {
                         val prevNumber = validEpisodes.last().number
                         val gap = ep.number - prevNumber
-                        if (gap >= 8 && ep.number > 15) continue
+                        val hasClusterNeighbor = episodes.any { other ->
+                            other.number != ep.number && kotlin.math.abs(other.number - ep.number) <= 3
+                        }
+                        if (gap >= 8 && ep.number > 15 && !hasClusterNeighbor) continue
                     }
                     validEpisodes.add(ep)
                 }
@@ -659,7 +695,7 @@ internal object SeriesCatalogParser {
 
     fun cleanSeriesTitle(title: String): String {
         val withoutPrefix = normalizeDigits(title)
-            .replace(Regex("""(?i)^\s*(?:مشاهدة|مشاهده|تحميل|سلسلة)?\s*(?:مسلسل|فيلم|انمي|أنمي|برنامج)?\s*"""), "")
+            .replace(Regex("""(?i)^\s*(?:(?:مشاهدة|مشاهده|تحميل|سلسلة|مسلسل|فيلم|انمي|أنمي|برنامج)\s+)*"""), "")
         val withoutSeriesSuffix = withoutPrefix
             .replace(
                 Regex("""(?i)\s+(?:الموسم|موسم|season|الجزء|جزء|part|الحلقة|حلقة|episode|ep)\s*.*$"""),
@@ -683,7 +719,7 @@ internal object SeriesCatalogParser {
     ): Int? {
         val values = sequenceOf(normalizeText(title), normalizeText(url))
         for (value in values) {
-            numberPattern.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()?.let { return it }
+            numberPattern.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
             ordinalPattern.find(value)?.groupValues?.getOrNull(1)?.let { word ->
                 ordinals[word]?.let { return it }
             }

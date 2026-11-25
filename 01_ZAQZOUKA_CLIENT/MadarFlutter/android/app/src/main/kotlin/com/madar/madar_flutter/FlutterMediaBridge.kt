@@ -286,32 +286,20 @@ class FlutterMediaBridge(context: Context) {
             android.util.Log.i("FlutterMediaBridge", "media.servers.all result=${rows.size} for title=$title (ep=$episodeNumber, s=$seasonNumber)")
             rows.filter { row -> isAllowedResolverInput(row.embedUrl) }.map { it.toMap() }
         }
-        "media.resolve" -> {
+        "media.resolve" -> resolveStreamDetail(
+            call.argument<String>("url").orEmpty(),
+            call.argument<String>("referer").orEmpty(),
+        )?.url
+        "media.resolve.detail" -> resolveStreamDetail(
+            call.argument<String>("url").orEmpty(),
+            call.argument<String>("referer").orEmpty(),
+        )?.let { resolved ->
+            mapOf("url" to resolved.url, "referer" to resolved.referer)
+        }
+        "media.probeEmbed" -> {
             val source = call.argument<String>("url").orEmpty()
             val referer = call.argument<String>("referer").orEmpty()
-            if (!isAllowedResolverInput(source)) null
-            else {
-                // Route to the right resolver based on URL origin
-                val isArabseedEmbed = isArabseedUrl(source) ||
-                    source.contains("myseed", ignoreCase = true) ||
-                    source.contains("arabseed", ignoreCase = true) ||
-                    source.contains("vids.php", ignoreCase = true)
-                val resolved = if (isArabseedEmbed) {
-                    val direct = ArabseedRepository.resolveDirectStream(source, referer)
-                    if (!direct.isNullOrBlank() && isAllowedResolverInput(direct)) direct
-                    else null
-                } else {
-                    // Try MultiProvider resolver first (handles Voe, Dood, Streamtape, etc.)
-                    val multi = MultiProviderRepository.resolveStream(source, referer)
-                    if (!multi.isNullOrBlank() && isAllowedResolverInput(multi)) multi
-                    else {
-                        val direct = ArabseedRepository.resolveDirectStream(source, referer)
-                        if (!direct.isNullOrBlank() && isAllowedResolverInput(direct)) direct
-                        else null
-                    }
-                }
-                resolved?.takeIf(::isAllowedResolverInput)
-            }
+            isAllowedResolverInput(source) && MultiProviderRepository.isEmbedUrlAlive(source, referer)
         }
         "live.events.cached" -> YacineRepository.getCachedEvents().map { it.toMap() }
         "live.events.fetch" -> YacineRepository.getEvents(forceRefresh = call.argument<Boolean>("force") ?: false).map { it.toMap() }
@@ -439,15 +427,58 @@ class FlutterMediaBridge(context: Context) {
         } ?: false
         val isCacheIncomplete = cached == null || isMissingLower || isMissingDetected || isMissingIntermediate || hasSeasonGaps || hasEpisodeGaps
 
-        if (!forceRefresh && !isCacheIncomplete && cached != null && cachedEpisodeCount >= 10) return cached
-
-        return if (seriesItem.isArabseedSource()) {
-            val primary = ArabseedRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
-            MultiProviderRepository.fetchSeasonBundleAcrossProviders(seriesItem, primary, forceRefresh = true)
-        } else {
-            val primary = MultiProviderRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = true)
-            MultiProviderRepository.fetchSeasonBundleAcrossProviders(seriesItem, primary, forceRefresh = true)
+        if (!forceRefresh && cached != null && cachedEpisodeCount >= 1 &&
+            (!isCacheIncomplete || !MultiProviderRepository.shouldRefreshSeasonBundle(seriesItem))
+        ) {
+            return cached
         }
+
+        val primary = if (seriesItem.isArabseedSource()) {
+            ArabseedRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = forceRefresh)
+        } else {
+            MultiProviderRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = forceRefresh)
+        }
+        val primarySeasons = primary.seasons
+        val primaryCount = primarySeasons.sumOf { it.episodes.size }
+        val pMinSeason = primarySeasons.minOfOrNull { it.number } ?: 0
+        val pMaxSeason = primarySeasons.maxOfOrNull { it.number } ?: 0
+        val pSeasonGaps = primarySeasons.map { it.number }.sorted().zipWithNext().any { (a, b) -> b - a > 1 }
+        val pMissingDetected = detectedSeason != null && primarySeasons.none { it.number == detectedSeason }
+        val pEpisodeGaps = primarySeasons.any { season ->
+            SeriesCatalogParser.needsEpisodeSequenceRepair(season.episodes.map { it.number })
+        }
+        val primaryIncomplete = primarySeasons.isEmpty() || pMinSeason > 1 ||
+            pMissingDetected || pMaxSeason > primarySeasons.size || pSeasonGaps || pEpisodeGaps
+
+        return if (!forceRefresh && !primaryIncomplete && primaryCount >= 1) {
+            MultiProviderRepository.cacheCompletePrimarySeasonBundle(seriesItem, primary)
+        } else {
+            MultiProviderRepository.fetchFullSeasonBundleSync(
+                seriesItem,
+                primary,
+                forceRefresh = forceRefresh,
+            )
+        }
+    }
+
+    private fun resolveStreamDetail(
+        rawSource: String,
+        referer: String,
+    ): MultiProviderRepository.ResolvedStreamResult? {
+        val source = MultiProviderRepository.decodeIdWrapperUrl(rawSource)
+        if (!isAllowedResolverInput(source)) return null
+        val isArabseedEmbed = isArabseedUrl(source) ||
+            source.contains("myseed", ignoreCase = true) ||
+            source.contains("arabseed", ignoreCase = true) ||
+            source.contains("vids.php", ignoreCase = true)
+        val result = if (isArabseedEmbed) {
+            ArabseedRepository.resolveDirectStreamWithReferer(source, referer)
+                ?: MultiProviderRepository.resolveStreamWithReferer(source, referer)
+        } else {
+            MultiProviderRepository.resolveStreamWithReferer(source, referer)
+                ?: ArabseedRepository.resolveDirectStreamWithReferer(source, referer)
+        }
+        return result?.takeIf { isAllowedResolverInput(it.url) }
     }
 }
 

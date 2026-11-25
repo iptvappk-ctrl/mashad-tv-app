@@ -4613,8 +4613,8 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
                   border: Border.all(color: const Color(0xFF262D3D)),
                 ),
                 child: const Text(
-                  '210293961',
-                  style: TextStyle(fontSize: 15, fontFamily: 'monospace', color: Colors.white, fontWeight: FontWeight.bold),
+                  'https://asiafilm.org/4/01e00aeb7c4b214f9e9469bcfc2b0486',
+                  style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: Colors.white, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
               ),

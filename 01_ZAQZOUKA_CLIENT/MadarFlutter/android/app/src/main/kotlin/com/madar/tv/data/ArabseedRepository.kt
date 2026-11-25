@@ -43,7 +43,7 @@ object ArabseedRepository {
 
     // ═══════════════════════════════════════════════════════════════════════
 
-    // ALL CONSTANTS — 6-layer encrypted via X.s/X.j (v6 engine)
+    // ALL CONSTANTS â€” 6-layer encrypted via X.s/X.j (v6 engine)
 
     // Pipeline: XOR(K1)→ROT-L(3)→XOR(K2)→Caesar(+17)→Nibble-Swap→PosXOR(K3)
 
@@ -449,7 +449,7 @@ object ArabseedRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonBundleCache[pageUrl]?.let { return it }
-            val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v16:" + pageUrl) ?: return null
+            val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v18:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(cached.value)
         seasonBundleCache[pageUrl] = normalized
         seasonBundleCacheAt[pageUrl] = cached.savedAt
@@ -601,8 +601,19 @@ object ArabseedRepository {
         val encoded = URLEncoder.encode(query.trim(), "UTF-8")
         // MySeed uses /find/?word= (the old /?s= returns an error page)
         val url = "$BASE_URL/find/?word=$encoded"
-        val html = fetchHtml(url)
+        var html = fetchHtml(url)
         val allResults = parseListing(html, null).toMutableList()
+        if (allResults.isEmpty()) {
+            val plainQuery = SeriesCatalogParser.normalizeArabicSearchQuery(query)
+            if (plainQuery.isNotBlank() && plainQuery != query.trim()) {
+                val plainUrl = "$BASE_URL/find/?word=${URLEncoder.encode(plainQuery, "UTF-8")}"
+                val plainHtml = fetchHtml(plainUrl)
+                if (plainHtml.isNotBlank()) {
+                    html = plainHtml
+                    allResults += parseListing(plainHtml, null)
+                }
+            }
+        }
         if (maxPages > 1 && html.isNotBlank()) {
             try {
                 val doc = Jsoup.parse(html, BASE_URL)
@@ -616,13 +627,33 @@ object ArabseedRepository {
                     val encodedWord = url.substringAfter("word=").substringBefore('&')
                     paginationLinks = (2..maxPages).map { p -> "$BASE_URL/find/page/$p/?word=$encodedWord" }
                 }
-                for (pageLink in paginationLinks.take(maxPages - 1)) {
-                    val pageHtml = fetchHtml(pageLink)
-                    if (pageHtml.isBlank()) break
-                    val pageItems = parseListing(pageHtml, null)
-                    if (pageItems.isEmpty()) break  // no more results
-                    allResults.addAll(pageItems)
+                val targets = paginationLinks.take(maxPages - 1)
+                val completion = ExecutorCompletionService<List<ArabseedItem>>(seasonPagePool)
+                val futures = targets.map { pageLink ->
+                    completion.submit(Callable {
+                        runCatching {
+                            val pageHtml = fetchHtmlWithReferer(pageLink, url, callTimeoutSeconds = 5)
+                            if (pageHtml.isBlank()) emptyList() else parseListing(pageHtml, null)
+                        }.getOrDefault(emptyList())
+                    })
                 }
+                val pageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4)
+                var remainingPages = futures.size
+                while (remainingPages > 0) {
+                    val left = pageDeadline - System.nanoTime()
+                    if (left <= 0L) break
+                    val finished = try {
+                        completion.poll(left, TimeUnit.NANOSECONDS) ?: break
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                    remainingPages--
+                    runCatching { finished.get() }.getOrNull()?.let { pageItems ->
+                        allResults.addAll(pageItems)
+                    }
+                }
+                futures.filterNot { it.isDone }.forEach { it.cancel(true) }
             } catch (_: Exception) {}
         }
         val distinctResults = allResults.distinctBy { it.pageUrl }
@@ -807,7 +838,7 @@ object ArabseedRepository {
 
     private val seasonBundleCache = ConcurrentHashMap<String, ArabseedSeasonBundle>()
     private val seasonBundleCacheAt = ConcurrentHashMap<String, Long>()
-    private val seasonPagePool = Executors.newFixedThreadPool(4)
+    private val seasonPagePool = Executors.newFixedThreadPool(10)
     private const val SEASON_CACHE_TTL = 30 * 60 * 1000L
 
 
@@ -815,7 +846,7 @@ object ArabseedRepository {
         fun saveSynthesizedBundle(pageUrl: String, bundle: ArabseedSeasonBundle) {
         seasonBundleCache[pageUrl] = bundle
         seasonBundleCacheAt[pageUrl] = System.currentTimeMillis()
-        CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v16:" + pageUrl, bundle)
+        CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v18:" + pageUrl, bundle)
     }
 
     fun fetchSeasonsAndEpisodes(
@@ -850,6 +881,7 @@ object ArabseedRepository {
                 val requestedSeasonPageNumber = seasonNumbersOnly?.singleOrNull()
                     ?.takeIf { pageSeasonNumber == it }
                 val episodeSelectors = listOf(
+                    ".episodes__list a", "ul.episodes__list a",
                     "a.episode__item", ".episode__item a",
                     "a[href*='%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9']",
                     "a[href*='الحلقة']", "a[href*='-episode-']", "a[href*='/episode/']",
@@ -936,8 +968,8 @@ object ArabseedRepository {
                             fetchSeasonHtml(pageUrl).takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
                         },
                         parseEpisodes = ::collectEpisodes,
-                        maxPages = if (forceRefresh) 8 else 4,
-                        timeoutSeconds = if (forceRefresh) 15 else 8,
+                        maxPages = if (forceRefresh) 24 else 12,
+                        timeoutSeconds = if (forceRefresh) 16 else 10,
                     )
                     for (ep in paginated) {
                         val existingIndex = rawEpisodes.indexOfFirst {
@@ -957,7 +989,7 @@ object ArabseedRepository {
                 // parent even when the episode page exposes several links: those links can span
                 // multiple seasons and must not be treated as one season's episode list.
                 // Also probe parent when episodes are few (< 8) since MySeed often shows only
-                // the latest 1-2 episodes on a series page — the parent /selary/ page has more.
+                // the latest 1-2 episodes on a series page â€” the parent /selary/ page has more.
                 if ((rawEpisodes.size < 8 || isEpisodePage) &&
                     !(seasonNumbersOnly != null && SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) != null)
                 ) {
@@ -1028,7 +1060,7 @@ object ArabseedRepository {
                         }
                         // Use parent if it has more episodes OR has higher episode numbers
                         // (MySeed /selary/ may show only the latest episode, e.g. ep12,
-                        // while the series page shows ep1-ep2 — the parent indicates more episodes exist)
+                        // while the series page shows ep1-ep2 â€” the parent indicates more episodes exist)
                         val parentMaxEpNum = parentEps.mapNotNull { (t, u, _) ->
                             SeriesCatalogParser.episodeNumber(t, u)
                         }.maxOrNull() ?: 0
@@ -1091,7 +1123,7 @@ object ArabseedRepository {
                                 visibleEpisodeNumbers[number].orEmpty(),
                             ))
                     }
-                    .take(30)
+                    .take(50)
                 val seasonPageCompletion = ExecutorCompletionService<Pair<Int, List<Triple<String, String, Int?>>>>(seasonPagePool)
                 val seasonPageFutures = seasonPagesToFetch.map { (seasonNumber, seasonUrl) ->
                     seasonPageCompletion.submit(Callable {
@@ -1108,13 +1140,18 @@ object ArabseedRepository {
                                     Triple(title, url, number ?: seasonNumber)
                                 }
                             },
+                            maxPages = if (forceRefresh) 20 else 10,
+                            timeoutSeconds = if (forceRefresh) 14 else 9,
                         )
                         seasonNumber to paginated
                     })
                 }
-                // These season pages are fetched concurrently; a seven-second
-                // cutoff routinely discarded older-season pages on slower hosts.
-                val seasonPageWaitSeconds = 18L
+                // Fetch linked season tabs concurrently with enough headroom for long series.
+                val seasonPageWaitSeconds = when {
+                    seasonPagesToFetch.size >= 12 -> 14L
+                    seasonNumbersOnly != null -> 9L
+                    else -> 6L
+                }
                 val seasonPageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seasonPageWaitSeconds)
                 val seasonPageAssignments = mutableSetOf<String>()
                 var unfinishedSeasonPages = seasonPageFutures.size
@@ -1176,41 +1213,44 @@ object ArabseedRepository {
                         android.util.Log.i(TAG, "MySeed direct probe: slugBase=$slugBase season=$detectedSeason currentRaw=${rawEpisodes.size}")
                         val baseDir = rawUrl.substringBeforeLast('/').trimEnd('/')
                         val baseEpUrl = "$baseDir/${slugBase}-s${detectedSeason}-eps"
-                        val probePool = java.util.concurrent.Executors.newFixedThreadPool(8)
-                        try {
-                            val probeFutures = (1..40).map { epNum ->
-                                probePool.submit(java.util.concurrent.Callable {
+                        fun probeWave(range: IntRange, waitSec: Long): List<Pair<Int, String>> {
+                            val ecs = ExecutorCompletionService<Pair<Int, String>?>(seasonPagePool)
+                            val futures = range.map { epNum ->
+                                ecs.submit(Callable<Pair<Int, String>?> {
                                     val epUrl = "$baseEpUrl$epNum/"
                                     try {
-                                        val conn = java.net.URL(epUrl).openConnection() as java.net.HttpURLConnection
-                                        conn.requestMethod = "HEAD"
-                                        conn.connectTimeout = 5000
-                                        conn.readTimeout = 5000
-                                        conn.instanceFollowRedirects = true
-                                        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android 10)")
-                                        conn.connect()
-                                        val code = conn.responseCode
-                                        conn.disconnect()
-                                        if (code in 200..299) epNum to epUrl else null
+                                        val req = Request.Builder().url(epUrl).head()
+                                            .header("User-Agent", UA).header("Referer", BASE_SLASH).build()
+                                        val call = client.newCall(req)
+                                        call.timeout().timeout(3, TimeUnit.SECONDS)
+                                        call.execute().use { resp ->
+                                            if (resp.isSuccessful) epNum to epUrl else null
+                                        }
                                     } catch (_: Exception) { null }
                                 })
                             }
-                            val probeDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(25)
-                            for (future in probeFutures) {
-                                val remaining = probeDeadline - System.nanoTime()
-                                if (remaining <= 0L) break
-                                runCatching { future.get(remaining, java.util.concurrent.TimeUnit.NANOSECONDS) }
-                                    .getOrNull()?.let { (epNum, epUrl) ->
-                                        val urlKey = SeriesCatalogParser.normalizedUrl(epUrl)
-                                        if (rawEpisodes.none { SeriesCatalogParser.normalizedUrl(it.second) == urlKey }) {
-                                            rawEpisodes += Triple("الحلقة $epNum", epUrl, detectedSeason)
-                                        }
-                                    }
+                            val found = mutableListOf<Pair<Int, String>>()
+                            val dl = System.nanoTime() + TimeUnit.SECONDS.toNanos(waitSec)
+                            var rem = futures.size
+                            while (rem > 0) {
+                                val left = dl - System.nanoTime()
+                                if (left <= 0L) break
+                                val done = runCatching { ecs.poll(left, TimeUnit.NANOSECONDS) }.getOrNull() ?: break
+                                rem--
+                                runCatching { done.get() }.getOrNull()?.let(found::add)
                             }
-                            android.util.Log.i(TAG, "MySeed direct probe done: rawEpisodes=${rawEpisodes.size}")
-                        } finally {
-                            probePool.shutdown()
+                            futures.filterNot { it.isDone }.forEach { it.cancel(true) }
+                            return found
                         }
+                        val wave1 = probeWave(1..16, 3L)
+                        val wave2 = if (wave1.any { it.first >= 14 }) probeWave(17..40, 3L) else emptyList()
+                        for ((epNum, epUrl) in (wave1 + wave2).sortedBy { it.first }) {
+                            val urlKey = SeriesCatalogParser.normalizedUrl(epUrl)
+                            if (rawEpisodes.none { SeriesCatalogParser.normalizedUrl(it.second) == urlKey }) {
+                                rawEpisodes += Triple("الحلقة $epNum", epUrl, detectedSeason)
+                            }
+                        }
+                        android.util.Log.i(TAG, "MySeed direct probe done: rawEpisodes=${rawEpisodes.size}")
                     }
                 }
 
@@ -1321,8 +1361,7 @@ object ArabseedRepository {
                     isMissingDetectedSeason ||
                     isMissingInterveningSeasons ||
                     hasSeasonGaps ||
-                    hasEpisodeGaps ||
-                    seasons.sumOf { it.episodes.size } < 5
+                    hasEpisodeGaps
                 val rawTitleCandidate = item.parentSeriesTitle?.takeIf(String::isNotBlank)
                     ?: item.title.takeIf { !it.contains("الموسم") || it.length > 15 }
                     ?: run {
@@ -1345,36 +1384,22 @@ object ArabseedRepository {
                         if (dashPrefix.length >= 2 && dashPrefix != cleanBaseTitle && dashPrefix != colonPrefix) add(dashPrefix)
                         if (strippedTitle.length >= 2 && strippedTitle != cleanBaseTitle) add(strippedTitle)
                         if (cleanBaseTitle.length >= 2) add(cleanBaseTitle)
-                        val stripped2 = cleanBaseTitle.replace(Regex("""(?i)^(مسلسل|سلسلة)\s+"""), "").trim()
-                        if (stripped2.length >= 2 && stripped2 != cleanBaseTitle && stripped2 != strippedTitle) add(stripped2)
-                    }.distinct()
+                    }.distinct().take(2)
                     android.util.Log.i(TAG, "searchCandidates for '$cleanBaseTitle': $searchCandidates")
                     val discoveredEpisodes = mutableListOf<Triple<String, String, Int?>>()
+                    val fetchedSearchItems = mutableListOf<ArabseedItem>()
                     for (query in searchCandidates) {
                         try {
-                            // Fetch up to 8 pages of search results to discover all episodes and seasons across paginated search
-                            val results = search(query, forceRefresh = true, maxPages = 8)
+                            val results = search(query, forceRefresh = true, maxPages = 4)
+                            fetchedSearchItems.addAll(results)
                             android.util.Log.i(TAG, "search query='$query' returned ${results.size} items: ${results.take(4).map { it.title }}")
                             for (sr in results) {
                                 val srEpNum = SeriesCatalogParser.episodeNumber(sr.title, sr.pageUrl)
                                 if (srEpNum != null && SeriesCatalogParser.isEpisode(sr.title, sr.pageUrl)) {
                                     val srBase = SeriesCatalogParser.cleanSeriesTitle(sr.title)
-                                    val normalizedBase = SeriesCatalogParser.normalizedSeriesTitle(sr.title)
-                                    val currentNormalized = SeriesCatalogParser.normalizedSeriesTitle(item.title)
-                                    // Relaxed matching: check cleaned titles and colon prefixes too
-                                    val titlesMatch = normalizedBase.contains(currentNormalized) ||
-                                        currentNormalized.contains(normalizedBase) ||
-                                        srBase.contains(cleanBaseTitle, ignoreCase = true) ||
-                                        cleanBaseTitle.contains(srBase, ignoreCase = true) ||
-                                        (strippedTitle.length >= 2 && (
-                                            sr.title.contains(strippedTitle, ignoreCase = true) ||
-                                            srBase.contains(strippedTitle, ignoreCase = true) ||
-                                            strippedTitle.contains(srBase, ignoreCase = true)
-                                        )) ||
-                                        (colonPrefix.length >= 2 && (
-                                            sr.title.contains(colonPrefix, ignoreCase = true) ||
-                                            srBase.contains(colonPrefix, ignoreCase = true)
-                                        ))
+                                    val titlesMatch = MultiProviderRepository.titlesStrictlyMatch(item.title, sr.title) ||
+                                        MultiProviderRepository.titlesStrictlyMatch(cleanBaseTitle, srBase) ||
+                                        (colonPrefix.length >= 4 && MultiProviderRepository.titlesStrictlyMatch(colonPrefix, srBase))
                                     if (titlesMatch) {
                                         val sNum = SeriesCatalogParser.seasonNumber(sr.title, sr.pageUrl) ?: 1
                                         if (seasonNumbersOnly == null || sNum in seasonNumbersOnly) {
@@ -1383,8 +1408,12 @@ object ArabseedRepository {
                                     }
                                 }
                             }
-                            if (discoveredEpisodes.size >= 500) break
+                            if (discoveredEpisodes.isNotEmpty()) break
                         } catch (_: Exception) {}
+                    }
+                    // Save fetched results in searchCache so relatedParts reuses them with 0 extra HTTP requests
+                    if (fetchedSearchItems.isNotEmpty() && cleanBaseTitle.isNotBlank()) {
+                        searchCache[cleanBaseTitle.lowercase()] = System.currentTimeMillis() to fetchedSearchItems.distinctBy { it.pageUrl }
                     }
                     if (discoveredEpisodes.isNotEmpty()) {
                         val newSeasons = mutableListOf<ArabseedSeason>()
@@ -1449,7 +1478,7 @@ object ArabseedRepository {
                         }
                     } else if (isEpisodePage && seasons.sumOf { it.episodes.size } < 3) {
                         // Current page itself is an episode but no search results found.
-                        // Only overwrite if we have almost nothing — keep any existing seasons.
+                        // Only overwrite if we have almost nothing â€” keep any existing seasons.
                         val epNum = SeriesCatalogParser.episodeNumber(item.title, item.pageUrl) ?: 1
                         val sNum = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) ?: 1
                         val existingSeason = seasons.firstOrNull { it.number == sNum }
@@ -1515,12 +1544,12 @@ object ArabseedRepository {
                     if (relatedParts.isNotEmpty()) break
                 }
 
-                // Additional smart discovery: search for other seasons/parts (EXCLUDING any episodes)
+                // Additional smart discovery: only run search when page exposed no parts/seasons yet.
                 val cleanBaseTitle = SeriesCatalogParser.cleanSeriesTitle(item.title)
 
-                if (cleanBaseTitle.length >= 3) {
+                if (cleanBaseTitle.length >= 3 && (forceRefresh || (relatedParts.isEmpty() && seasons.size <= 1 && seasons.sumOf { it.episodes.size } < 3))) {
                     try {
-                        val searchResults = search(cleanBaseTitle)
+                        val searchResults = search(cleanBaseTitle, forceRefresh = false, maxPages = 2)
                         for (sr in searchResults) {
                             val srTitle = sr.title
                             val srUrl = sr.pageUrl
@@ -1567,7 +1596,7 @@ object ArabseedRepository {
                 if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                     seasonBundleCache[item.pageUrl] = bundle
                     seasonBundleCacheAt[item.pageUrl] = System.currentTimeMillis()
-                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v16:" + item.pageUrl, bundle)
+                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v18:" + item.pageUrl, bundle)
                 }
 
                 bundle
@@ -1588,15 +1617,48 @@ object ArabseedRepository {
 
 
 
-    fun resolveDirectStream(serverUrl: String, referer: String = ""): String? {
-        if (!isSafeResolverUrl(serverUrl)) return null
+    fun resolveDirectStreamWithReferer(serverUrl: String, referer: String = ""): MultiProviderRepository.ResolvedStreamResult? {
+        val unwrapped = MultiProviderRepository.decodeIdWrapperUrl(serverUrl)
+        if (!isSafeResolverUrl(unwrapped)) return null
         val sourceReferer = referer.trim().ifBlank {
             runCatching {
-                val uri = java.net.URI(serverUrl)
+                val uri = java.net.URI(unwrapped)
                 "${uri.scheme}://${uri.host}/"
             }.getOrDefault(BASE_SLASH)
         }
-        return resolveDirectStreamInternal(serverUrl, sourceReferer, 0)
+        val direct = resolveDirectStreamInternal(unwrapped, sourceReferer, 0)?.takeIf(::isSafeResolverUrl)
+        if (!direct.isNullOrBlank()) {
+            val unwrappedOrigin = runCatching {
+                val u = java.net.URI(unwrapped)
+                "${u.scheme}://${u.host}/"
+            }.getOrDefault(BASE_SLASH)
+            val gwOrigin = if (unwrapped.contains("vids.php")) "https://d.myseed.tv/" else ""
+            val refererCandidates = listOfNotNull(
+                gwOrigin.takeIf { it.isNotBlank() },
+                unwrappedOrigin,
+                unwrapped,
+                sourceReferer,
+                BASE_SLASH,
+                "",
+            ).distinct()
+            val workingReferer = MultiProviderRepository.verifyPlayableStreamWithReferer(direct, refererCandidates)
+            if (workingReferer != null) {
+                return MultiProviderRepository.ResolvedStreamResult(direct, workingReferer)
+            }
+        }
+        return MultiProviderRepository.resolveStreamWithReferer(unwrapped, sourceReferer)
+    }
+
+    fun resolveDirectStream(serverUrl: String, referer: String = ""): String? {
+        val unwrapped = MultiProviderRepository.decodeIdWrapperUrl(serverUrl)
+        if (!isSafeResolverUrl(unwrapped)) return null
+        val sourceReferer = referer.trim().ifBlank {
+            runCatching {
+                val uri = java.net.URI(unwrapped)
+                "${uri.scheme}://${uri.host}/"
+            }.getOrDefault(BASE_SLASH)
+        }
+        return resolveDirectStreamInternal(unwrapped, sourceReferer, 0)
             ?.takeIf(::isSafeResolverUrl)
     }
 
@@ -1618,7 +1680,7 @@ object ArabseedRepository {
         if (depth > 2) return null
         try {
             val cacheKey = "$serverUrl|$referer"
-            // vids.php tokens expire every ~60 seconds — skip cache for those URLs
+            // vids.php tokens expire every ~60 seconds â€” skip cache for those URLs
             val isVidsPhpUrl = serverUrl.contains("vids.php") || serverUrl.contains("player-gateway")
             if (!isVidsPhpUrl) streamCache[cacheKey]?.let { return it }
 
@@ -1714,35 +1776,10 @@ object ArabseedRepository {
                 } catch (_: Exception) {}
             }
 
-            // 4. Voe.sx resolver — يستخرج direct HLS/mp4 من صفحة voe
+            // 4. Voe.sx resolver (MKGMa + JS redirect + legacy patterns)
             if (serverUrl.contains("voe.sx") || serverUrl.contains("voe.")) {
                 try {
-                    val voeHtml = fetchHtmlWithReferer(serverUrl, referer.ifBlank { "https://arabseed.ink/" })
-                    // Voe يخزن الـ HLS URL في var sources = { ... 'hls': 'URL' ... }
-                    val hlsMatch = Regex("""['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(voeHtml)
-                    hlsMatch?.groupValues?.get(1)?.let { voeStream ->
-                        if (voeStream.startsWith("http")) {
-                            streamCache[cacheKey] = voeStream
-                            return voeStream
-                        }
-                    }
-                    // Fallback: Voe sometimes base64-encodes the sources object
-                    val b64Match = Regex("""'e':\s*'([A-Za-z0-9+/=]{50,})'""").find(voeHtml)
-                    b64Match?.groupValues?.get(1)?.let { encoded ->
-                        val decoded = runCatching {
-                            String(android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)).trim()
-                        }.getOrNull() ?: return@let
-                        val innerHls = Regex("""['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(decoded)
-                        innerHls?.groupValues?.get(1)?.let { voeStream ->
-                            if (voeStream.startsWith("http")) {
-                                streamCache[cacheKey] = voeStream
-                                return voeStream
-                            }
-                        }
-                    }
-                    // Voe also uses: sources = {mp4: 'URL'}
-                    val mp4Match = Regex("""['"]mp4['"]\s*:\s*['"]([^'"]+\.mp4[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(voeHtml)
-                    mp4Match?.groupValues?.get(1)?.let { voeStream ->
+                    MultiProviderRepository.resolveEmbedToStreamWithMeta(serverUrl, referer.ifBlank { BASE_SLASH })?.first?.let { voeStream ->
                         if (voeStream.startsWith("http")) {
                             streamCache[cacheKey] = voeStream
                             return voeStream
@@ -1751,16 +1788,13 @@ object ArabseedRepository {
                 } catch (_: Exception) {}
             }
 
-            // 5. Vidsharing / bysezejataos resolver
-            if (serverUrl.contains("vidsharing") || serverUrl.contains("bysezejataos")) {
+            // 5. Vidsharing / Byse / Govid resolver (AES-256-GCM + XFS + govid iframe hops)
+            if (serverUrl.contains("vidsharing") || serverUrl.contains("byse") || serverUrl.contains("govid")) {
                 try {
-                    val vsHtml = fetchHtmlWithReferer(serverUrl, referer.ifBlank { "https://arabseed.ink/" })
-                    // Vidsharing: sources:[{file:"URL"}] pattern
-                    val vsMatch = Regex("""file\s*:\s*["']([^"']+\.m3u8[^"']*)["']""", RegexOption.IGNORE_CASE).find(vsHtml)
-                    vsMatch?.groupValues?.get(1)?.let { vsStream ->
-                        if (vsStream.startsWith("http")) {
-                            streamCache[cacheKey] = vsStream
-                            return vsStream
+                    MultiProviderRepository.resolveEmbedToStreamWithMeta(serverUrl, referer.ifBlank { BASE_SLASH })?.first?.let { stream ->
+                        if (stream.startsWith("http")) {
+                            streamCache[cacheKey] = stream
+                            return stream
                         }
                     }
                 } catch (_: Exception) {}
@@ -1799,7 +1833,7 @@ object ArabseedRepository {
             }
 
             // 7. Doodstream resolver
-            if (serverUrl.contains("dood") || serverUrl.contains("ds2play")) {
+            if (serverUrl.contains("dood") || serverUrl.contains("ds2play") || serverUrl.contains("playmogo") || serverUrl.contains("doodstream")) {
                 try {
                     val origin = try {
                         val u = java.net.URI.create(serverUrl)
@@ -1913,7 +1947,7 @@ object ArabseedRepository {
                 }
             }
 
-            // 5. JWPlayer / videojs regex — extended patterns
+            // 5. JWPlayer / videojs regex â€” extended patterns
             val jwRegex = Regex("""(?:file|sources|src)\s*:\s*(?:\[\s*\{[^}]*?file\s*:\s*["']([^"']+)["']|\[\s*["']([^"']+)["']|["']([^"']+\.(?:mp4|m3u8)[^"']*)["'])""", RegexOption.IGNORE_CASE)
             jwRegex.find(gHtml)?.let { jm ->
                 val cand = jm.groupValues.drop(1).firstOrNull { it.isNotBlank() }
@@ -1923,7 +1957,7 @@ object ArabseedRepository {
                 }
             }
 
-            // 6. Broader stream URL search — any URL with /hls/ /video/ /stream/ path
+            // 6. Broader stream URL search â€” any URL with /hls/ /video/ /stream/ path
             val broadStreamRegex = Regex(
                 """["'](https?://[^"'\s<>]{10,}(?:/hls/|/stream/|/video/|/media/|/cdn/)[^"'\s<>]+)["']""",
                 RegexOption.IGNORE_CASE
@@ -2283,13 +2317,16 @@ object ArabseedRepository {
 
         // 2. Elements with data-url, data-src, data-embed
         for (el in doc.select("$SEL_DURL, $SEL_DSRC, $SEL_DEMBED, [data-url], [data-src], [data-embed]")) {
-            val link = el.attr(R_DURL).ifBlank { el.attr(R_DEMBED).ifBlank { el.attr(R_DSRC).ifBlank { el.attr("data-url").ifBlank { el.attr("data-embed") } } } }.trim()
+            var link = el.attr(R_DURL).ifBlank { el.attr(R_DEMBED).ifBlank { el.attr(R_DSRC).ifBlank { el.attr("data-url").ifBlank { el.attr("data-embed") } } } }.trim()
             val rawName = el.attr("data-server-name").ifBlank { el.text() }.trim()
-            if (link.isNotBlank() && (link.startsWith("http") || link.startsWith("/")) && !isAdUrl(link)) {
-                val full = if (link.startsWith("http")) link else "${BASE_URL.trimEnd('/')}/" + link.trimStart('/')
-                val serverName = cleanServerName(rawName, full)
-                if (isServerCandidateUrl(full) && !isSeriesNavigationElement(el, full) && servers.none { it.embedUrl == full }) {
-                    servers += ArabseedServer(serverName, full)
+            if (link.isNotBlank() && !isAdUrl(link)) {
+                link = MultiProviderRepository.decodeIdWrapperUrl(link)
+                if (link.startsWith("http") || link.startsWith("/")) {
+                    val full = if (link.startsWith("http")) link else "${BASE_URL.trimEnd('/')}/" + link.trimStart('/')
+                    val serverName = cleanServerName(rawName, full)
+                    if (isServerCandidateUrl(full) && !isSeriesNavigationElement(el, full) && servers.none { it.embedUrl == full }) {
+                        servers += ArabseedServer(serverName, full)
+                    }
                 }
             }
         }
@@ -2337,13 +2374,49 @@ object ArabseedRepository {
             .containsMatchIn(path)
     }
 
-    private fun isServerCandidateUrl(url: String): Boolean {
-        val uri = runCatching { java.net.URI(url.trim()) }.getOrNull() ?: return false
+    private fun isServerCandidateUrl(url: String, pageUrl: String? = null): Boolean {
+        val clean = url.trim()
+        val uri = runCatching { java.net.URI(clean) }.getOrNull() ?: return false
         val host = uri.host?.lowercase(java.util.Locale.ROOT).orEmpty()
         val path = uri.path.orEmpty().lowercase(java.util.Locale.ROOT)
-        if (uri.scheme !in setOf("http", "https") || host.isBlank() || isAdUrl(url)) return false
-        if (Regex("(?i)\\.(?:apng|avif|bmp|gif|jpe?g|png|svg|webp)$").containsMatchIn(path)) return false
+        if (uri.scheme !in setOf("http", "https") || host.isBlank() || isAdUrl(clean)) return false
+        val deadEmbedHosts = listOf("govid.live", "luluvdo.com", "vidplayer.live", "shahied4u.vidplayer.live")
+        if (deadEmbedHosts.any { host == it || host.endsWith(".$it") }) return false
+        if (Regex("(?i)\\.(?:apng|avif|bmp|gif|jpe?g|png|svg|webp|css|js|ico|woff2?|ttf|eot|otf|xml|json|txt|pdf|zip|rar)$").containsMatchIn(path)) return false
         if (host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be") return false
+
+        // Never accept the item/source page itself as a server
+        if (pageUrl != null) {
+            val cleanPage = pageUrl.trim().trimEnd('/')
+            if (clean.trimEnd('/') == cleanPage || clean.substringBefore('?') == cleanPage.substringBefore('?')) {
+                return false
+            }
+        }
+
+        // Never accept site navigation, login, plans, catalog, etc.
+        val blockedRoutes = listOf(
+            "/login", "/logout", "/register", "/signup", "/signin", "/auth",
+            "/plans", "/pricing", "/privacy", "/terms", "/contact", "/about",
+            "/catalog", "/search", "/category", "/genre", "/tag", "/tags",
+            "/actor", "/director", "/filter", "/years", "/schedule", "/episode-schedule",
+            "/dmca", "/policy", "/faq", "/rss", "/feed", "/sitemap"
+        )
+        if (path.isEmpty() || path == "/" || blockedRoutes.any { path.contains(it) }) return false
+
+        val isContentDetailRoute = path.startsWith("/movie/") || path.startsWith("/drama/") ||
+            path.startsWith("/series/") || path.startsWith("/selary/") || path.startsWith("/post/") ||
+            path.startsWith("/show/") || path.startsWith("/title/") || path.startsWith("/film/") ||
+            path.startsWith("/episode/")
+        if (isContentDetailRoute) {
+            val hasPlaybackMarker = path.contains("/watch") || path.contains("/servers") ||
+                path.contains("/embed") || path.contains("/player") || path.contains("/play") ||
+                path.contains("/video") || path.contains("/v/") || path.contains("/e/") ||
+                clean.contains("?watch=") || clean.contains("?embed=") || clean.contains("?play=") ||
+                clean.contains("&watch=") || clean.contains("&embed=") || clean.contains("&play=") ||
+                clean.contains("vids.php")
+            if (!hasPlaybackMarker) return false
+        }
+
         return true
     }
 

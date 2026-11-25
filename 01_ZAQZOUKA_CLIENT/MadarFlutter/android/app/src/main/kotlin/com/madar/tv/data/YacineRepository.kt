@@ -406,75 +406,22 @@ object YacineRepository {
         val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         val ref = "https://yacinelive.com/"
 
-        val streams: List<Triple<String, String, String>> = when {
-            ch == 1 || (n.contains("bein") && n.contains("1") && !n.contains("xtra")) -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://bein1-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
-            )
-            ch == 2 -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://bein2-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
-            )
-            ch == 3 -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://bein3-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
-            )
-            ch == 4 -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://bein4-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
-            )
-            ch == 5 -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://bein5-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
-            )
-            ch == 6 -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://bein6-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
-            )
-            ch == 7 -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://bein7-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
-            )
-            ch == 8 -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://bein8-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
-            )
-            ch == 9 -> listOf(
-                Triple("$name · سيرفر مباشر 1", "https://bein9-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
-            )
-            n.contains("xtra") -> listOf(
-                Triple("$name · سيرفر رئيسي CDN", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
-            )
-            n.contains("france") || n.contains("french") -> listOf(
-                Triple("$name · سيرفر رئيسي CDN", "https://bein-beinsports1french-samsungau.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
-            )
-            n.contains("english") -> listOf(
-                Triple("$name · سيرفر رئيسي CDN", "https://bein-beinsports1english-samsungau.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+        val workingStreams: List<Triple<String, String, String>> = when {
+            ch in listOf(2, 4, 6, 8) || n.contains("xtra") -> listOf(
+                Triple("$name · سيرفر مباشر 1", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
+                Triple("$name · سيرفر 4 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
             )
             else -> listOf(
                 Triple("$name · سيرفر مباشر 1", "https://d9ssxzmclhfo4.cloudfront.net/bein_sports.m3u8", ref),
-                Triple("$name · سيرفر 2 HD", "https://bein1-bein.amagi.tv/playlist.m3u8", ref),
-                Triple("$name · سيرفر 3 بديل", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 2 HD", "https://bein-xtra-bein.amagi.tv/playlist.m3u8", ref),
+                Triple("$name · سيرفر 3 بديل", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
+                Triple("$name · سيرفر 4 بديل", "https://bein-beinxtrasports-firetv.amagi.tv/playlist.m3u8", ref),
             )
         }
 
-        return streams.map { (streamName, url, referer) ->
+        return workingStreams.map { (streamName, url, referer) ->
             YacineStream(
                 name = streamName,
                 url = url,
@@ -497,15 +444,6 @@ object YacineRepository {
         val id = eventId.trim()
         val hint = channelHint.trim()
 
-        // 1. Try live event streams first if eventId is a valid numeric ID
-        if (id.isNotEmpty() && id.all { it.isDigit() }) {
-            val eventStreams = getEventStreams(id)
-            if (eventStreams.isNotEmpty()) {
-                return@withContext eventStreams
-            }
-        }
-
-        // 2. Resolve channel name
         val channelToUse = when {
             hint.isNotBlank() -> hint
             else -> {
@@ -513,15 +451,24 @@ object YacineRepository {
                 ev?.channel?.ifBlank { "beIN SPORTS 1" } ?: "beIN SPORTS 1"
             }
         }
+        val staticBackup = getStreamsForChannelName(channelToUse)
 
-        // 3. Try live channel streams
-        val chStreams = getChannelStreams(channelToUse)
-        if (chStreams.isNotEmpty()) {
-            return@withContext chStreams
+        // 1. Try live event streams first if eventId is a valid numeric ID
+        if (id.isNotEmpty() && id.all { it.isDigit() }) {
+            val eventStreams = getEventStreams(id)
+            if (eventStreams.isNotEmpty()) {
+                return@withContext (eventStreams + staticBackup).distinctBy { it.url }
+            }
         }
 
-        // 4. Last fallback: offline static streams
-        getStreamsForChannelName(channelToUse)
+        // 2. Try live channel streams
+        val chStreams = getChannelStreams(channelToUse)
+        if (chStreams.isNotEmpty()) {
+            return@withContext (chStreams + staticBackup).distinctBy { it.url }
+        }
+
+        // 3. Last fallback: offline static streams
+        staticBackup
     }
 
     suspend fun getChannelStreams(channelId: String): List<YacineStream> = withContext(Dispatchers.IO) {
@@ -592,26 +539,16 @@ object YacineRepository {
                 .ifBlank { obj.optString("user_agent", "") }
                 .ifBlank { browserUa }
             val ua = if (rawUa.startsWith("okhttp", ignoreCase = true)) browserUa else rawUa
-            val rawRef = obj.optString("referer", "").ifBlank { "https://yacinelive.com/" }
-            // Yacine embeds zero-width UTF-8 security tokens in referer headers.
-            // Converting UTF-8 bytes to ISO-8859-1 preserves the exact byte sequence over HttpURLConnection.
-            val referer = try {
-                String(rawRef.toByteArray(Charsets.UTF_8), Charsets.ISO_8859_1)
-            } catch (_: Exception) {
-                rawRef
-            }.ifBlank { "https://yacinelive.com/" }
+            val rawRef = obj.optString("referer", "").replace("\r", "").replace("\n", "")
+            // Keep raw UTF-8 zero-width tokens intact; HttpURLConnection transmits UTF-8 header bytes directly.
+            val referer = rawRef.ifBlank { "https://yacinelive.com/" }
             val playbackHeaderNames = setOf("user-agent", "referer", "origin", "accept", "accept-language")
             val requestHeaders = buildMap {
                 headersObj?.keys()?.forEach { key ->
-                    val rawVal = headersObj.optString(key).trim()
-                    val safeVal = try {
-                        String(rawVal.toByteArray(Charsets.UTF_8), Charsets.ISO_8859_1)
-                    } catch (_: Exception) {
-                        rawVal
+                    val safeVal = headersObj.optString(key).replace("\r", "").replace("\n", "").trim()
+                    if (key.lowercase() in playbackHeaderNames && safeVal.isNotBlank() && !key.contains("\r") && !key.contains("\n")) {
+                        put(key, safeVal)
                     }
-                    if (key.lowercase() in playbackHeaderNames && safeVal.isNotBlank() && !key.contains("\r") && !key.contains("\n")
-                        && !safeVal.contains("\r") && !safeVal.contains("\n")
-                    ) put(key, safeVal)
                 }
                 put("User-Agent", ua)
                 put("Referer", referer)
@@ -624,6 +561,19 @@ object YacineRepository {
                 urlType = obj.optInt("url_type", 3),
                 headers = requestHeaders,
             )
-        }.filter { it.url.isNotEmpty() && !it.url.contains("rex.new-redirect.online") }
+        }.filter { stream ->
+            val u = stream.url.lowercase()
+            u.isNotEmpty() &&
+                !u.contains("rex.new-redirect.online") &&
+                !u.contains("re300.new-redirect.online") &&
+                !u.contains("re00.new-redirect.online")
+        }.sortedBy { stream ->
+            val u = stream.url.lowercase()
+            when {
+                u.contains("signalsignal.") || u.contains("spotifaycamp.") -> 0
+                stream.urlType == 1 -> 1
+                else -> 2
+            }
+        }
     }
 }

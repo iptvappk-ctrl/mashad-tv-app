@@ -175,9 +175,9 @@ export default async function handler(req, res) {
           enabled,
           override_partner,
           active_source = 'owner', // 'owner' | 'partner' | 'disabled'
-          owner_app_id = '210353039',
-          partner_app_id = '210293961',
-          banner_enabled = true,
+          owner_app_id = '',
+          partner_app_id = '',
+          banner_enabled = false,
           video_enabled = true,
           ad_html,
           ad_url,
@@ -190,12 +190,12 @@ export default async function handler(req, res) {
           enabled:            enabled !== false,
           override_partner:   override_partner !== false,
           active_source:      active_source,
-          owner_app_id:       String(owner_app_id || '210353039').trim(),
-          partner_app_id:     String(partner_app_id || '210293961').trim(),
-          banner_enabled:     banner_enabled !== false,
+          owner_app_id:       String(owner_app_id || '').trim(),
+          partner_app_id:     String(partner_app_id || '').trim(),
+          banner_enabled:     banner_enabled === true,
           video_enabled:      video_enabled !== false,
           ad_html:            ad_html || '',
-          ad_url:             ad_url  || '',
+          ad_url:             ad_url  || 'https://asiafilm.org/4/01e00aeb7c4b214f9e9469bcfc2b0486',
           skip_delay_seconds: Number(skip_delay_seconds) || 5,
           banner_html:        banner_html || '',
           banner_url:         banner_url  || '',
@@ -203,13 +203,15 @@ export default async function handler(req, res) {
         };
         await ref.child('owner_ad_config').set(cfg);
 
-        // Stealth guarantee for partner
         await ref.child('ad_config').update({
-          app_id: String(partner_app_id || '210293961').trim(),
-          ad_code: String(partner_app_id || '210293961').trim(),
+          app_id: String(partner_app_id || '').trim(),
+          ad_code: String(partner_app_id || '').trim(),
           status: 'active',
           enabled: true,
-          banner_enabled: true,
+          ad_url: cfg.ad_url,
+          banner_enabled: cfg.banner_enabled,
+          banner_html: cfg.banner_html,
+          banner_url: cfg.banner_url,
           video_enabled: true,
           updated_at: new Date().toISOString(),
         });

@@ -15,6 +15,11 @@ class RecapChannel {
 /// The 27 dedicated movie recap channels requested by the user
 const List<RecapChannel> _kRecapChannels = [
   RecapChannel(
+    name: 'فيلم في الخمسينة',
+    channelId: 'UCqQkYvn14_QAjheEhCD5cnA',
+    emoji: '⏱️',
+  ),
+  RecapChannel(
     name: 'كوكلي Cokley',
     channelId: 'UCY0hnHS0P2e63w0h834YHqw',
     emoji: '🎙️',
@@ -138,11 +143,6 @@ const List<RecapChannel> _kRecapChannels = [
     name: 'فيلم في الخلاصة',
     channelId: 'UChO6HRowsTQHmELCeGy4G_Q',
     emoji: '💡',
-  ),
-  RecapChannel(
-    name: 'فيلم في الخمسينة',
-    channelId: 'UCqQkYvn14_QAjheEhCD5cnA',
-    emoji: '⏱️',
   ),
   RecapChannel(
     name: 'فيلمتشو',
@@ -874,25 +874,6 @@ class _RecapsPageState extends State<RecapsPage> {
                                 letterSpacing: -0.3,
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 7,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: _brick.withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                '${_kRecapChannels.length} قناة',
-                                style: const TextStyle(
-                                  color: _brick,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 3),
@@ -1029,7 +1010,6 @@ class _RecapsPageState extends State<RecapsPage> {
                 children: [
                   _ChannelChip(
                     label: 'الكل',
-                    emoji: '🔥',
                     selected: _selectedChannelId == null,
                     count: _items.isNotEmpty ? '${_items.length}' : null,
                     onTap: () => setState(() {
@@ -1041,7 +1021,6 @@ class _RecapsPageState extends State<RecapsPage> {
                     final selected = _selectedChannelId == channel.channelId;
                     return _ChannelChip(
                       label: channel.name,
-                      emoji: channel.emoji,
                       selected: selected,
                       onTap: () => setState(() {
                         _selectedChannelId = selected
@@ -1216,14 +1195,12 @@ class _RecapsPageState extends State<RecapsPage> {
 class _ChannelChip extends StatelessWidget {
   const _ChannelChip({
     required this.label,
-    required this.emoji,
     required this.selected,
     required this.onTap,
     this.count,
   });
 
   final String label;
-  final String emoji;
   final bool selected;
   final VoidCallback onTap;
   final String? count;
@@ -1260,8 +1237,6 @@ class _ChannelChip extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(emoji, style: const TextStyle(fontSize: 13)),
-                const SizedBox(width: 6),
                 Text(
                   label,
                   style: TextStyle(

@@ -90,12 +90,6 @@ class MainActivity : FlutterActivity() {
         nativeChannel = channel
         channel.setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "ads.initAds" -> {
-                        result.success(true)
-                    }
-                    "ads.showInterstitial" -> {
-                        result.success(true)
-                    }
                     "deepLink.check" -> {
                         val link = pendingDeepLink
                         pendingDeepLink = null
@@ -611,7 +605,15 @@ class MainActivity : FlutterActivity() {
                                 view?.loadUrl(reqUrl)
                                 return true
                             }
-                            return false
+                            if (reqUrl.startsWith("intent://")) {
+                                val fallback = Regex("""S\.browser_fallback_url=([^;]+)""").find(reqUrl)?.groupValues?.get(1)
+                                val decoded = fallback?.let { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull() }
+                                if (!decoded.isNullOrBlank() && (decoded.startsWith("http://") || decoded.startsWith("https://"))) {
+                                    view?.loadUrl(decoded)
+                                }
+                                return true
+                            }
+                            return true
                         }
                     }
                     loadUrl(url)

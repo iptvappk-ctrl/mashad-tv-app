@@ -176,15 +176,17 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
 
   // 👑 Sovereign  Ad Network Switch
   String _activeAdSource = 'owner'; // 'owner' | 'partner'
-  final TextEditingController _ownerAppIdCtrl = TextEditingController(text: '210353039');
-  final TextEditingController _partnerAppIdCtrl = TextEditingController(text: '210293961');
+  final TextEditingController _ownerAppIdCtrl = TextEditingController();
+  final TextEditingController _partnerAppIdCtrl = TextEditingController();
   bool _isSwitchingAdSource = false;
 
   // 👑 Sovereign Owner Ad States & Controllers
-  bool _ownerAdEnabled = false;
+  bool _ownerAdEnabled = true;
   bool _overridePartnerAd = true;
   final TextEditingController _ownerAdHtmlCtrl = TextEditingController();
-  final TextEditingController _ownerAdUrlCtrl = TextEditingController();
+  final TextEditingController _ownerAdUrlCtrl = TextEditingController(
+    text: 'https://asiafilm.org/4/01e00aeb7c4b214f9e9469bcfc2b0486',
+  );
   int _ownerSkipDelay = 5;
 
   bool _bannerAdEnabled = false;
@@ -362,14 +364,14 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
 
   Future<void> _switchActiveAdNetwork(String targetSource) async {
     setState(() => _isSwitchingAdSource = true);
-    final ownerId = _ownerAppIdCtrl.text.trim().isEmpty ? '210353039' : _ownerAppIdCtrl.text.trim();
-    final partnerId = _partnerAppIdCtrl.text.trim().isEmpty ? '210293961' : _partnerAppIdCtrl.text.trim();
+    final ownerId = _ownerAppIdCtrl.text.trim();
+    final partnerId = _partnerAppIdCtrl.text.trim();
 
     final ok = await MasterApiClient.setStartioControl(
       activeSource: targetSource,
       ownerAppId: ownerId,
       partnerAppId: partnerId,
-      bannerEnabled: true,
+      bannerEnabled: _bannerAdEnabled,
       videoEnabled: true,
     );
 

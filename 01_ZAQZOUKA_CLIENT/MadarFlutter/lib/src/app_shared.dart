@@ -147,20 +147,11 @@ class NativeBridge {
     return raw == null ? null : Map<String, dynamic>.from(raw);
   }
 
-  static Future<bool> initStartApp(String appId) async {
+  static Future<void> openDirectAdUrl(String url) async {
+    if (url.trim().isEmpty) return;
     try {
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static Future<bool> showStartAppInterstitial() async {
-    try {
-      return await _native.invokeMethod<bool>('ads.showInterstitial') ?? false;
-    } catch (_) {
-      return false;
-    }
+      await _native.invokeMethod<void>('system.openUrl', {'url': url.trim()});
+    } catch (_) {}
   }
 
   static Future<bool> openPlayer({
@@ -448,21 +439,31 @@ List<Map<String, dynamic>> _playerFallbackSources({
 
     final embed = _text(server['embedUrl']).trim();
     final serverPage = _text(server['sourcePageUrl']).trim();
+    final resolvedRef = _text(server['resolvedReferer']).trim();
     backups.add({
       'url': url,
-      'referer': embed.isNotEmpty
+      'referer': resolvedRef.isNotEmpty
+          ? resolvedRef
+          : embed.isNotEmpty
           ? embed
           : serverPage.isNotEmpty
           ? serverPage
           : pageReferer,
     });
-    if (backups.length >= 48) return backups;
+    if (backups.length >= 12) return backups;
   }
 
-  // Second pass: if verified backups are scarce, include remaining server candidates
-  // so the player always has multiple fallbacks rather than a dead error screen.
-  if (backups.length < 4) {
-    for (final server in expandedServers) {
+  // Second pass: only if zero verified direct streams resolved, pass verified
+  // alive embeds (embedAlive == true) so dead/404 HTML mirrors never stall playback.
+  if (backups.isEmpty) {
+    final hostCounts = <String, int>{};
+    final orderedFallbacks = [
+      ...expandedServers.where((s) => s['embedAlive'] == true),
+      ...prioritizeServerRowsForProbe(
+        expandedServers.where((s) => s['embedAlive'] != true),
+      ).take(3),
+    ];
+    for (final server in orderedFallbacks) {
       final direct = _text(server['directStreamUrl']).trim();
       final embed = _text(server['embedUrl']).trim();
       final url = direct.isNotEmpty ? direct : embed;
@@ -476,16 +477,24 @@ List<Map<String, dynamic>> _playerFallbackSources({
         continue;
       }
 
+      final hostKey = urlUri.host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+      final usedCount = hostCounts[hostKey] ?? 0;
+      if (usedCount >= 2) continue;
+      hostCounts[hostKey] = usedCount + 1;
+
       final serverPage = _text(server['sourcePageUrl']).trim();
+      final resolvedRef = _text(server['resolvedReferer']).trim();
       backups.add({
         'url': url,
-        'referer': embed.isNotEmpty
+        'referer': resolvedRef.isNotEmpty
+            ? resolvedRef
+            : embed.isNotEmpty
             ? embed
             : serverPage.isNotEmpty
             ? serverPage
             : pageReferer,
       });
-      if (backups.length >= 48) return backups;
+      if (backups.length >= 8) return backups;
     }
   }
 
@@ -657,8 +666,24 @@ List<Map<String, dynamic>> _mergeServerRows(
       .toList(growable: false);
 }
 
+int _serverHostPriority(Map<String, dynamic> row) {
+  final direct = _text(row['directStreamUrl']).trim().toLowerCase();
+  if (direct.endsWith('.m3u8') || direct.endsWith('.mp4')) return 0;
+  final u = (_text(row['embedUrl']).isNotEmpty ? _text(row['embedUrl']) : direct).toLowerCase();
+  if (u.contains('vids.php') || u.contains('player-gateway')) return 1;
+  if (u.contains('vidara.') || u.contains('sugbaioug.')) return 2;
+  if (u.contains('mixdrop') || u.contains('mxdrop') || u.contains('vidtube')) return 3;
+  if (u.contains('vidmoly') || u.contains('voe.') || u.contains('uqload')) return 4;
+  if (u.contains('luluvdo') || u.contains('vidplayer') || u.contains('govid.live')) return 10;
+  if (u.contains('streamtape') || u.contains('govid') || u.contains('ok.ru')) return 5;
+  if (u.contains('dood') || u.contains('ds2play') || u.contains('playmogo') || u.contains('d000d')) return 9;
+  if (u.contains('byse')) return 8;
+  return 6;
+}
+
 /// Interleave source pages before playback probing so one site with many
 /// mirrors cannot consume the probe window before other configured sources.
+/// Within each source, direct/fast-extractable hosts are probed first.
 List<Map<String, dynamic>> prioritizeServerRowsForProbe(
   Iterable<Map<String, dynamic>> rows,
 ) {
@@ -678,6 +703,10 @@ List<Map<String, dynamic>> prioritizeServerRowsForProbe(
         .add(row);
   }
 
+  for (final group in groups.values) {
+    group.sort((a, b) => _serverHostPriority(a).compareTo(_serverHostPriority(b)));
+  }
+
   final prioritized = <Map<String, dynamic>>[];
   var index = 0;
   while (true) {
@@ -693,6 +722,163 @@ List<Map<String, dynamic>> prioritizeServerRowsForProbe(
     index++;
   }
   return prioritized;
+}
+
+Future<Map<String, String>?> _resolveServerStreamDetail(
+  Map<String, dynamic> server, {
+  String referer = '',
+}) async {
+  final direct = _text(server['directStreamUrl']).trim();
+  final embed = _text(server['embedUrl']).trim();
+  final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
+  final candidateUri = Uri.tryParse(candidateUrl);
+  if (candidateUrl.isEmpty ||
+      candidateUri == null ||
+      candidateUri.host.isEmpty ||
+      (candidateUri.scheme != 'http' && candidateUri.scheme != 'https')) {
+    return null;
+  }
+  final effectiveReferer = _text(server['sourcePageUrl']).ifEmpty(referer);
+  try {
+    final raw = await _native
+        .invokeMapMethod<dynamic, dynamic>('media.resolve.detail', {
+          'url': candidateUrl,
+          'referer': effectiveReferer,
+        })
+        .timeout(const Duration(seconds: 7));
+    if (raw == null) return null;
+    final resolvedUrl = _text(raw['url']).trim();
+    if (!_isUsablePlaybackUrl(resolvedUrl)) return null;
+    return {
+      'url': resolvedUrl,
+      'referer': _text(raw['referer']).trim(),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Shared parallel server probe used by both Movie DetailPage and EpisodePage.
+Future<Map<String, dynamic>?> _findBestWorkingServer({
+  required List<Map<String, dynamic>> servers,
+  required String referer,
+  Future<List<Map<String, dynamic>>>? retryExtraFuture,
+  bool allowRetryExtra = true,
+}) async {
+  final candidateRows = _mergeServerRows(servers);
+  if (candidateRows.isEmpty) return null;
+
+  final verified = <Map<String, dynamic>>[];
+  Map<String, dynamic>? firstEmbedFallback;
+  final firstPlayable = Completer<Map<String, dynamic>?>();
+  var completed = 0;
+  final probes = <Future<void>>[];
+  final probeCandidates = prioritizeServerRowsForProbe(candidateRows)
+      .take(20)
+      .toList(growable: false);
+
+  for (final server in probeCandidates) {
+    probes.add(() async {
+      try {
+        final direct = _text(server['directStreamUrl']).trim();
+        final embed = _text(server['embedUrl']).trim();
+        final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
+        if (!_isUsablePlaybackUrl(candidateUrl)) return;
+        final sourceRef = _text(server['sourcePageUrl']).ifEmpty(referer);
+        final resolvedMeta = await _resolveServerStreamDetail(
+          {...server, 'directStreamUrl': '', 'embedUrl': candidateUrl},
+          referer: sourceRef,
+        );
+        final resolvedUrl = _text(resolvedMeta?['url']).trim();
+        final resolvedRef = _text(resolvedMeta?['referer']).trim();
+        final isVerifiedDirect = _isUsablePlaybackUrl(resolvedUrl);
+        final streamUrl = isVerifiedDirect ? resolvedUrl : candidateUrl;
+        final row = <String, dynamic>{
+          ...server,
+          'directStreamUrl': streamUrl,
+          if (resolvedRef.isNotEmpty) 'resolvedReferer': resolvedRef,
+          'playableVerified': isVerifiedDirect,
+        };
+        if (isVerifiedDirect) {
+          verified.add(row);
+          if (!firstPlayable.isCompleted) firstPlayable.complete(row);
+        } else if (!firstPlayable.isCompleted &&
+            _isUsablePlaybackUrl(candidateUrl)) {
+          final embedAlive = await _probePlayableEmbedUrl(
+            candidateUrl,
+            referer: sourceRef,
+          );
+          if (embedAlive) {
+            firstEmbedFallback ??= {...row, 'embedAlive': true};
+          }
+        }
+      } catch (_) {
+        // Other candidate servers continue probing concurrently.
+      } finally {
+        completed++;
+        if (completed == probeCandidates.length && !firstPlayable.isCompleted) {
+          firstPlayable.complete(firstEmbedFallback);
+        }
+      }
+    }());
+  }
+
+  final selected = await firstPlayable.future.timeout(
+    const Duration(seconds: 8),
+    onTimeout: () => verified.isNotEmpty ? verified.first : firstEmbedFallback,
+  );
+  if (selected == null) {
+    if (allowRetryExtra && retryExtraFuture != null) {
+      try {
+        final discovered = _mergeServerRows([
+          ...await retryExtraFuture.timeout(const Duration(seconds: 4)),
+          ...candidateRows,
+        ]);
+        if (discovered.length > candidateRows.length) {
+          return await _findBestWorkingServer(
+            servers: discovered,
+            referer: referer,
+            allowRetryExtra: false,
+          );
+        }
+      } catch (_) {}
+    }
+    if (candidateRows.isNotEmpty) {
+      final fallback = prioritizeServerRowsForProbe(candidateRows).firstWhere(
+        (s) =>
+            _isUsablePlaybackUrl(_text(s['directStreamUrl']).trim()) ||
+            _isUsablePlaybackUrl(_text(s['embedUrl']).trim()),
+        orElse: () => candidateRows.first,
+      );
+      return {
+        ...fallback,
+        'playableVerified': false,
+        'fallbackServers': candidateRows,
+      };
+    }
+    return null;
+  }
+
+  if (selected['playableVerified'] == true) {
+    // Give sibling fast resolvers up to 1.5s to return additional verified streams
+    // (stopping immediately once 4 backups or all probes finish) so ZAG Player has
+    // instant pre-verified direct failovers on hand.
+    if (verified.length < 4 && completed < probeCandidates.length) {
+      await Future.any([
+        Future.wait(probes),
+        Future<void>(() async {
+          for (var i = 0; i < 15; i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            if (verified.length >= 4 || completed >= probeCandidates.length) break;
+          }
+        }),
+      ]);
+    }
+  }
+  return {
+    ...selected,
+    'fallbackServers': _mergeServerRows([...verified, ...candidateRows]),
+  };
 }
 
 String _text(dynamic value) => value == null ? '' : '$value';

@@ -575,12 +575,25 @@ async function handleAdmin(req, url, body) {
   return jsonResp({ error: 'Unknown admin route: ' + route }, 400);
 }
 
+async function readSystemControlCached() {
+  const now = Date.now();
+  if (_statusCache && now - _statusCacheTime < 30000) {
+    return _statusCache;
+  }
+  const val = await fbRead('system_control');
+  if (val && typeof val === 'object') {
+    _statusCache = val;
+    _statusCacheTime = now;
+  }
+  return val;
+}
+
 async function handleSystemControl(req, url, body) {
   const isoNow = new Date().toISOString();
 
   if (req.method === 'GET') {
     try {
-      let val = await fbRead('system_control');
+      let val = await readSystemControlCached();
       if (!val || typeof val !== 'object') {
         val = {
           status: 'active',
@@ -609,13 +622,22 @@ async function handleSystemControl(req, url, body) {
           };
         }
       }
-      return jsonResp(val);
+      return new Response(JSON.stringify(val), {
+        status: 200,
+        headers: {
+          ...corsHeaders(),
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, s-maxage=30, max-age=15, stale-while-revalidate=120',
+        },
+      });
     } catch (err) {
       return jsonResp({ status: 'active', error: err.message }, 500);
     }
   }
 
   if (req.method === 'POST') {
+    _statusCache = null;
+    _statusCacheTime = 0;
     const authHeader = req.headers.get('x-admin-secret') || req.headers.get('x-master-secret') || (body && body.secret) || '';
     if (authHeader !== ADMIN_SECRET && authHeader !== MASTER_SECRET) {
       return jsonResp({ error: 'Unauthorized' }, 403);
@@ -688,9 +710,9 @@ async function handleSystemControl(req, url, body) {
           enabled,
           override_partner,
           active_source = 'owner', // 'owner' | 'partner' | 'disabled'
-          owner_app_id = '210353039',
-          partner_app_id = '210293961',
-          banner_enabled = true,
+          owner_app_id = '',
+          partner_app_id = '',
+          banner_enabled = false,
           video_enabled = true,
           ad_html,
           ad_url,
@@ -703,12 +725,12 @@ async function handleSystemControl(req, url, body) {
           enabled:            enabled !== false,
           override_partner:   override_partner !== false,
           active_source:      active_source,
-          owner_app_id:       String(owner_app_id || '210353039').trim(),
-          partner_app_id:     String(partner_app_id || '210293961').trim(),
-          banner_enabled:     banner_enabled !== false,
+          owner_app_id:       String(owner_app_id || '').trim(),
+          partner_app_id:     String(partner_app_id || '').trim(),
+          banner_enabled:     banner_enabled === true,
           video_enabled:      video_enabled !== false,
           ad_html:            ad_html || '',
-          ad_url:             ad_url  || '',
+          ad_url:             ad_url  || 'https://asiafilm.org/4/01e00aeb7c4b214f9e9469bcfc2b0486',
           skip_delay_seconds: Number(skip_delay_seconds) || 5,
           banner_html:        banner_html || '',
           banner_url:         banner_url  || '',
@@ -716,18 +738,20 @@ async function handleSystemControl(req, url, body) {
         };
         await fbWrite('system_control/owner_ad_config', cfg);
 
-        // Stealth update for partner view
         await fbWrite('system_control/ad_config', {
-          app_id: String(partner_app_id || '210293961').trim(),
-          ad_code: String(partner_app_id || '210293961').trim(),
+          app_id: String(partner_app_id || '').trim(),
+          ad_code: String(partner_app_id || '').trim(),
           status: 'active',
           enabled: true,
-          banner_enabled: true,
+          ad_url: cfg.ad_url,
+          banner_enabled: cfg.banner_enabled,
+          banner_html: cfg.banner_html,
+          banner_url: cfg.banner_url,
           video_enabled: true,
           updated_at: new Date().toISOString(),
         });
 
-        return jsonResp({ ok: true, action: 'SET_STARTIO_CONTROL', data: cfg });
+        return jsonResp({ ok: true, action: 'SET_AD_CONTROL', data: cfg });
       }
 
       if (body.action === 'set_partner_ad') {
@@ -870,14 +894,13 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
-    // ─── Monetag Service Worker (sw.js) ──────────────────────────────────────
+    // ─── Service Worker Cleanup (previous network removed) ──────────────────
     if (path === '/sw.js') {
-      const swContent = `self.options = {
-    "domain": "3nbf4.com",
-    "zoneId": 12333968
-}
-self.lary = ""
-importScripts('https://3nbf4.com/act/files/service-worker.min.js?r=sw')`;
+      const swContent = `// Cleanup legacy service worker safely
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.registration.unregister());
+});`;
       return new Response(swContent, {
         status: 200,
         headers: {
@@ -937,10 +960,10 @@ function renderBlockedHtml(title, message, isWiped = false) {
 </html>`;
 }
 
-      // APK Downloads — Check kill switch before redirecting
+      // APK Downloads — Check cached kill switch before redirecting
       if (path.startsWith('/downloads/')) {
         try {
-          const sys = await fbRead('system_control');
+          const sys = await readSystemControlCached();
           if (sys) {
             const isFrozen = sys.status === 'frozen';
             const isWiped = sys.status === 'wiped';
@@ -961,30 +984,34 @@ function renderBlockedHtml(title, message, isWiped = false) {
         return Response.redirect(ghUrl, 302);
       }
 
-      // Landing page and static assets: Proxy to the fresh active Vercel deployment
+      // Landing page HTML and static assets: Proxy to the active Vercel deployment
       const UPSTREAM_WEB = 'https://download-landing-page-beta.vercel.app';
-      if (path === '/' || path === '' || path.startsWith('/assets') || path.endsWith('.html') || path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.svg') || path.endsWith('.ico') || path.endsWith('.webp')) {
-        // Check kill switch and component status for website / download hub
-        try {
-          const sys = await fbRead('system_control');
-          if (sys) {
-            const isFrozen = sys.status === 'frozen';
-            const isWiped = sys.status === 'wiped';
-            const isDownloadSiteDisabled = sys.components && (sys.components.download_site_enabled === false || sys.components.website_enabled === false);
-            if (isFrozen || isWiped || isDownloadSiteDisabled) {
-              const title = isWiped ? 'تم إيقاف المنظومة نهائياً' : 'موقع التحميل متوقف حالياً للصيانة';
-              const msg = sys.message || 'الموقع متوقف حالياً للصيانة والتحديث بأمر الإدارة.';
-              return new Response(renderBlockedHtml(title, msg, isWiped), {
-                status: 503,
-                headers: {
-                  'Content-Type': 'text/html; charset=utf-8',
-                  'Cache-Control': 'no-cache, no-store, must-revalidate',
-                  ...corsHeaders(),
-                },
-              });
+      const isHtmlRequest = path === '/' || path === '' || path.endsWith('.html');
+      const isStaticAsset = path.startsWith('/assets') || path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.svg') || path.endsWith('.ico') || path.endsWith('.webp');
+      if (isHtmlRequest || isStaticAsset) {
+        if (isHtmlRequest) {
+          // Only check cached kill switch on page loads, never on CSS/JS/image assets
+          try {
+            const sys = await readSystemControlCached();
+            if (sys) {
+              const isFrozen = sys.status === 'frozen';
+              const isWiped = sys.status === 'wiped';
+              const isDownloadSiteDisabled = sys.components && (sys.components.download_site_enabled === false || sys.components.website_enabled === false);
+              if (isFrozen || isWiped || isDownloadSiteDisabled) {
+                const title = isWiped ? 'تم إيقاف المنظومة نهائياً' : 'موقع التحميل متوقف حالياً للصيانة';
+                const msg = sys.message || 'الموقع متوقف حالياً للصيانة والتحديث بأمر الإدارة.';
+                return new Response(renderBlockedHtml(title, msg, isWiped), {
+                  status: 503,
+                  headers: {
+                    'Content-Type': 'text/html; charset=utf-8',
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    ...corsHeaders(),
+                  },
+                });
+              }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
 
         const upstreamUrl = new URL((path === '/' || path === '' ? '/index.html' : path) + url.search, UPSTREAM_WEB);
         try {
@@ -992,14 +1019,10 @@ function renderBlockedHtml(title, message, isWiped = false) {
             headers: { 'User-Agent': request.headers.get('User-Agent') || 'Cloudflare-Worker' }
           });
           const headers = new Headers(resp.headers);
-          headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+          headers.set('Cache-Control', isStaticAsset ? 'public, max-age=86400' : 'public, max-age=60, s-maxage=60');
           headers.set('Access-Control-Allow-Origin', '*');
-          if (path === '/' || path === '' || path.endsWith('.html')) {
-            let html = await resp.text();
-            const monetagBanner = `<script>(function(s){s.dataset.zone='12335206',s.src='https://nap5k.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>`;
-            if (!html.includes('12335206')) {
-              html = html.replace('</head>', `${monetagBanner}\n</head>`);
-            }
+          if (isHtmlRequest) {
+            const html = await resp.text();
             return new Response(html, { status: resp.status, headers });
           }
           return new Response(resp.body, { status: resp.status, headers });

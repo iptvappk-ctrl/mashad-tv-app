@@ -1023,11 +1023,21 @@ class _CatalogPageState extends State<CatalogPage> {
 
     final showFeatured =
         _tabId == 'home' && _search.text.trim().isEmpty && _items.isNotEmpty;
+    final currentYear = DateTime.now().year;
+    final currentFeaturedPool = _items.where((item) {
+      final y = int.tryParse(item.year.trim()) ?? 0;
+      return y == 0 || y <= currentYear;
+    }).toList(growable: false);
     final featuredItems = showFeatured
-        ? _items.take(5).toList()
+        ? (currentFeaturedPool.isNotEmpty ? currentFeaturedPool : _items)
+              .take(5)
+              .toList(growable: false)
         : <MediaItem>[];
+    final featuredUrls = featuredItems.map((e) => e.pageUrl).toSet();
     final gridItems = showFeatured
-        ? _items.skip(featuredItems.length).toList(growable: false)
+        ? _items
+              .where((item) => !featuredUrls.contains(item.pageUrl))
+              .toList(growable: false)
         : _items;
     final categoryTitle = _search.text.trim().isNotEmpty
         ? 'نتائج البحث'
@@ -1055,6 +1065,10 @@ class _CatalogPageState extends State<CatalogPage> {
                 onOpen: widget.onOpen,
               ),
             ),
+          ),
+        if (_search.text.trim().isEmpty && gridItems.isNotEmpty)
+          SliverToBoxAdapter(
+            child: AppFeedNativeAdCard(seed: _tabId.hashCode.abs() + _categoryId.hashCode.abs()),
           ),
         SliverToBoxAdapter(
           child: Padding(

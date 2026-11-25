@@ -1,4 +1,4 @@
-﻿part of '../main.dart';
+part of '../main.dart';
 
 class FavoritesPage extends StatelessWidget {
   const FavoritesPage({
@@ -192,8 +192,11 @@ class _DetailPageState extends State<DetailPage> {
         _serverRows = _maps(cached[0]?['servers']);
         _loading = _detail == null;
         _serversLoading = _serverRows.isEmpty;
-        final initialSeasonEpisodes = _maps(_maps(_bundle?['seasons']).firstOrNull?['episodes']);
-        _seasonsLoading = _bundle == null || _seasonNeedsEnrichment(initialSeasonEpisodes);
+        final seasonsList = _maps(_bundle?['seasons']);
+        final hasAnyGap = seasonsList.any(
+          (season) => _seasonNeedsEnrichment(_maps(season['episodes'])),
+        );
+        _seasonsLoading = _bundle == null || seasonsList.isEmpty || hasAnyGap || force;
         if (_bundle != null) {
           _seasonIndex = _seasonIndexFor(
             _bundle!,
@@ -271,14 +274,11 @@ class _DetailPageState extends State<DetailPage> {
 
   Future<void> _pollSeasonCache(int request, Map<String, Object?> args) async {
     try {
-      // The native enrichment service publishes partial provider results while it
-      // checks older seasons in the background. Keep observing that cache long
-      // enough for the bounded cross-provider pass to finish.
-      // Native mirror enrichment has a bounded 45-second walk after the
-      // initial source parse. Keep polling slightly beyond that deadline so
-      // the last completed season pages are not silently missed.
-      for (var attempt = 0; attempt < 55; attempt++) {
-        await Future<void>.delayed(const Duration(seconds: 1));
+      // Poll briskly while bounded native enrichment completes.
+      for (var attempt = 0; attempt < 30; attempt++) {
+        await Future<void>.delayed(
+          Duration(milliseconds: attempt < 10 ? 250 : 400),
+        );
         if (!mounted || request != _request) return;
         final cached = await NativeBridge.map('media.seasons.cached', args);
         if (cached != null) {
@@ -296,7 +296,6 @@ class _DetailPageState extends State<DetailPage> {
                   preferredNumber: _manualSeasonNumber,
                 );
               });
-              _refreshCurrentSeasonIfSparse();
             }
           }
         }
@@ -388,6 +387,9 @@ class _DetailPageState extends State<DetailPage> {
             _serverRows = rows;
             _serversLoading = false;
           });
+          if (!widget.item.isSeries) {
+            unawaited(_warmTopMovieServer(rows, url));
+          }
         }
       }
     } catch (_) {}
@@ -413,9 +415,12 @@ class _DetailPageState extends State<DetailPage> {
         if (!mounted || request != _request) return;
         if (rows.isNotEmpty) {
           setState(() {
-            _serverRows = _mergeServerRows([..._serverRows, ...rows]);
+            _serverRows = _mergeServerRows([...rows, ..._serverRows]);
             _serversLoading = false;
           });
+          if (!widget.item.isSeries) {
+            unawaited(_warmTopMovieServer(_serverRows, url));
+          }
         }
       } catch (_) {
         // One unavailable provider must not block playable results from others.
@@ -632,7 +637,11 @@ class _DetailPageState extends State<DetailPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 26),
           children: [
-            _DetailHeader(item: widget.item, episodeCount: totalEpisodeCount, seasonCount: _seasons.length),
+            _DetailHeader(
+              item: widget.item,
+              episodeCount: _seasonsLoading ? 0 : totalEpisodeCount,
+              seasonCount: _seasonsLoading ? 0 : _seasons.length,
+            ),
             const SizedBox(height: 14),
             Row(
               children: [
@@ -789,125 +798,93 @@ class _DetailPageState extends State<DetailPage> {
         _episodePageCursorBySeason[seasonNumber]!.isNotEmpty &&
         _episodePageCursorBySeason[seasonNumber] != _text(selected?['pageUrl']) &&
         !_episodeSeasonsExhausted.contains(seasonNumber);
-    final canRequestMore = hasLoadedMore || (hasNextPageCursor && !_seasonsLoading);
+    final isSeasonSyncing = _seasonsLoading ||
+        (_refreshingSeasonPages.contains(_text(selected?['pageUrl'])) && episodes.isEmpty);
+    final canRequestMore =
+        !isSeasonSyncing && (hasLoadedMore || hasNextPageCursor);
     return _SectionCard(
       title: 'حلقات هذا الجزء / الموسم',
       icon: '📺',
       trailing: Text(
-        '${episodes.length} حلقة',
+        isSeasonSyncing
+            ? 'جاري تحميل المواسم والحلقات…'
+            : '${episodes.length} حلقة',
         style: const TextStyle(color: _muted, fontSize: 12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_seasons.isNotEmpty) ...[
-            SizedBox(
-              height: 42,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _seasons.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 7),
-                itemBuilder: (_, index) {
-                  final season = _seasons[index];
-                  final label = _text(season['title'])
-                      .ifEmpty('الموسم ${_text(season['number'])}');
-                  return ChoiceChip(
-                    label: Text(label),
-                    selected: index == _seasonIndex,
-                    showCheckmark: false,
-                    labelStyle: TextStyle(
-                      color: index == _seasonIndex ? Colors.white : _muted,
-                      fontSize: 12,
-                    ),
-                    side: BorderSide(
-                      color: index == _seasonIndex ? _brick : _line,
-                    ),
-                    onSelected: (_) {
-                      final seasonEpisodes = _maps(season['episodes']);
-                      setState(() {
-                        _seasonIndex = index;
-                        _manualSeasonNumber = _integer(season['number']);
-                      });
-                      if (_seasonNeedsEnrichment(seasonEpisodes)) {
-                        unawaited(_refreshSeasonPage(season));
-                      }
-                    },
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-          if ((_seasonsLoading && episodes.isNotEmpty) ||
-              (_refreshingSeasonPages.contains(_text(selected?['pageUrl'])) &&
-                  episodes.isNotEmpty))
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: _brick.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: _brick.withOpacity(0.2)),
-              ),
-              child: const Row(
-                children: [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: _brick,
-                    ),
-                  ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'جاري مزامنة باقي الحلقات والمواسم من السيرفرات السريعة…',
-                      style: TextStyle(
-                        color: _ink,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (episodes.isEmpty)
-            (_seasonsLoading ||
-                    _refreshingSeasonPages.contains(
-                      _text(selected?['pageUrl']),
-                    ))
-                ? _seasonEpisodesSkeleton()
-                : const Text(
-                    'المصدر لم يرجع حلقات لهذا الجزء.',
-                    style: TextStyle(color: _muted),
-                  )
+          if (isSeasonSyncing)
+            _seasonEpisodesSkeleton()
           else ...[
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: List.generate(visibleEpisodes.length, (index) {
-                final episode = visibleEpisodes[index];
-                final n = _episodeNumber(episode);
-                final isCurrent = _currentEpisodeIndex(episodes) == index;
-                return ActionChip(
-                  avatar: Icon(
-                    Icons.play_arrow_rounded,
-                    size: 16,
-                    color: isCurrent ? Colors.white : _brick,
-                  ),
-                  label: Text('الحلقة ${n > 0 ? n : index + 1}'),
-                  backgroundColor: isCurrent ? _brick : _paper,
-                  labelStyle: TextStyle(
-                    color: isCurrent ? Colors.white : _ink,
-                    fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w500,
-                  ),
-                  side: BorderSide(color: isCurrent ? _brick : _line),
-                  onPressed: () => _openEpisode(episodes, index, selected),
-                );
-              }),
-            ),
+            if (_seasons.isNotEmpty) ...[
+              SizedBox(
+                height: 42,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _seasons.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 7),
+                  itemBuilder: (_, index) {
+                    final season = _seasons[index];
+                    final label = _text(season['title'])
+                        .ifEmpty('الموسم ${_text(season['number'])}');
+                    return ChoiceChip(
+                      label: Text(label),
+                      selected: index == _seasonIndex,
+                      showCheckmark: false,
+                      labelStyle: TextStyle(
+                        color: index == _seasonIndex ? Colors.white : _muted,
+                        fontSize: 12,
+                      ),
+                      side: BorderSide(
+                        color: index == _seasonIndex ? _brick : _line,
+                      ),
+                      onSelected: (_) {
+                        final seasonEpisodes = _maps(season['episodes']);
+                        setState(() {
+                          _seasonIndex = index;
+                          _manualSeasonNumber = _integer(season['number']);
+                        });
+                        if (_seasonNeedsEnrichment(seasonEpisodes)) {
+                          unawaited(_refreshSeasonPage(season));
+                        }
+                      },
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (episodes.isEmpty)
+              const Text(
+                'المصدر لم يرجع حلقات لهذا الجزء.',
+                style: TextStyle(color: _muted),
+              )
+            else ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: List.generate(visibleEpisodes.length, (index) {
+                  final episode = visibleEpisodes[index];
+                  final n = _episodeNumber(episode);
+                  final isCurrent = _currentEpisodeIndex(episodes) == index;
+                  return ActionChip(
+                    avatar: Icon(
+                      Icons.play_arrow_rounded,
+                      size: 16,
+                      color: isCurrent ? Colors.white : _brick,
+                    ),
+                    label: Text('الحلقة ${n > 0 ? n : index + 1}'),
+                    backgroundColor: isCurrent ? _brick : _paper,
+                    labelStyle: TextStyle(
+                      color: isCurrent ? Colors.white : _ink,
+                      fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w500,
+                    ),
+                    side: BorderSide(color: isCurrent ? _brick : _line),
+                    onPressed: () => _openEpisode(episodes, index, selected),
+                  );
+                }),
+              ),
             if (canRequestMore) ...[
               const SizedBox(height: 12),
               OutlinedButton.icon(
@@ -933,6 +910,7 @@ class _DetailPageState extends State<DetailPage> {
                 ),
               ),
             ],
+          ],
           ],
         ],
       ),
@@ -989,19 +967,39 @@ class _DetailPageState extends State<DetailPage> {
 
   Widget _seasonEpisodesSkeleton() => _ShimmerLoading(
     child: Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          'جاري جلب حلقات الموسم…',
+          'جاري تحميل كل المواسم والحلقات…',
+          textAlign: TextAlign.right,
           style: TextStyle(color: _muted, fontSize: 12),
         ),
         const SizedBox(height: 10),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: List.generate(
+              4,
+              (_) => Container(
+                width: 92,
+                height: 36,
+                margin: const EdgeInsets.only(left: 7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEADBCB),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _line),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          alignment: WrapAlignment.end,
+          alignment: WrapAlignment.start,
           children: List.generate(
-            6,
+            9,
             (_) => Container(
               width: 104,
               height: 42,
@@ -1410,106 +1408,54 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
-  // ── يجرّب كل السيرفرات ويرجع أول واحد شغّال (direct stream أو embed للـ WebView) ─────
+  Future<void> _warmTopMovieServer(
+    List<Map<String, dynamic>> servers,
+    String pageUrl,
+  ) async {
+    final prioritized = prioritizeServerRowsForProbe(servers);
+    final candidate = prioritized.firstWhere(
+      (s) =>
+          _isUsablePlaybackUrl(_text(s['directStreamUrl']).trim()) ||
+          _isUsablePlaybackUrl(_text(s['embedUrl']).trim()),
+      orElse: () => const <String, dynamic>{},
+    );
+    if (candidate.isEmpty) return;
+    final direct = _text(candidate['directStreamUrl']).trim();
+    if (_isUsablePlaybackUrl(direct) && candidate['playableVerified'] == true) {
+      return;
+    }
+    final referer = _text(candidate['sourcePageUrl']).ifEmpty(pageUrl);
+    final resolvedMeta = await _resolveServerStreamDetail(candidate, referer: referer);
+    if (resolvedMeta == null || !mounted) return;
+    final resolvedUrl = _text(resolvedMeta['url']).trim();
+    final resolvedRef = _text(resolvedMeta['referer']).trim();
+    if (!_isUsablePlaybackUrl(resolvedUrl)) return;
+    final embedKey = _text(candidate['embedUrl']).trim();
+    final updated = {
+      ...candidate,
+      'directStreamUrl': resolvedUrl,
+      if (resolvedRef.isNotEmpty) 'resolvedReferer': resolvedRef,
+      'playableVerified': true,
+    };
+    setState(() {
+      _serverRows = _mergeServerRows([
+        updated,
+        ..._serverRows.where((r) => _text(r['embedUrl']).trim() != embedKey),
+      ]);
+    });
+  }
+
+  // ── يجرّب كل السيرفرات ويرجع أول واحد شغّال بأقصى سرعة ─────
   Future<Map<String, dynamic>?> _findWorkingServer(
     List<Map<String, dynamic>> servers,
     String referer, {
     bool retryDiscoveredSources = true,
-  }) async {
-    var candidateRows = _mergeServerRows(servers);
-    final backupFuture = _providerBackupFuture;
-    if (candidateRows.isEmpty) return null;
-
-    final verified = <Map<String, dynamic>>[];
-    final firstPlayable = Completer<Map<String, dynamic>?>();
-    var completed = 0;
-    final probes = <Future<void>>[];
-    final probeCandidates = prioritizeServerRowsForProbe(candidateRows)
-        .take(24)
-        .toList(growable: false);
-    for (final server in probeCandidates) {
-      probes.add(() async {
-        try {
-          final direct = _text(server['directStreamUrl']).trim();
-          final embed = _text(server['embedUrl']).trim();
-          final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
-          if (!_isUsablePlaybackUrl(candidateUrl)) return;
-          final resolved = await _native
-              .invokeMethod<String>('media.resolve', {
-                'url': candidateUrl,
-                'referer': _text(server['sourcePageUrl']).ifEmpty(referer),
-              })
-              .timeout(const Duration(seconds: 8))
-              .then((v) => _text(v).trim())
-              .catchError((_) => '');
-          // إذا نجح resolve استخدمه، وإذا فشل اقبل candidateUrl (embed) مباشرةً
-          final streamUrl = _isUsablePlaybackUrl(resolved) ? resolved : candidateUrl;
-          final row = {
-            ...server,
-            'directStreamUrl': streamUrl,
-            'playableVerified': _isUsablePlaybackUrl(resolved),
-          };
-          verified.add(row);
-          if (!firstPlayable.isCompleted) firstPlayable.complete(row);
-        } catch (_) {
-          // A bad server is skipped while the other candidates continue probing.
-        } finally {
-          completed++;
-          if (completed == probeCandidates.length &&
-              !firstPlayable.isCompleted) {
-            firstPlayable.complete(null);
-          }
-        }
-      }());
-    }
-
-    final selected = await firstPlayable.future.timeout(
-      const Duration(seconds: 9),
-      onTimeout: () => null,
-    );
-    if (selected == null) {
-      if (retryDiscoveredSources && backupFuture != null) {
-        try {
-          final discovered = _mergeServerRows([
-            ...candidateRows,
-            ...await backupFuture.timeout(const Duration(seconds: 6)),
-          ]);
-          if (discovered.length > candidateRows.length) {
-            return await _findWorkingServer(
-              discovered,
-              referer,
-              retryDiscoveredSources: false,
-            );
-          }
-        } catch (_) {}
-      }
-      if (candidateRows.isNotEmpty) {
-        final fallback = candidateRows.firstWhere(
-          (s) =>
-              _isUsablePlaybackUrl(_text(s['directStreamUrl']).trim()) ||
-              _isUsablePlaybackUrl(_text(s['embedUrl']).trim()),
-          orElse: () => candidateRows.first,
-        );
-        return {
-          ...fallback,
-          'playableVerified': false,
-          'fallbackServers': candidateRows,
-        };
-      }
-      return null;
-    }
-
-    // Let near-simultaneous checks finish so playback has tested automatic
-    // backups ready if the fastest valid stream fails during startup.
-    await Future.any([
-      Future.wait(probes),
-      Future<void>.delayed(const Duration(milliseconds: 3500)),
-    ]);
-    return {
-      ...selected,
-      'fallbackServers': _mergeServerRows([...verified, ...candidateRows]),
-    };
-  }
+  }) => _findBestWorkingServer(
+    servers: servers,
+    referer: referer,
+    retryExtraFuture: _providerBackupFuture,
+    allowRetryExtra: retryDiscoveredSources,
+  );
 
   Widget _serverSection(
     List<Map<String, dynamic>> servers,
@@ -1624,20 +1570,44 @@ class _DetailPageState extends State<DetailPage> {
     // إذا كان السيرفر محقَّقاً مسبقاً استخدم directStreamUrl مباشرة
     // وإلا حاول الـ resolve — لو فشل استخدم candidateUrl كـ embed في WebView
     final String url;
+    String resolvedReferer = _text(server['resolvedReferer']).trim();
+    final bool candidateEmbedVerified;
     if (server['playableVerified'] == true && _isUsablePlaybackUrl(direct)) {
       url = direct;
+      candidateEmbedVerified = true;
+    } else if (server['embedAlive'] == true && _isUsablePlaybackUrl(candidateUrl)) {
+      // Already verified alive inside _findWorkingServer; avoid wasting a second network roundtrip.
+      url = candidateUrl;
+      candidateEmbedVerified = true;
     } else {
-      final resolvedViaStream = await _resolveServerStream({
+      final resolvedMeta = await _resolveServerStreamDetail({
         ...server,
         'directStreamUrl': '',
         'embedUrl': candidateUrl,
-      }, referer: sourcePage).catchError((_) => '');
-      url = _isUsablePlaybackUrl(resolvedViaStream) ? resolvedViaStream : '';
+      }, referer: sourcePage);
+      final resolvedViaStream = _text(resolvedMeta?['url']).trim();
+      if (resolvedRefOrEmpty(resolvedMeta).isNotEmpty) {
+        resolvedReferer = resolvedRefOrEmpty(resolvedMeta);
+      }
+      if (_isUsablePlaybackUrl(resolvedViaStream)) {
+        url = resolvedViaStream;
+        candidateEmbedVerified = true;
+      } else {
+        url = '';
+        candidateEmbedVerified = await _probePlayableEmbedUrl(
+          candidateUrl,
+          referer: sourcePage,
+        );
+      }
     }
     if (!mounted) return;
 
-    // استخدم url المُحلَّل إذا كان صالحاً، وإلا اقبل candidateUrl (embed) ليُفتح في WebView
-    final playableUrl = _isUsablePlaybackUrl(url) ? url : candidateUrl;
+    // استخدم url المُحلَّل إذا كان صالحاً، وإلا اقبل candidateUrl فقط إذا ثبت أن صفحة السيرفر حية
+    final playableUrl = _isUsablePlaybackUrl(url)
+        ? url
+        : (candidateEmbedVerified && _isUsablePlaybackUrl(candidateUrl)
+              ? candidateUrl
+              : '');
     if (!_isUsablePlaybackUrl(playableUrl)) {
       final failedUrl = candidateUrl;
       final alternatives =
@@ -1659,13 +1629,18 @@ class _DetailPageState extends State<DetailPage> {
       _message(context, 'لم يتم التحقق من رابط فيديو صالح لهذا المصدر.');
       return;
     }
-    final playerReferer = embed.isNotEmpty ? embed : sourcePage;
+    final playerReferer = resolvedReferer.isNotEmpty
+        ? resolvedReferer
+        : embed.isNotEmpty
+        ? embed
+        : sourcePage;
 
     if (!mounted) return;
 
     final verifiedServer = {
       ...server,
       'directStreamUrl': playableUrl,
+      if (resolvedReferer.isNotEmpty) 'resolvedReferer': resolvedReferer,
       'playableVerified': true,
     };
 

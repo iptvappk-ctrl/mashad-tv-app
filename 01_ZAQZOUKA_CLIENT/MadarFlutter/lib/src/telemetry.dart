@@ -203,7 +203,7 @@ class AppTelemetry {
 
   static void _startHeartbeatTimer() {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _heartbeatTimer = Timer.periodic(const Duration(minutes: 3), (_) {
       sendHeartbeat();
     });
   }

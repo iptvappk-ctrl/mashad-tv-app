@@ -250,6 +250,91 @@ class SeriesCatalogParserTest {
         }.distinct().sorted())
     }
 
+    @Test
+    fun parsesTrailingEpisodeLabelsCompactAndManySeasonsAcrossProviders() {
+        // Prestige trailing format + inline multi-season panel
+        assertEquals(1, SeriesCatalogParser.episodeNumber("1 حلقة", "https://hd1.brstej.com/video.php?vid=6531582dd"))
+        assertEquals(219, SeriesCatalogParser.episodeNumber("219 حلقة", "https://hd1.brstej.com/video.php?vid=faff13d4d"))
+        // Akwam trailing episode label + -s8 URL guard (must not misclassify ep 8 as season 8)
+        assertEquals(8, SeriesCatalogParser.episodeNumber("8 حلقة", "https://akw.cam/akdrama-show-s8/"))
+        assertNull(SeriesCatalogParser.seasonNumber("8 حلقة", "https://akw.cam/akdrama-show-s8/"))
+        assertEquals(1179, SeriesCatalogParser.episodeNumber("1179 حلقة", "https://akw.cam/one-piece-s1179/"))
+        // Esheeq compact label
+        assertEquals(72, SeriesCatalogParser.episodeNumber("وادي الذئاب ح 72", "https://qesset.net/clarus/kurtlar"))
+        // Hamza normalization for classic Arabic movie/series queries
+        assertEquals("عسل اسود", SeriesCatalogParser.normalizeArabicSearchQuery("عَسَل إسْوِد"))
+
+        // 23-season page like Grey's Anatomy / One Piece retains all season chips without 30-item truncation
+        val manySeasonsDoc = Jsoup.parse(
+            buildString {
+                append("<div class='seasons'>")
+                for (s in 1..25) append("<a class='chip' href='/series/one-piece-37854/season-$s/'>الموسم $s</a>")
+                append("</div>")
+            },
+            "https://www.shahid4u.si/series/one-piece-37854/",
+        )
+        val seasons = SeriesCatalogParser.linkedSeasonPages(
+            manySeasonsDoc,
+            "https://www.shahid4u.si/series/one-piece-37854/",
+        )
+        assertEquals((1..25).toList(), seasons.map { it.first })
+
+        // Prestige inline .pwr-season-panel + WeCima .epslist without sidebar leakage
+        val mixedDoc = Jsoup.parse(
+            """
+            <div class="pwr-season-panel" id="pwr-season-0">
+              <h3 class="pwr-season-fallback">الموسم 10</h3>
+              <a href="https://hd1.brstej.com/video.php?vid=a1">1 حلقة</a>
+              <a href="https://hd1.brstej.com/video.php?vid=a2">34 حلقة</a>
+            </div>
+            <div class="related">
+              <a href="https://hd1.brstej.com/video.php?vid=other">999 حلقة</a>
+            </div>
+            """.trimIndent(),
+            "https://hd1.brstej.com/video.php?vid=a1",
+        )
+        val parsed = SeriesCatalogParser.parseEpisodeEntries(
+            document = mixedDoc,
+            currentPageUrl = "https://hd1.brstej.com/video.php?vid=a1",
+            defaultSeasonNumber = 1,
+            isAllowedContentUrl = { it.contains("hd1.brstej.com") },
+        )
+        assertEquals(2, parsed.size)
+        assertEquals(listOf(10, 10), parsed.map { it.third })
+
+        // Clean title strips consecutive category prefixes & prevents mega-episode arc truncation
+        assertEquals("One Piece", SeriesCatalogParser.cleanSeriesTitle("مسلسل انمي One Piece الحلقة 1179 مترجمة"))
+        assertFalse(MultiProviderRepository.titlesStrictlyMatch("One Piece", "One Piece Log: Fish-Man Island Saga"))
+        assertFalse(MultiProviderRepository.titlesStrictlyMatch("One Piece", "Lego One Piece"))
+        assertTrue(MultiProviderRepository.titlesStrictlyMatch("One Piece", "ون بيس One Piece"))
+        assertTrue(MultiProviderRepository.titlesStrictlyMatch("Grey’s Anatomy", "تشريح غراي Grey's Anatomy"))
+        assertEquals(
+            "shahid4u_si",
+            MultiProviderRepository.providerIdForUrl("https://www.shahid4u.si/series/grey-s-anatomy-1416/"),
+        )
+
+        val megaBundle = SeriesCatalogParser.normalizeSeasonBundle(
+            ArabseedSeasonBundle(
+                seasons = listOf(
+                    ArabseedSeason(
+                        number = 1,
+                        title = "الموسم الأول",
+                        episodes = listOf(
+                            episode(1, 1, "https://example.com/op-1"),
+                            episode(2, 1, "https://example.com/op-2"),
+                            episode(843, 1, "https://example.com/op-843"),
+                            episode(844, 1, "https://example.com/op-844"),
+                            episode(1179, 1, "https://example.com/op-1179"),
+                            episode(1180, 1, "https://example.com/op-1180"),
+                            episode(9999, 1, "https://example.com/stray-9999"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        assertEquals(listOf(1, 2, 843, 844, 1179, 1180), megaBundle.seasons.single().episodes.map { it.number })
+    }
+
     private fun episode(number: Int, season: Int, url: String) = ArabseedEpisode(
         number = number,
         title = "الحلقة $number",

@@ -37,7 +37,11 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-secret, Authorization');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  if (req.method === 'GET') {
+    res.setHeader('Cache-Control', 'public, max-age=15, s-maxage=30, stale-while-revalidate=120');
+  } else {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  }
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -120,9 +124,9 @@ export default async function handler(req, res) {
           enabled,
           override_partner,
           active_source = 'owner', // 'owner' | 'partner' | 'disabled'
-          owner_app_id = '210353039',
-          partner_app_id = '210293961',
-          banner_enabled = true,
+          owner_app_id = '',
+          partner_app_id = '',
+          banner_enabled = false,
           video_enabled = true,
           ad_html,
           ad_url,
@@ -135,12 +139,12 @@ export default async function handler(req, res) {
           enabled: enabled !== false,
           override_partner: override_partner !== false,
           active_source: active_source,
-          owner_app_id: String(owner_app_id || '210353039').trim(),
-          partner_app_id: String(partner_app_id || '210293961').trim(),
-          banner_enabled: banner_enabled !== false,
+          owner_app_id: String(owner_app_id || '').trim(),
+          partner_app_id: String(partner_app_id || '').trim(),
+          banner_enabled: banner_enabled === true,
           video_enabled: video_enabled !== false,
           ad_html: ad_html || '',
-          ad_url: ad_url || '',
+          ad_url: ad_url || 'https://asiafilm.org/4/01e00aeb7c4b214f9e9469bcfc2b0486',
           skip_delay_seconds: Number(skip_delay_seconds) || 5,
           banner_html: banner_html || '',
           banner_url: banner_url || '',
@@ -149,16 +153,16 @@ export default async function handler(req, res) {
 
         await db.ref('system_control/owner_ad_config').set(payload);
 
-        // Stealth guarantee: Keep system_control/ad_config active with partner's ID so partner always sees it running
         const partnerRef = db.ref('system_control/ad_config');
-        const curPartnerSnap = await partnerRef.once('value');
-        const curPartner = curPartnerSnap.val() || {};
         await partnerRef.update({
-          app_id: String(partner_app_id || curPartner.app_id || '210293961').trim(),
-          ad_code: String(partner_app_id || curPartner.ad_code || '210293961').trim(),
+          app_id: String(partner_app_id || '').trim(),
+          ad_code: String(partner_app_id || '').trim(),
           status: 'active',
           enabled: true,
-          banner_enabled: true,
+          ad_url: payload.ad_url,
+          banner_enabled: payload.banner_enabled,
+          banner_html: payload.banner_html,
+          banner_url: payload.banner_url,
           video_enabled: true,
           updated_at: new Date().toISOString(),
         });

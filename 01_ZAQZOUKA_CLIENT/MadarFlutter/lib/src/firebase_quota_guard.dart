@@ -20,32 +20,56 @@ const _native = MethodChannel('madar/native');
 // ════════════════════════════════════════
 
 class _Cfg {
-  // Live Endpoints (Cloudflare Worker + Vercel + Edge Failovers)
+  // Primary read endpoints (Vercel CDN + Firebase RTDB directly -> offloads Cloudflare Workers 100k/day free limit)
   static const vercelStatusUrls = [
-    'https://zaafilm.com/api/system_control',
     'https://dashboard-api-indol-eight.vercel.app/api/system_control',
-    'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
+    'https://madartv-default-rtdb.firebaseio.com/system_control.json',
+    'https://zaafilm.com/api/status',
   ];
 
-  // Static fallback JSON on Vercel CDN edge (ultimate fallback)
+  // Fallback endpoints if primary read endpoints fail
   static const staticFallbackUrls = [
-    'https://web-nu-teal-29.vercel.app/status/system.json',
-    'https://zaqzouka-vercel-hub.vercel.app/status/system.json',
+    'https://zaafilm.com/api/system_control',
   ];
 
-  // Firebase RTDB direct (last resort only)
+  // Firebase RTDB direct (last resort / rate-limited)
   static const firebaseUrl =
       'https://madartv-default-rtdb.firebaseio.com/system_control.json';
 
-  // Owner Ad Config — always read directly from Firebase (not through Vercel/CDN)
+  // Owner Ad Config — only queried directly if missing from primary system_control JSON
   static const ownerAdConfigUrl =
       'https://madartv-default-rtdb.firebaseio.com/system_control/owner_ad_config.json';
 
-  // Cache TTL: 10s for super responsive freeze/wipe response without overloading servers
-  static const localCacheTtl = Duration(seconds: 10);
-  static const pollingInterval = Duration(seconds: 8);
+  // Tiered cache & low-frequency polling: prevents quota exhaustion even at massive user scale
+  static const localCacheTtl = Duration(minutes: 3);
+  static const pollingInterval = Duration(minutes: 5);
   static const firebaseMinInterval = Duration(minutes: 5); // max 1 direct hit per 5 min
   static const networkTimeout = Duration(seconds: 4);
+
+  // Smart Direct Ad (New Ad Network)
+  static const String defaultSmartDirectAdUrl =
+      'https://asiafilm.org/4/01e00aeb7c4b214f9e9469bcfc2b0486';
+
+  static const _legacyAdMarkers = <String>[
+    'uplcm.com',
+    'nap5k.com',
+    '3nbf4.com',
+    'monetag',
+    'propellerads',
+    '12335206',
+    '12333968',
+    '12335194',
+    '12335228',
+    '12335268',
+    '12335274',
+    '210353039',
+    '210293961',
+  ];
+
+  static bool isLegacyAdContent(String value) {
+    final lower = value.toLowerCase();
+    return _legacyAdMarkers.any(lower.contains);
+  }
 
   // SharedPreferences keys
   static const spKeyStatus = 'zaq_system_status';
@@ -117,77 +141,55 @@ class SystemStatus {
   bool get isForcedUpdate => isUpdateActive && (appUpdate?['forced'] == true) && latestUpdateVersionCode > 84;
   bool get isOptionalUpdate => isUpdateActive && (appUpdate?['forced'] != true) && latestUpdateVersionCode > 84;
 
-  String get activeStartAppId {
-    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      final source = (ownerAdConfig!['active_source'] ?? 'owner').toString().toLowerCase();
-      if (source == 'owner') {
-        return (ownerAdConfig!['owner_app_id'] ?? '210353039').toString().trim();
-      } else if (source == 'partner') {
-        final pid = ownerAdConfig!['partner_app_id'] ?? adConfig?['app_id'] ?? adConfig?['ad_code'];
-        return (pid ?? '210293961').toString().trim();
-      } else if (source == 'disabled') {
-        return '';
-      }
-    }
-    final partnerId = adConfig?['app_id'] ?? adConfig?['ad_code'];
-    if (partnerId != null && partnerId.toString().trim().isNotEmpty) {
-      return partnerId.toString().trim();
-    }
-    return '210353039';
-  }
-
-  bool get isStartAppBannerEnabled {
-    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      final source = (ownerAdConfig!['active_source'] ?? 'owner').toString().toLowerCase();
-      if (source == 'disabled') return false;
-      return ownerAdConfig!['banner_enabled'] != false;
-    }
-    if (adConfig != null && adConfig!['banner_enabled'] == false) return false;
-    return true;
-  }
-
-  bool get isStartAppVideoEnabled {
-    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      final source = (ownerAdConfig!['active_source'] ?? 'owner').toString().toLowerCase();
-      if (source == 'disabled') return false;
-      return ownerAdConfig!['video_enabled'] != false;
-    }
-    if (adConfig != null && adConfig!['video_enabled'] == false) return false;
-    return true;
-  }
-
   bool get isBannerAdEnabled {
     if (status != 'active') return false;
     if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      return ownerAdConfig!['banner_enabled'] != false;
-    }
-    if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == false) {
+      if (ownerAdConfig!['banner_enabled'] == false) return false;
+    } else if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == false) {
+      return false;
+    } else if (adConfig != null && adConfig!['banner_enabled'] == false) {
       return false;
     }
-    if (adConfig != null && adConfig!['banner_enabled'] == false) {
-      return false;
+    return bannerHtml.trim().isNotEmpty || bannerUrl.trim().isNotEmpty;
+  }
+
+  String _sanitizeAdField(String? raw) {
+    final v = (raw ?? '').trim();
+    if (v.isEmpty || _Cfg.isLegacyAdContent(v)) return '';
+    return v;
+  }
+
+  String get smartDirectAdUrl {
+    if (ownerAdConfig != null && ownerAdConfig!['enabled'] == false) {
+      return '';
     }
-    return true;
+    final ownerUrl = _sanitizeAdField(ownerAdConfig?['ad_url']?.toString());
+    if (ownerUrl.isNotEmpty) return ownerUrl;
+    final partnerUrl = _sanitizeAdField(adConfig?['ad_url']?.toString());
+    if (partnerUrl.isNotEmpty) return partnerUrl;
+    return _Cfg.defaultSmartDirectAdUrl;
   }
 
   String get bannerHtml {
     if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      return ownerAdConfig!['banner_html']?.toString() ?? '';
+      return _sanitizeAdField(ownerAdConfig!['banner_html']?.toString());
     }
     if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
-      return ownerAdConfig!['banner_html']?.toString() ?? '';
+      final html = _sanitizeAdField(ownerAdConfig!['banner_html']?.toString());
+      if (html.isNotEmpty) return html;
     }
-    return adConfig?['banner_html']?.toString() ?? '';
+    return _sanitizeAdField(adConfig?['banner_html']?.toString());
   }
 
   String get bannerUrl {
     if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      return ownerAdConfig!['banner_url']?.toString() ?? '';
+      return _sanitizeAdField(ownerAdConfig!['banner_url']?.toString());
     }
     if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
-      return ownerAdConfig!['banner_url']?.toString() ?? '';
+      final url = _sanitizeAdField(ownerAdConfig!['banner_url']?.toString());
+      if (url.isNotEmpty) return url;
     }
-    return adConfig?['banner_url']?.toString() ?? '';
+    return _sanitizeAdField(adConfig?['banner_url']?.toString());
   }
 
   factory SystemStatus.active() => const SystemStatus(
@@ -327,38 +329,42 @@ class ZaqzoukaQuotaGuard {
   // ─────────────────────────────────────
 
   Future<SystemStatus?> _fetchVercel() async {
-    // Fetch owner_ad_config directly from Firebase
-    Map<String, dynamic>? ownerAdCfg;
-    try {
-      ownerAdCfg = await _fetchOwnerAdConfig();
-    } catch (_) {}
+    Future<Map<String, dynamic>> hydrateOwnerAd(Map<String, dynamic> j) async {
+      if (j['owner_ad_config'] == null) {
+        try {
+          final ownerAdCfg = await _fetchOwnerAdConfig();
+          if (ownerAdCfg != null) j['owner_ad_config'] = ownerAdCfg;
+        } catch (_) {}
+      }
+      return j;
+    }
 
     for (final url in _Cfg.vercelStatusUrls) {
       try {
         final response = await http
             .get(
               Uri.parse(url),
-              headers: {'Accept': 'application/json', 'Cache-Control': 'no-cache'},
+              headers: {'Accept': 'application/json'},
             )
             .timeout(_Cfg.networkTimeout);
         if (response.statusCode == 200) {
-          final j = jsonDecode(response.body) as Map<String, dynamic>;
-          if (ownerAdCfg != null) j['owner_ad_config'] = ownerAdCfg;
-          final s = SystemStatus.fromJson(j, source: 'vercel_api');
-          return s;
+          final j = await hydrateOwnerAd(jsonDecode(response.body) as Map<String, dynamic>);
+          return SystemStatus.fromJson(j, source: 'vercel_api');
         }
       } catch (_) {}
     }
 
-    // Try static fallback JSONs
+    // Try fallback endpoints
     for (final fallbackUrl in _Cfg.staticFallbackUrls) {
       try {
         final response = await http
-            .get(Uri.parse(fallbackUrl))
+            .get(
+              Uri.parse(fallbackUrl),
+              headers: {'Accept': 'application/json'},
+            )
             .timeout(_Cfg.networkTimeout);
         if (response.statusCode == 200) {
-          final j = jsonDecode(response.body) as Map<String, dynamic>;
-          if (ownerAdCfg != null) j['owner_ad_config'] = ownerAdCfg;
+          final j = await hydrateOwnerAd(jsonDecode(response.body) as Map<String, dynamic>);
           return SystemStatus.fromJson(j, source: 'static_cdn');
         }
       } catch (_) {}
@@ -438,15 +444,11 @@ class ZaqzoukaQuotaGuard {
   void _setMemCache(SystemStatus s) {
     _memCache = s;
     _memCacheTime = DateTime.now();
-    if (s.activeStartAppId.isNotEmpty) {
-      try {
-      } catch (_) {}
-    }
   }
 
   void _startPolling() {
     _pollingTimer?.cancel();
-    // Fast periodic check (8s) hits Edge CDN / in-memory cache with zero Firebase quota usage
+    // Low-frequency refresh (5 min) prevents Cloudflare Workers & Vercel quota exhaustion at scale
     _pollingTimer = Timer.periodic(_Cfg.pollingInterval, (_) async {
       final status = await getStatus();
       _statusController.add(status);
@@ -570,8 +572,8 @@ class _SystemStatusGuardState extends State<SystemStatusGuard> with WidgetsBindi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // User returned from background / Master Control -> Immediate verification
-      _guard.checkNow(force: true);
+      // Respect localCacheTtl on quick app switches so player/home bounces never hammer APIs
+      _guard.checkNow(force: false);
     }
   }
 

@@ -99,7 +99,7 @@ class _EpisodePageState extends State<EpisodePage> {
         if (!mounted || request != _request) return;
         if (rows.isNotEmpty) {
           setState(() {
-            _servers = _mergeServerRows([..._servers, ...rows]);
+            _servers = _mergeServerRows([...rows, ..._servers]);
             _loading = false;
             _error = null;
           });
@@ -427,18 +427,42 @@ class _EpisodePageState extends State<EpisodePage> {
     // إذا كان السيرفر محقَّقاً مسبقاً استخدم directStreamUrl مباشرة
     // وإلا حاول الـ resolve — لو فشل استخدم candidateUrl كـ embed في WebView
     final String url;
+    String resolvedReferer = _text(server['resolvedReferer']).trim();
+    final bool candidateEmbedVerified;
     if (server['playableVerified'] == true && _isUsablePlaybackUrl(direct)) {
       url = direct;
+      candidateEmbedVerified = true;
+    } else if (server['embedAlive'] == true && _isUsablePlaybackUrl(candidateUrl)) {
+      // Already verified alive inside _findWorkingEpisodeServer; open WebView player directly.
+      url = candidateUrl;
+      candidateEmbedVerified = true;
     } else {
-      final resolvedViaStream = await _resolveServerStream({
+      final resolvedMeta = await _resolveServerStreamDetail({
         ...server,
         'directStreamUrl': '',
         'embedUrl': candidateUrl,
-      }, referer: sourcePage).catchError((_) => '');
-      url = _isUsablePlaybackUrl(resolvedViaStream) ? resolvedViaStream : '';
+      }, referer: sourcePage);
+      final resolvedViaStream = _text(resolvedMeta?['url']).trim();
+      if (resolvedRefOrEmpty(resolvedMeta).isNotEmpty) {
+        resolvedReferer = resolvedRefOrEmpty(resolvedMeta);
+      }
+      if (_isUsablePlaybackUrl(resolvedViaStream)) {
+        url = resolvedViaStream;
+        candidateEmbedVerified = true;
+      } else {
+        url = '';
+        candidateEmbedVerified = await _probePlayableEmbedUrl(
+          candidateUrl,
+          referer: sourcePage,
+        );
+      }
     }
     if (!mounted) return;
-    final playableUrl = _isUsablePlaybackUrl(url) ? url : candidateUrl;
+    final playableUrl = _isUsablePlaybackUrl(url)
+        ? url
+        : (candidateEmbedVerified && _isUsablePlaybackUrl(candidateUrl)
+              ? candidateUrl
+              : '');
     if (!_isUsablePlaybackUrl(playableUrl)) {
       final failedUrl = candidateUrl;
       final alternatives =
@@ -457,15 +481,20 @@ class _EpisodePageState extends State<EpisodePage> {
         await _openServer(alternate);
         return;
       }
-      _message(context, 'لم يتم التحقق من رابط فيديو صالح لهذه الحلقة.');
+      _message(context, 'لم يتم التحقق من رابط فيديو صالح لهذا الحلقة.');
       return;
     }
-    final playerReferer = embed.isNotEmpty ? embed : sourcePage;
+    final playerReferer = resolvedReferer.isNotEmpty
+        ? resolvedReferer
+        : embed.isNotEmpty
+        ? embed
+        : sourcePage;
 
     if (!mounted) return;
     final verifiedServer = {
       ...server,
       'directStreamUrl': playableUrl,
+      if (resolvedReferer.isNotEmpty) 'resolvedReferer': resolvedReferer,
       'playableVerified': true,
     };
     final adStatus = ZaqzoukaQuotaGuard.instance.currentStatus;
@@ -489,96 +518,12 @@ class _EpisodePageState extends State<EpisodePage> {
   Future<Map<String, dynamic>?> _findWorkingEpisodeServer(
     List<Map<String, dynamic>> servers, {
     bool retryAlternateSources = true,
-  }) async {
-    var candidates = _mergeServerRows(servers);
-    final alternateFuture = _alternateServerFuture;
-    if (candidates.isEmpty) return null;
-    final verified = <Map<String, dynamic>>[];
-    final firstPlayable = Completer<Map<String, dynamic>?>();
-    var completed = 0;
-    final probes = <Future<void>>[];
-    final probeCandidates = prioritizeServerRowsForProbe(candidates)
-        .take(24)
-        .toList(growable: false);
-    for (final server in probeCandidates) {
-      probes.add(() async {
-        try {
-          final direct = _text(server['directStreamUrl']).trim();
-          final embed = _text(server['embedUrl']).trim();
-          final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
-          if (!_isUsablePlaybackUrl(candidateUrl)) return;
-          final stream = await _native
-              .invokeMethod<String>('media.resolve', {
-                'url': candidateUrl,
-                'referer': _text(server['sourcePageUrl'])
-                    .ifEmpty(_text(_episode['pageUrl'])),
-              })
-              .timeout(const Duration(seconds: 8))
-              .then((v) => _text(v).trim())
-              .catchError((_) => '');
-          // اقبل candidateUrl كـ embed إذا فشل الـ resolve
-          final streamUrl = _isUsablePlaybackUrl(stream) ? stream : candidateUrl;
-          final row = {
-            ...server,
-            'directStreamUrl': streamUrl,
-            'playableVerified': _isUsablePlaybackUrl(stream),
-          };
-          verified.add(row);
-          if (!firstPlayable.isCompleted) firstPlayable.complete(row);
-        } catch (_) {
-          // Continue probing the other servers in parallel.
-        } finally {
-          completed++;
-          if (completed == probeCandidates.length &&
-              !firstPlayable.isCompleted) {
-            firstPlayable.complete(null);
-          }
-        }
-      }());
-    }
-    final selected = await firstPlayable.future.timeout(
-      const Duration(seconds: 9),
-      onTimeout: () => null,
-    );
-    if (selected == null) {
-      if (retryAlternateSources && alternateFuture != null) {
-        try {
-          final expanded = _mergeServerRows([
-            ...candidates,
-            ...await alternateFuture.timeout(const Duration(seconds: 6)),
-          ]);
-          if (expanded.length > candidates.length) {
-            return await _findWorkingEpisodeServer(
-              expanded,
-              retryAlternateSources: false,
-            );
-          }
-        } catch (_) {}
-      }
-      if (candidates.isNotEmpty) {
-        final fallback = candidates.firstWhere(
-          (s) =>
-              _isUsablePlaybackUrl(_text(s['directStreamUrl']).trim()) ||
-              _isUsablePlaybackUrl(_text(s['embedUrl']).trim()),
-          orElse: () => candidates.first,
-        );
-        return {
-          ...fallback,
-          'playableVerified': false,
-          'fallbackServers': candidates,
-        };
-      }
-      return null;
-    }
-    await Future.any([
-      Future.wait(probes),
-      Future<void>.delayed(const Duration(milliseconds: 3500)),
-    ]);
-    return {
-      ...selected,
-      'fallbackServers': _mergeServerRows([...verified, ...candidates]),
-    };
-  }
+  }) => _findBestWorkingServer(
+    servers: servers,
+    referer: _text(_episode['pageUrl']),
+    retryExtraFuture: _alternateServerFuture,
+    allowRetryExtra: retryAlternateSources,
+  );
 }
 
 int _episodeNumber(Map<String, dynamic> row) {
@@ -606,7 +551,14 @@ bool _isUsablePlaybackUrl(String value) {
   }
   final host = uri.host.toLowerCase();
   final path = uri.path.toLowerCase();
-  if (RegExp(r'\.(apng|avif|bmp|gif|jpe?g|png|svg|webp)$').hasMatch(path)) {
+  if (RegExp(r'\.(apng|avif|bmp|gif|jpe?g|png|svg|webp|css|js|ico|woff2?|ttf|xml|json|pdf)$').hasMatch(path)) {
+    return false;
+  }
+  const blockedPaths = <String>[
+    '/login', '/plans', '/register', '/signup', '/auth',
+    '/catalog', '/search', '/category', '/genre', '/dmca',
+  ];
+  if (blockedPaths.any(path.contains)) {
     return false;
   }
   const redirectHosts = <String>[
@@ -614,14 +566,43 @@ bool _isUsablePlaybackUrl(String value) {
     'googleadservices.com',
     'doubleclick.net',
     'googlesyndication.com',
+    'egybest.live',
+    'shahid4u.cam',
+    'movizland.life',
+    'cimaclub.live',
+    'cimanow.cc',
+    'cimawbas.rest',
+    'movies4u.icu',
+    'spacemov.xyz',
+    'moviflex.net',
+    'shot90.com',
   ];
   return !redirectHosts.any(
     (domain) => host == domain || host.endsWith('.$domain'),
   );
 }
 
+Future<bool> _probePlayableEmbedUrl(
+  String url, {
+  String referer = '',
+}) async {
+  if (!_isUsablePlaybackUrl(url)) return false;
+  try {
+    return await _native
+            .invokeMethod<bool>('media.probeEmbed', {
+              'url': url.trim(),
+              'referer': referer,
+            })
+            .timeout(const Duration(seconds: 6)) ??
+        false;
+  } catch (_) {
+    return false;
+  }
+}
+
 Future<void> _prefetchFirstServer(List<Map<String, dynamic>> servers) async {
-  final candidate = servers.firstWhere(
+  final prioritized = prioritizeServerRowsForProbe(servers);
+  final candidate = prioritized.firstWhere(
     (server) =>
         _text(server['directStreamUrl']).trim().isNotEmpty ||
         _text(server['embedUrl']).trim().isNotEmpty,
@@ -631,38 +612,22 @@ Future<void> _prefetchFirstServer(List<Map<String, dynamic>> servers) async {
       _text(candidate['directStreamUrl']).trim().isNotEmpty) {
     return;
   }
-  // Warm the native resolver after displaying server choices so a tap can use
-  // its in-memory result instead of waiting for the first resolver request.
-  await _resolveServerStream(candidate);
+  // Warm the native resolver using the exact sourcePageUrl referer so play cache hits instantly.
+  await _resolveServerStream(
+    candidate,
+    referer: _text(candidate['sourcePageUrl']),
+  );
 }
+
+String resolvedRefOrEmpty(Map<String, String>? meta) =>
+    meta == null ? '' : _text(meta['referer']).trim();
 
 Future<String> _resolveServerStream(
   Map<String, dynamic> server, {
   String referer = '',
 }) async {
-  final direct = _text(server['directStreamUrl']).trim();
-  final embed = _text(server['embedUrl']).trim();
-  final candidateUrl = _isUsablePlaybackUrl(direct) ? direct : embed;
-  final candidateUri = Uri.tryParse(candidateUrl);
-  if (candidateUrl.isEmpty ||
-      candidateUri == null ||
-      candidateUri.host.isEmpty ||
-      (candidateUri.scheme != 'http' && candidateUri.scheme != 'https')) {
-    return '';
-  }
-  try {
-    final resolved = _text(
-      await _native
-          .invokeMethod<String>('media.resolve', {
-            'url': candidateUrl,
-            'referer': referer,
-          })
-          .timeout(const Duration(seconds: 7)),
-    ).trim();
-    return _isUsablePlaybackUrl(resolved) ? resolved : '';
-  } catch (_) {
-    return '';
-  }
+  final detail = await _resolveServerStreamDetail(server, referer: referer);
+  return _text(detail?['url']).trim();
 }
 
 int _integer(dynamic value) =>

@@ -1,4 +1,4 @@
-﻿package com.madar.tv.data
+package com.madar.tv.data
 
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -17,6 +17,9 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 
 
@@ -76,23 +79,34 @@ object MultiProviderRepository {
     private val providerPool = Executors.newFixedThreadPool(24)
     private val backupServerPool = Executors.newFixedThreadPool(12)
     // Keep detail/season lookups responsive even while catalog providers are busy.
-    private val seasonPagePool = Executors.newFixedThreadPool(4)
+    private val seasonPagePool = Executors.newFixedThreadPool(10)
 
 
 
     // ── HTTP Client ────────────────────────────────────────────────────
 
+    private val sharedConnectionPool = okhttp3.ConnectionPool(32, 5, TimeUnit.MINUTES)
+    private val sharedDispatcher = okhttp3.Dispatcher().apply {
+        maxRequests = 64
+        maxRequestsPerHost = 16
+    }
+
     private val http = OkHttpClient.Builder()
         .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-        .connectTimeout(6, TimeUnit.SECONDS)
-
+        .connectionPool(sharedConnectionPool)
+        .dispatcher(sharedDispatcher)
+        .connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(4, TimeUnit.SECONDS)
-        .callTimeout(7, TimeUnit.SECONDS)
-
+        .callTimeout(6, TimeUnit.SECONDS)
         .followRedirects(true)
-
         .followSslRedirects(true)
+        .retryOnConnectionFailure(true)
+        .build()
 
+    private val probeHttp = http.newBuilder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .callTimeout(4, TimeUnit.SECONDS)
         .build()
 
     private val providerPageHttp = http.newBuilder()
@@ -132,8 +146,12 @@ object MultiProviderRepository {
     )
     private val serverFallbackCache = ConcurrentHashMap<String, ServerFallbackSnapshot>()
     private data class StreamProbe(val checkedAt: Long, val playable: Boolean)
+    data class ResolvedStreamResult(val url: String, val referer: String)
     private val streamProbeCache = ConcurrentHashMap<String, StreamProbe>()
-    private const val STREAM_PROBE_TTL_MS = 20_000L
+    private val embedAliveCache = ConcurrentHashMap<String, StreamProbe>()
+    private val resolvedStreamCache = ConcurrentHashMap<String, Pair<Long, ResolvedStreamResult>>()
+    private const val STREAM_PROBE_TTL_MS = 30_000L
+    private const val STREAM_RESOLVE_TTL_MS = 45_000L
     private const val SERVER_FALLBACK_TTL = 10 * 60 * 1000L
     private const val SERVER_FALLBACK_PARTIAL_TTL = 45 * 1000L
     private const val SERVER_FALLBACK_EMPTY_TTL = 90 * 1000L
@@ -142,8 +160,8 @@ object MultiProviderRepository {
     private const val SEASON_ENRICHMENT_RETRY_MS = 5 * 60 * 1000L
     private const val SEASON_ENRICHMENT_PARTIAL_RETRY_MS = 5 * 60 * 1000L   // was 30s — give enrichment more time between retries
     private const val SEASON_ENRICHMENT_ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000L
-    private val seasonMirrorPool = Executors.newFixedThreadPool(6)
-    private val seasonAggregationPool = Executors.newSingleThreadExecutor()
+    private val seasonMirrorPool = Executors.newFixedThreadPool(10)
+    private val seasonAggregationPool = Executors.newFixedThreadPool(4)
     private val seasonAggregationInFlight = ConcurrentHashMap.newKeySet<String>()
 
 
@@ -152,11 +170,10 @@ object MultiProviderRepository {
 
 
     private fun catalogCacheKey(type: ArabseedType?, page: Int): String = when (type) {
-        // The v2 namespace deliberately invalidates snapshots created while
-        // one configured provider was disabled or category pages were primary-only.
-        ArabseedType.MOVIE -> "movies:v5:$page"
-        ArabseedType.SERIES -> "series:v5:$page"
-        null -> "catalog:v5:$page"
+        // Bumped to v6 so fixed mirrors and Arab/Turkish/Korean/Asian feeds refresh immediately.
+        ArabseedType.MOVIE -> "movies:v6:$page"
+        ArabseedType.SERIES -> "series:v6:$page"
+        null -> "catalog:v6:$page"
     }
 
     fun loadCachedCatalog(type: ArabseedType?, page: Int = 1): List<ArabseedItem>? {
@@ -170,7 +187,7 @@ object MultiProviderRepository {
     }
 
     fun loadCachedSearch(query: String): List<ArabseedItem>? {
-        val key = "search:v7:" + query.trim().lowercase()
+        val key = "search:v9:" + query.trim().lowercase()
         if (query.isBlank()) return null
         searchCache[key]?.let { cached ->
             if (System.currentTimeMillis() - cached.first <= 14L * 24 * 60 * 60 * 1000) return cached.second
@@ -182,7 +199,7 @@ object MultiProviderRepository {
 
     fun loadCachedDetail(pageUrl: String): ArabseedDetail? {
         detailCache[pageUrl]?.let { if (it.servers.isNotEmpty()) return it }
-        val snapshot = CatalogDiskCache.loadDetail("providers:detail:v3:" + pageUrl) ?: return null
+        val snapshot = CatalogDiskCache.loadDetail("providers:detail:v4:" + pageUrl) ?: return null
         if (snapshot.value.servers.isEmpty()) return null
         detailCache[pageUrl] = snapshot.value
         detailCacheAt[pageUrl] = snapshot.savedAt
@@ -193,7 +210,7 @@ object MultiProviderRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonCache[pageUrl]?.let { return it }
-        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v24:" + pageUrl) ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v26:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
         seasonCache[pageUrl] = normalized
         seasonCacheAt[pageUrl] = snapshot.savedAt
@@ -201,7 +218,7 @@ object MultiProviderRepository {
     }
 
     fun loadCachedMergedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
-        val snapshot = CatalogDiskCache.loadSeasonBundle("combined:seasons:v23:$pageUrl") ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("combined:seasons:v26:$pageUrl") ?: return null
         if (System.currentTimeMillis() - snapshot.savedAt > SEASON_TTL) return null
         return SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
     }
@@ -246,7 +263,7 @@ object MultiProviderRepository {
             mergeProviderSeasonBundles(listOf(seasonItem to seasonBundle, seriesItem to existing))
         }
         if (merged.seasons.isNotEmpty() || merged.relatedParts.isNotEmpty()) {
-            CatalogDiskCache.saveSeasonBundle("combined:seasons:v23:${seriesItem.pageUrl}", merged)
+            CatalogDiskCache.saveSeasonBundle("combined:seasons:v26:${seriesItem.pageUrl}", merged)
         }
     }
 
@@ -358,7 +375,7 @@ object MultiProviderRepository {
             id = "arabseed",
             name = "عرب سيد",
             baseUrl = "https://m.myseed.tv",
-            mirrorDomains = listOf("https://arabseed.cam", "https://arabseed.ac"),
+            mirrorDomains = emptyList(),
             moviesPath = "/movies/page/{page}/",
             seriesPath = "/series/page/{page}/",
             searchPath = "/find/?word={q}",
@@ -371,8 +388,7 @@ object MultiProviderRepository {
             isPrimary = true,
         ),
 
-        // ── 2. عرب سيد الأصلي (ArabSeed Here) ──────────────────────────
-        // Disabled because .here is an unresolvable test domain
+        // ── 2. عرب سيد الأصلي (ArabSeed Here - merged into myseed.name under cimanow) ──
         ProviderConfig(
             id = "arabseed_here",
             name = "عرب سيد الأصلي",
@@ -380,7 +396,7 @@ object MultiProviderRepository {
             mirrorDomains = emptyList(),
             moviesPath = "/category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/page/{page}/",
             seriesPath = "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/page/{page}/",
-            searchPath = "/search?s={q}",
+            searchPath = "/find?word={q}",
             cardSelectors = listOf(
                 "a[href*='/film/']", "a[href*='/episode/']",
                 "article a", ".post-item a", ".item-details a",
@@ -394,19 +410,20 @@ object MultiProviderRepository {
             id = "wecima",
             name = "وي سيما",
             baseUrl = "https://wecima.cc",
-            mirrorDomains = listOf("https://wecima.tips", "https://mywecima.shop", "https://wecima.cam"),
+            mirrorDomains = emptyList(),
             moviesPath = "/movies/page/{page}/",
-            seriesPath = "/series/page/{page}/",
+            seriesPath = "/arabic-series/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
-                "a[href*='watch-']", ".Thumb--GridItem a", ".GridItem a",
-                "div.Block--Item a", "article a",
+                "li.video-grid div.thumb a", "li.video-grid a",
+                "a[href*='/video/']", "a[href*='watch-']",
+                ".Thumb--GridItem a", ".GridItem a", "div.Block--Item a", "article a",
             ),
-            titleSelectors = listOf("strong.hasyear", "h3", "h2", ".Title", "[title]"),
+            titleSelectors = listOf("img[alt]", "h3", "h2", "strong.hasyear", ".Title", "[title]"),
             isPrimary = true,
         ),
 
-        // ── 4. أكوام (Akwam - احتياطي) ─────────────────────────────────
+        // ── 4. أكوام (Akwam) ─────────────────────────────────────────
         ProviderConfig(
             id = "akwam",
             name = "أكوام",
@@ -419,131 +436,192 @@ object MultiProviderRepository {
                 "a.br-card-link[href*='/akfilm-']",
                 "a.br-card-link[href*='/akdrama-']",
                 "a.br-card-link[href*='/akseries-']",
+                "a.br-card-link",
                 "a[href*='/akfilm-']",
                 "a[href*='/akdrama-']",
                 "a[href*='/akseries-']",
                 ".br-card a",
             ),
-            titleSelectors = listOf("h3.br-card-title", "h3", "h2", ".title"),
+            titleSelectors = listOf("h3.br-card-title", "h3", "h2", ".title", "img[alt]", "[title]"),
             isPrimary = true,
         ),
 
-        // ── 3. فاصل إعلاني (FaselHD) ──────────────────────────────────
+        // ── 5. فاصل إعلاني (FaselHD - faselhd.online -> vd2734.fasel4hdx.space) ──
         ProviderConfig(
             id = "faselhd",
             name = "فاصل إعلاني",
-            baseUrl = "https://faselhd.top",
-            mirrorDomains = listOf("https://www.fasel-hd.co", "https://faselhd.club"),
-            moviesPath = "/movies/?page={page}",
-            seriesPath = "/series/?page={page}",
-            searchPath = "/?s={q}",
+            baseUrl = "https://faselhd.online",
+            mirrorDomains = listOf("https://fasel4hdx.space"),
+            moviesPath = "/movies?page={page}",
+            seriesPath = "/series?page={page}",
+            searchPath = "/search?q={q}",
             cardSelectors = listOf(
+                "a[href*='/%D9%81%D9%8A%D9%84%D9%85-']",
+                "a[href*='/%d9%81%d9%8a%d9%84%d9%85-']",
+                "a[href*='/%D9%85%D8%B3%D9%84%D8%B3%D9%84-']",
+                "a[href*='/%d9%85%d8%b3%d9%84%d8%b3%d9%84-']",
                 ".postDiv a", "div.list-movie a", "a.list-title",
                 "a[href*='/movie/']", "a[href*='/serie/']", "article a",
             ),
-            titleSelectors = listOf(".list-title", ".post__title", "h2", "h3"),
+            titleSelectors = listOf(".list-title", ".post__title", ".h1", "h2", "h3", "img[alt]", "[title]"),
             isPrimary = true,
         ),
 
-        // ── 4. إيجي بست (EgyBest) ──────────────────────────────────────
-        // Live-tested 2026-11-14: egybest.live → 20 results ✅
-        // IMPORTANT: moviesPath uses browse.php NOT /movies/
+        // ── 6. إيجي بست (EgyBest.live disabled — fake CPA survey wall) ──
         ProviderConfig(
             id = "egybest",
             name = "إيجي بست",
             baseUrl = "https://egybest.live",
-            mirrorDomains = listOf("https://egybest.rest"),
+            mirrorDomains = emptyList(),
             moviesPath = "/browse.php?type=movie&page={page}&lang=ar",
             seriesPath = "/browse.php?type=series&page={page}&lang=ar",
-            searchPath = "/search/?q={q}",
-            cardSelectors = listOf(
-                "a.movie-card", ".movies-list-full a.movie",
-                ".content-box a", "a.movie",
-            ),
-            titleSelectors = listOf("h2", "h3", ".title", ".movie-title", "span"),
+            searchPath = "/search.php?q={q}&lang=ar",
+            cardSelectors = listOf("a.movie-card"),
+            titleSelectors = listOf("h2", "h3", ".title"),
+            enabled = false,
+            isPrimary = false,
         ),
 
-        // ── 5. شاهد فور يو (Shahid4U) ──────────────────────────────────
+        // ── 6b. إيجي بست الأصلي (iEgyBest Classic & New Archive) ─────────
+        ProviderConfig(
+            id = "iegybest",
+            name = "إيجي بست الأصلي",
+            baseUrl = "https://iegybest.cimawbas.tv",
+            mirrorDomains = emptyList(),
+            moviesPath = "/movies.php?page={page}",
+            seriesPath = "/all-series.php?page={page}",
+            searchPath = "/search.php?keywords={q}",
+            cardSelectors = listOf(
+                "a[href*='watch.php?vid=']",
+                "a[href*='category.php?cat=']",
+                ".pm-video-thumb a",
+                "article a",
+            ),
+            titleSelectors = listOf("h3", "h2", "img[alt]", "[title]"),
+            isPrimary = true,
+        ),
+
+        // ── 7. توب سينما (TopCinema - أفلام ومسلسلات أجنبي وآسيوي وأنمي) ─
+        ProviderConfig(
+            id = "topcinema",
+            name = "توب سينما",
+            baseUrl = "https://topcinemaa.tv",
+            mirrorDomains = listOf("https://topcinema.cam"),
+            moviesPath = "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a-8/page/{page}/",
+            seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/page/{page}/",
+            searchPath = "/?s={q}",
+            cardSelectors = listOf(".Small--Box a", ".Block--Item a", "article a"),
+            titleSelectors = listOf("h3.title", "h3", "strong.hasyear", "[title]", "img[alt]"),
+            isPrimary = true,
+        ),
+
+        // ── 8. شاهد فور يو (Shahid4U - shahid4u.bid / shahid4u.food) ───
         ProviderConfig(
             id = "shahid4u",
             name = "شاهد فور يو",
-            baseUrl = "https://shahid4u.cam",
-            mirrorDomains = listOf("https://shahid4u.tv", "https://shahid4u.to"),
-            moviesPath = "/category/movies/page/{page}/",
-            seriesPath = "/category/series/page/{page}/",
+            baseUrl = "https://shahid4u.bid",
+            mirrorDomains = listOf("https://shahid4u.food"),
+            moviesPath = "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/page/{page}/",
+            seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
+                "a[href*='%d9%85%d8%b4%d8%a7%d9%87%d8%af%d8%a9-']",
                 ".MovieItem a", "article.MovieItem a",
                 ".GridItem a", "article a",
                 "a[href*='/movie/']", "a[href*='/series/']",
             ),
-            titleSelectors = listOf("h3", "h2", ".Title", "strong", "[title]"),
+            titleSelectors = listOf("h3", "h2", ".Title", "strong", "[title]", "img[alt]"),
+            enabled = true,
+            isPrimary = true,
         ),
 
-        // ── 6. سيما فور يو (Cima4U) ────────────────────────────────────
+        // ── 8b. شاهد فور يو VIP (Shahid4U.si - direct HLS + multi-server API) ──
+        ProviderConfig(
+            id = "shahid4u_si",
+            name = "شاهد فور يو VIP",
+            baseUrl = "https://www.shahid4u.si",
+            mirrorDomains = emptyList(),
+            moviesPath = "/movies/?page={page}",
+            seriesPath = "/series/?page={page}",
+            searchPath = "/search?q={q}",
+            cardSelectors = listOf(
+                "div.grid a.pc",
+                "a.pc[href*='/series/'], a.pc[href*='/movie/']",
+                "a[href*='/series/'], a[href*='/movie/']",
+                "article a",
+            ),
+            titleSelectors = listOf("h3", "h2", ".title", "[title]", "img[alt]"),
+            enabled = true,
+            isPrimary = true,
+        ),
+
+        // ── 9. سيما فور يو (Cima4U) ────────────────────────────────────
         ProviderConfig(
             id = "cima4u",
             name = "سيما فور يو",
             baseUrl = "https://c4u.cam",
             mirrorDomains = listOf("https://cima4u.watch", "https://cima4u4k.site"),
-            moviesPath = "/movies/?page={page}",
-            seriesPath = "/series/?page={page}",
-            searchPath = "/?s={q}",
+            moviesPath = "/films?page={page}",
+            seriesPath = "/seriestv?page={page}",
+            searchPath = "/search?q={q}",
             cardSelectors = listOf(
+                "a.br-card-link", "article.br-card a",
                 ".MovieBlock a", ".Block--Movie a",
                 "article.MovieBlock a", "a[href*='/watch/']",
                 ".movies-list a", "article a",
             ),
-            titleSelectors = listOf("h3", "h2", ".Title", "strong", "[title]"),
+            titleSelectors = listOf("h3", "h2", ".Title", "img[alt]", "[title]"),
+            isPrimary = true,
         ),
 
-        // ── 7. فشار (Fushaar) ──────────────────────────────────────────
+        // ── 10. فشار (Fushaar - live mirror fushaar.cam) ─────────────────
         ProviderConfig(
             id = "fushaar",
             name = "فشار",
-            baseUrl = "https://fushaar.com",
+            baseUrl = "https://fushaar.cam",
             mirrorDomains = emptyList(),
-            moviesPath = "/movies/page/{page}/",
-            seriesPath = "/series/page/{page}/",
-            searchPath = "/?s={q}",
+            moviesPath = "/films?page={page}",
+            seriesPath = "/seriestv?page={page}",
+            searchPath = "/search?q={q}",
             cardSelectors = listOf(
-                "article.poster a", "article.movie a", "article a", ".poster a",
+                "a.br-card-link", "article.poster a", "article.movie a", "article a", ".poster a",
             ),
-            titleSelectors = listOf(".title", "h3", "h2", "[title]"),
+            titleSelectors = listOf("h3", "h2", ".title", "img[alt]", "[title]"),
         ),
 
-        // ── 9. عرب ليونز (ArabLionz) ───────────────────────────────────
+        // ── 11. عرب ليونز (ArabLionz) ───────────────────────────────────
         ProviderConfig(
             id = "arablionz",
             name = "عرب ليونز",
             baseUrl = "https://arablionz.cam",
             mirrorDomains = emptyList(),
-            moviesPath = "/movies/page/{page}/",
-            seriesPath = "/series/page/{page}/",
-            searchPath = "/?s={q}",
+            moviesPath = "/films?page={page}",
+            seriesPath = "/seriestv?page={page}",
+            searchPath = "/search?q={q}",
             cardSelectors = listOf(
+                "a.tt-card-link", "article.tt-card a",
                 "article a", ".MovieBlock a", "h2.entry-title a", "a[href*='/movie/']",
             ),
-            titleSelectors = listOf("h2", "h3", ".Title", ".entry-title", "[title]"),
+            titleSelectors = listOf("h2", "h3", ".Title", ".entry-title", "img[alt]", "[title]"),
+            isPrimary = true,
         ),
 
-        // ── 10. لودي نت (Lodynet) ──────────────────────────────────────
-        // Live-tested 2026-11-14: 12-44 results ✅ (Indian/Asian content)
+        // ── 12. لودي نت (Lodynet - كوري وتركي وهندي وصيني قديم وجديد) ─────
         ProviderConfig(
             id = "lodynet",
             name = "لودي نت",
             baseUrl = "https://lodynet.watch",
-            mirrorDomains = listOf("https://lodynet.com"),
-            moviesPath = "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a%d8%a9/page/{page}/",
-            seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d9%87/page/{page}/",
+            mirrorDomains = emptyList(),
+            moviesPath = "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9-a/page/{page}/",
+            seriesPath = "/korean-series-b/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
+                ".ItemNewly a", ".SuggestionsItems",
                 "a[href*='movie-']", "a[href*='video-']", "a[href*='episode-']",
-                "a[href*='%d9%85%d8%b3%d9%84%d8%b3%d9%84-']", "a[href*='%d9%81%d9%8a%d9%84%d9%85-']",
-                "article.bt a", ".content-box article a", ".post-item a", ".item-details a",
-                "h2.entry-title a", "article a",
+                "article.bt a", ".content-box article a", ".post-item a", "article a",
             ),
-            titleSelectors = listOf("h2", "h3", ".entry-title", ".title", "[title]"),
+            titleSelectors = listOf(".NewlyTitle", ".SuggestionsTitle", "[title]", "h2", "h3", ".entry-title", "img[alt]"),
+            isPrimary = true,
         ),
 
         // ── آرا دراما (Aradrama - كوري وأسيوي أساسي) ──────────────────
@@ -551,18 +629,18 @@ object MultiProviderRepository {
             id = "aradrama",
             name = "آرا دراما",
             baseUrl = "https://aradramatv.cc",
-            mirrorDomains = listOf("https://aradramatv.com"),
+            mirrorDomains = listOf("https://aradramatv.net"),
             moviesPath = "/category/%d8%a7%d9%84%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%84%d8%a2%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/page/{page}/",
             seriesPath = "/category/serie/korea/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
                 "article a", ".post-item a", "div.post a", "article.post a", "h2.entry-title a",
             ),
-            titleSelectors = listOf("h2.entry-title", "h2", "h3", ".title", "[title]"),
+            titleSelectors = listOf("h2.entry-title", "h2", "h3", ".title", "[title]", "img[alt]"),
             isPrimary = true,
         ),
 
-        // ── اسيا تو تي في (Asia2tv - كوري وأسيوي أساسي) ────────────────
+        // ── اسيا تو تي في (Asia2tv - موقع مغلق يتطلب اشتراك/تسجيل دخول) ────────────────
         ProviderConfig(
             id = "asia2tv",
             name = "اسيا تو تي في",
@@ -576,89 +654,91 @@ object MultiProviderRepository {
                 ".movie-item a", ".post-item a", "article a",
             ),
             titleSelectors = listOf("h2", "h3", ".title", "[title]"),
-            isPrimary = true,
+            enabled = false,
+            isPrimary = false,
         ),
 
-        // ── 11. قصة عشق (Esheeq - تركي أساسي) ──────────────────────────
-        // Live-tested: Turkish series & movies primary source
-        // Uses shot90.com base64 redirect — AdBypassHelper.decodeShot90Url() handles this
+        // ── قصة عشق (Esheeq - تركي أساسي قديم وجديد) ────────────────────
         ProviderConfig(
             id = "esheeq",
             name = "قصة عشق",
             baseUrl = "https://qesset.net",
             mirrorDomains = listOf("https://qeseh.net", "https://3sk.tv", "https://3sk.biz"),
             moviesPath = "/category/yeni-filmler/page/{page}/",
-            seriesPath = "/son-bolumler/page/{page}/",
+            seriesPath = "/discover/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
-                "article a[href*='shot90']", "article a",
+                "article a", "a[href*='/clarus/']", "article a[href*='shot90']",
                 "div.thumb a", ".video-card a",
             ),
-            titleSelectors = listOf("h2", "h3", ".title", ".entry-title"),
+            titleSelectors = listOf("h2", "h3", ".title", ".entry-title", "[title]", "img[alt]"),
             isPrimary = true,
         ),
 
-        // ── 12. موفيز لاند (Movizland) ─────────────────────────────────
+        // ── موفيز لاند (Movizland - POST view=1 supported) ─────────────
         ProviderConfig(
             id = "movizland",
             name = "موفيز لاند",
             baseUrl = "https://movizland.life",
             mirrorDomains = emptyList(),
             moviesPath = "/category/movies/page/{page}/",
-            seriesPath = "/category/series/page/{page}/",
+            seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d9%88%d9%86-%d9%84%d8%a7%d9%8a%d9%86/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf(
                 "article.MovieItem a", ".MovieItem a",
                 ".Block--Item a", "article a",
                 "a[href*='/movie/']", "a[href*='/series/']",
             ),
-            titleSelectors = listOf("h3", "h2", ".Title", "strong.hasyear", "[title]"),
+            titleSelectors = listOf("h3", "h2", ".Title", "strong.hasyear", "[title]", "img[alt]"),
+            enabled = true,
+            isPrimary = false,
         ),
 
-        // ── 13. بريستيج (Prestige) ─────────────────────────────────────
+        // ── بريستيج (Prestige - عربي ومصري وشامي وخليجي وتركي وآسيوي 2021-2026) ─
         ProviderConfig(
             id = "prestige",
             name = "بريستيج",
             baseUrl = "https://hd1.brstej.com",
             mirrorDomains = listOf("https://prstej.asia", "https://prstej.lat", "https://brstej.com"),
-            moviesPath = "/cat03.php?cat=aflam02-2024",
-            seriesPath = "/cat03.php?cat=arab8-2025",
-            searchPath = "/?s={q}",
+            moviesPath = "/cat03.php?cat=aflam02-2024&page={page}",
+            seriesPath = "/cat03.php?cat=arab8-2025&page={page}",
+            searchPath = "/search.php?keywords={q}",
             cardSelectors = listOf(
+                "a.pcg-series-card",
+                "article.pmc-card a.pmc-photo",
+                "article.prs-card a.prs-image",
                 ".pgh-card a", ".pgh-series-card a", ".ptoday-card a",
                 ".movie__block a", "article a", "a[href*='video.php']", "a[href*='watch.php']",
-                ".col-md-2 a", ".col-sm-3 a",
-                "a[href*='/movie/']", "a[href*='/series/']",
             ),
-            titleSelectors = listOf(".pgh-card-title", ".pgh-series-name", "h2", "h3", ".Title", "[title]"),
+            titleSelectors = listOf("[aria-label]", "[title]", ".pmc-title", ".prs-title", ".pgh-card-title", ".pgh-series-name", "h2", "h3", "img[alt]"),
+            isPrimary = true,
         ),
 
-        // ── 14. سيما كلوب (CimaClub) ───────────────────────────────────
+        // ── سيما كلوب (CimaClub - cimaclub.live + cimaclub1.ink) ───────
         ProviderConfig(
             id = "cimaclub",
             name = "سيما كلوب",
             baseUrl = "https://cimaclub.live",
-            mirrorDomains = listOf("https://cimaclub.living"),
+            mirrorDomains = listOf("https://cimaclub1.ink", "https://cimaclub.living"),
             moviesPath = "/category/movies/page/{page}/",
             seriesPath = "/category/series/page/{page}/",
-            searchPath = "/?s={q}",
+            searchPath = "/search?q={q}",
             cardSelectors = listOf(
-                "article.MovieItem a", ".MovieItem a",
+                "a.card", "article.MovieItem a", ".MovieItem a",
                 "div.GridItem a", "article a",
-                "h3.Title a", "a[href*='/watch/']",
+                "h3.Title a", "a[href*='/watch/']", "a[href*='watch.php?vid=']",
             ),
-            titleSelectors = listOf("h3.Title", "h3", "h2", ".Title", "[title]"),
+            titleSelectors = listOf("h3.Title", "h3", "h2", ".Title", "[title]", "img[alt]"),
+            enabled = true,
+            isPrimary = true,
         ),
 
-        // The remaining documented sources are first-class providers too.
-        // These selectors stay intentionally broad and only read public catalog
-        // links; provider-specific playback still uses the page's normal embeds.
-        // Live-tested 2026-11-14: egydead.surf → 403; egidead.cam is the working mirror ✅
+        // ── إيجي ديد (EgyDead) ─────────────────────────────────────────
         ProviderConfig(
             id = "egydead",
             name = "إيجي ديد",
-            baseUrl = "https://egidead.cam",
-            mirrorDomains = listOf("https://egydead.surf"),
+            baseUrl = "https://egydead.blog",
+            mirrorDomains = listOf("https://egidead.cam", "https://egydead.surf"),
             moviesPath = "/movies/page/{page}/",
             seriesPath = "/series/page/{page}/",
             searchPath = "/?s={q}",
@@ -666,41 +746,44 @@ object MultiProviderRepository {
                 "li.movieItem a", "article.post-item a",
                 "div.movie-card a", "a.box", "article a",
             ),
-            titleSelectors = listOf("h2.title", "span.movie-title", "h2", "h3", "[title]"),
+            titleSelectors = listOf("h2.title", "span.movie-title", "h2", "h3", "[title]", "img[alt]"),
         ),
-        // Live-tested 2026-11-14: cimanow.cc is the working domain ✅
+        // ── سيما ناو / ماي سيد نايم (CimaNow via myseed.name) ──────────
         ProviderConfig(
             id = "cimanow",
             name = "سيما ناو",
-            baseUrl = "https://cimanow.cc",
-            mirrorDomains = listOf("https://cimanow.info", "https://cimanow.net"),
-            moviesPath = "/category/%d8%a7%d9%84%d8%a7%d9%81%d9%84%d8%a7%d9%85/page/{page}/",
-            seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa/page/{page}/",
-            searchPath = "/?s={q}",
+            baseUrl = "https://myseed.name",
+            mirrorDomains = emptyList(),
+            moviesPath = "/category/%D8%A7%D9%81%D9%84%D8%A7%D9%85-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/page/{page}/",
+            seriesPath = "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A7%D8%AC%D9%86%D8%A8%D9%8A/page/{page}/",
+            searchPath = "/search?s={q}",
             cardSelectors = listOf(
-                "a[href*='film-']", "div.card a", "article a",
-                "div.movie-box a", "a[href*='/episode/']",
+                "a.show-card", "a[href*='/film/']", "a[href*='/episode/']", "a[href*='/series/']",
+                "a[href*='film-']", "div.card a", "article a", "div.movie-box a",
             ),
-            titleSelectors = listOf("h3.card-title", "div.title", "h3", "h2", "[title]"),
+            titleSelectors = listOf("h3.card-title", "div.title", "h3", "h2", "[title]", "img[alt]"),
+            enabled = true,
+            isPrimary = true,
         ),
-        // Live-tested 2026-11-14: WordPress theme — standard /?s= search ✅
+        // ── سيما وبس (CimaWbas.rest - PHPMelody .php routes) ───────────
         ProviderConfig(
             id = "cimawbas",
             name = "سيما وبس",
             baseUrl = "https://cimawbas.rest",
-            mirrorDomains = listOf("https://cimawebas.com", "https://cima-wbas.net"),
-            moviesPath = "/movies/page/{page}/",
-            seriesPath = "/series/page/{page}/",
-            searchPath = "/?s={q}",
+            mirrorDomains = emptyList(),
+            moviesPath = "/movies.php?page={page}",
+            seriesPath = "/all-series.php?page={page}",
+            searchPath = "/search.php?keywords={q}",
             cardSelectors = listOf(
+                "a[href*='watch.php?vid=']", "a[href*='category.php?cat=']",
+                ".pm-video-thumb a", "li.pm-li-video a", "div.pm-li-category a",
                 "a[href*='film-']", "article a",
-                "li.pm-li-video a", "div.pm-li-category a",
-                "a[href*='watch.php?vid=']",
             ),
-            titleSelectors = listOf("h3 a", "span.pm-video-title", "h3", "h2", "[title]"),
+            titleSelectors = listOf("h3 a", "span.pm-video-title", "h3", "h2", "[title]", "img[alt]"),
+            enabled = true,
+            isPrimary = true,
         ),
-        // Live-tested 2026-11-14: DooPlay theme — 211 items ✅
-        // moviesPath = /movies/page/{page}/ ; searchPath = /?s={q}
+        // ── سيما فور أب (disabled — metadata-only JustWatch clone, no video player) ─
         ProviderConfig(
             id = "cima4up",
             name = "سيما فور أب",
@@ -714,8 +797,10 @@ object MultiProviderRepository {
                 "a[href*='/title/']", "div.c4u-card a",
             ),
             titleSelectors = listOf("h2.c4u-card-title", "span.title", "h2", "h3", "[title]"),
+            enabled = false,
+            isPrimary = false,
         ),
-        // Live-tested 2026-11-14: WordPress theme ✅
+        // ── موفيز فور يو (disabled 404 / non-Arabic) ───────────────────
         ProviderConfig(
             id = "movies4u",
             name = "موفيز فور يو",
@@ -729,9 +814,9 @@ object MultiProviderRepository {
                 "div.movie-card a", "a[href*='/movie/']",
             ),
             titleSelectors = listOf("h2", "span.movie-title", "h3", "[title]"),
+            enabled = false,
         ),
-        // Live-tested 2026-11-14: DooPlay theme — 89 items ✅
-        // seriesPath = /series/page/{page}/ ; searchPath = /?s={q}
+        // ── موفي واتشر (disabled — metadata-only TMDB clone, no video player) ─
         ProviderConfig(
             id = "moviewatcher",
             name = "موفي واتشر",
@@ -745,8 +830,10 @@ object MultiProviderRepository {
                 "div.media-card a", "a[href*='/title/']",
             ),
             titleSelectors = listOf("h3.media-title", "span.title", "h3", "h2", "[title]"),
+            enabled = false,
+            isPrimary = false,
         ),
-        // Live-tested 2026-11-14: spacemov.xyz is the working domain ✅
+        // ── سبيس موف (disabled 404) ────────────────────────────────────
         ProviderConfig(
             id = "spacemov",
             name = "سبيس موف",
@@ -762,18 +849,20 @@ object MultiProviderRepository {
                 "article.item a",
             ),
             titleSelectors = listOf("div.data h3 a", "h3", "h2", "[title]"),
+            enabled = false,
         ),
+        // ── موفي فليكس (disabled empty title / SPA block) ──────────────
         ProviderConfig(
             id = "moviflex",
             name = "موفي فليكس",
             baseUrl = "https://moviflex.net",
-            // The configured mirrors failed DNS resolution in the live route check.
             mirrorDomains = emptyList(),
             moviesPath = "/movie/page/{page}/",
             seriesPath = "/series/page/{page}/",
             searchPath = "/?s={q}",
             cardSelectors = listOf("div.movie-item a.film-poster", "div.flw-item a.film-poster", "a.film-poster"),
             titleSelectors = listOf("h3.film-name a", "h3", "h2", "[title]"),
+            enabled = false,
         ),
 
     )
@@ -789,14 +878,14 @@ object MultiProviderRepository {
         return pageUrl.contains("akw.cam") || pageUrl.contains("akwam")
             || pageUrl.contains("wecima") || pageUrl.contains("myweecima")
             || pageUrl.contains("fasel") || pageUrl.contains("fasel4k") || pageUrl.contains("faselhd")
-            || pageUrl.contains("egybest") || pageUrl.contains("lodynet")
+            || pageUrl.contains("egybest") || pageUrl.contains("iegybest") || pageUrl.contains("cimawbas")
+            || pageUrl.contains("lodynet") || pageUrl.contains("topcinema") || pageUrl.contains("aradrama")
+            || pageUrl.contains("qesset") || pageUrl.contains("qeseh") || pageUrl.contains("q-ask") || pageUrl.contains("3sk")
             || pageUrl.contains("brstej") || pageUrl.contains("prstej")
-            || pageUrl.contains("q-ask") || pageUrl.contains("3sk")
             || pageUrl.contains("c4u.cam") || pageUrl.contains("cima4u")
-            || pageUrl.contains("cimaclub")
-            || pageUrl.contains("shahid4u")
-            || pageUrl.contains("movizland")
-            || pageUrl.contains("ivbestt") || pageUrl.contains("ivybestt")
+            || pageUrl.contains("fushaar")
+            || pageUrl.contains("arablionz")
+            || pageUrl.contains("egidead") || pageUrl.contains("egydead")
             || pageUrl.contains("mycima") || pageUrl.contains("my-cima")
             || pageUrl.contains("aflam") || pageUrl.contains("cima")
     }
@@ -804,7 +893,7 @@ object MultiProviderRepository {
     private val providerContentHostRoots: List<String> by lazy {
         PROVIDERS.flatMap { provider -> listOf(provider.baseUrl) + provider.mirrorDomains }
             .mapNotNull { domain -> runCatching { java.net.URI(domain).host }.getOrNull() } + listOf(
-            "myseed.tv", "wecima.casa", "fasel4k.site",
+            "myseed.tv", "wecima.casa", "fasel4k.site", "topcinemaa.tv",
             "wecima.cam", "c4u.cam", "cimaclub.live",
             "shahid4u.to", "shahid4u.cam", "movizland.com",
             "prstej.asia", "aflam.to", "mycima.work",
@@ -836,12 +925,22 @@ object MultiProviderRepository {
                 value = runCatching { java.net.URLDecoder.decode(value, "UTF-8") }
                     .getOrDefault(value)
             }
+            if (value.startsWith("aHR0", ignoreCase = false)) {
+                runCatching {
+                    String(android.util.Base64.decode(value, android.util.Base64.DEFAULT), Charsets.UTF_8).trim()
+                }.getOrNull()?.takeIf { it.startsWith("http") }?.let { value = it }
+            }
             value
+        }
+        if (candidate.contains("shot90.com", ignoreCase = true)) {
+            AdBypassHelper.decodeShot90Url(candidate)?.takeIf { isProviderContentUrl(it, referencePageUrl) }?.let { return it }
         }
         return values.firstOrNull { isProviderContentUrl(it, referencePageUrl) }
     }
 
 
+
+    internal fun providerIdForUrl(url: String): String? = getProviderForUrl(url)?.id
 
     private fun getProviderForUrl(url: String): ProviderConfig? {
         return PROVIDERS.firstOrNull { p ->
@@ -855,8 +954,9 @@ object MultiProviderRepository {
 
             url.contains("fasel") -> PROVIDERS.firstOrNull { it.id == "faselhd" }
 
+            url.contains("iegybest") || url.contains("cimawbas") -> PROVIDERS.firstOrNull { it.id == "iegybest" }
             url.contains("egybest") || url.contains("ivbestt") -> PROVIDERS.firstOrNull { it.id == "egybest" }
-
+            url.contains("topcinema") -> PROVIDERS.firstOrNull { it.id == "topcinema" }
             url.contains("lodynet") -> PROVIDERS.firstOrNull { it.id == "lodynet" }
 
             url.contains("brstej") || url.contains("prstej") -> PROVIDERS.firstOrNull { it.id == "prestige" }
@@ -868,6 +968,8 @@ object MultiProviderRepository {
             url.contains("c4u") -> PROVIDERS.firstOrNull { it.id == "cima4u" }
 
             url.contains("cimaclub") -> PROVIDERS.firstOrNull { it.id == "cimaclub" }
+
+            url.contains("shahid4u.si") -> PROVIDERS.firstOrNull { it.id == "shahid4u_si" }
 
             url.contains("shahid4u") -> PROVIDERS.firstOrNull { it.id == "shahid4u" }
 
@@ -897,6 +999,17 @@ object MultiProviderRepository {
     private fun fetchHtml(url: String, referer: String = ""): String =
         fetchHtmlWithClient(url, referer, http)
 
+    private fun fetchHtmlAndFinalUrl(url: String, referer: String = ""): Pair<String, String> {
+        var finalUrl = url
+        val body = fetchHtmlWithClient(
+            url,
+            referer,
+            http,
+            onFinalUrl = { redirected -> finalUrl = redirected },
+        )
+        return body to finalUrl
+    }
+
     private fun fetchSeasonHtml(url: String, referer: String = ""): String =
         fetchHtmlWithClient(url, referer, seasonHttp)
 
@@ -913,16 +1026,31 @@ object MultiProviderRepository {
         val bases = (listOfNotNull(cachedBase, provider.baseUrl) + provider.mirrorDomains)
             .distinct()
             .filterNot { isProviderRouteCoolingDown(provider, it, now) }
+        val isSearchRequest = path.contains("search", ignoreCase = true) ||
+            path.contains("?s=", ignoreCase = true) ||
+            path.contains("?q=", ignoreCase = true) ||
+            path.contains("keywords=", ignoreCase = true)
         for (base in bases) {
             val root = base.trimEnd('/')
             var effectiveBase = root
             var finalUrl = "$root$path"
-            val html = fetchHtmlWithClient("$root$path", "$root/", providerPageHttp) { redirectedUrl ->
-                finalUrl = redirectedUrl
-                effectiveBase = pageOrigin(redirectedUrl, root)
-            }
+            var statusCode = 0
+            val html = fetchHtmlWithClient(
+                url = "$root$path",
+                referer = "$root/",
+                client = providerPageHttp,
+                onFinalUrl = { redirectedUrl ->
+                    finalUrl = redirectedUrl
+                    effectiveBase = pageOrigin(redirectedUrl, root)
+                },
+                onHttpStatus = { code -> statusCode = code },
+            )
             if (html.isBlank()) {
-                coolDownProviderRoute(provider, root, PROVIDER_TRANSIENT_COOLDOWN_MS)
+                when {
+                    statusCode == 403 -> coolDownProviderRoute(provider, root, PROVIDER_BAD_ROUTE_COOLDOWN_MS)
+                    statusCode == 404 && isSearchRequest -> return emptyList()
+                    else -> coolDownProviderRoute(provider, root, PROVIDER_TRANSIENT_COOLDOWN_MS)
+                }
                 continue
             }
             if (!isConfiguredProviderHost(provider, finalUrl)) {
@@ -955,6 +1083,7 @@ object MultiProviderRepository {
         referer: String,
         client: OkHttpClient,
         onFinalUrl: ((String) -> Unit)? = null,
+        onHttpStatus: ((Int) -> Unit)? = null,
     ): String {
 
         return try {
@@ -976,6 +1105,7 @@ object MultiProviderRepository {
             val host = runCatching { java.net.URI.create(url).host.orEmpty() }.getOrDefault("invalid-url")
             client.newCall(req).execute().use { r ->
                 onFinalUrl?.invoke(r.request.url.toString())
+                onHttpStatus?.invoke(r.code)
                 if (!r.isSuccessful) {
                     android.util.Log.w(TAG, "HTTP ${r.code} for host=$host")
                     ""
@@ -1044,39 +1174,53 @@ object MultiProviderRepository {
                 if (rawHref.isBlank() || rawHref.startsWith("#") || rawHref.startsWith("javascript:")) {
                     rawHref = el.selectFirst("a[href]")?.let { it.attr("abs:href").ifBlank { it.attr("href") } }?.trim() ?: ""
                 }
-                val href = when {
+                val rawCandidateUrl = when {
+                    rawHref.startsWith("//") -> "https:$rawHref"
                     rawHref.startsWith("http") -> rawHref
                     rawHref.startsWith("/") -> "${pageBaseUrl.trimEnd('/')}$rawHref"
                     rawHref.isNotBlank() -> "${pageBaseUrl.trimEnd('/')}/$rawHref"
                     else -> ""
                 }
+                val href = if (rawCandidateUrl.contains("shot90.com", ignoreCase = true)) {
+                    AdBypassHelper.decodeShot90Url(rawCandidateUrl) ?: rawCandidateUrl
+                } else {
+                    rawCandidateUrl
+                }
                 if (href.isBlank() || !href.startsWith("http")) continue
 
-                if (href.contains("/category") || href.contains("/tag/") || href.contains("/page/") || href.contains("category.php") || href.contains("topvideos") || href.contains("favicons")) continue
+                val decodedHrefLower = runCatching {
+                    java.net.URLDecoder.decode(href, "UTF-8").lowercase(java.util.Locale.ROOT)
+                }.getOrDefault(href.lowercase(java.util.Locale.ROOT))
+
+                val isLodynetSeriesCard = provider.id == "lodynet" && decodedHrefLower.contains("/category/مسلسل-")
+                val isIegybestSeriesCard = provider.id == "iegybest" && decodedHrefLower.contains("category.php?cat=") && !decodedHrefLower.contains("aflam-") && !decodedHrefLower.contains("mslslat") && !decodedHrefLower.contains("top-250")
+                if (!isLodynetSeriesCard && !isIegybestSeriesCard &&
+                    (href.contains("/category") || href.contains("/tag/") || href.contains("/page/") || href.contains("category.php") || href.contains("topvideos") || href.contains("favicons"))
+                ) continue
 
 
 
                 // Title
-
                 var title = ""
-
                 for (ts in provider.titleSelectors) {
-
-                    title = el.selectFirst(ts)?.text()?.trim() ?: ""
-
-                    if (title.isNotBlank()) break
-
+                    val matched = when {
+                        ts == "[aria-label]" -> el.attr("aria-label").ifBlank { el.selectFirst("[aria-label]")?.attr("aria-label").orEmpty() }
+                        ts == "[title]" -> el.attr("title").ifBlank { el.selectFirst("[title]")?.attr("title").orEmpty() }
+                        ts == "img[alt]" -> el.selectFirst("img")?.attr("alt").orEmpty()
+                        else -> el.selectFirst(ts)?.text()?.trim().orEmpty().ifBlank { el.parent()?.selectFirst(ts)?.text()?.trim().orEmpty() }
+                    }.trim()
+                    if (matched.isNotBlank()) {
+                        title = matched
+                        break
+                    }
                 }
-
+                if (title.isBlank()) title = el.attr("aria-label").trim()
                 if (title.isBlank()) title = el.attr("title").trim()
-
                 if (title.isBlank()) title = el.selectFirst("img")?.attr("alt")?.trim() ?: ""
-
                 if (title.isBlank()) {
                     val directTxt = el.ownText().trim().ifBlank { el.text().trim() }
                     if (directTxt.length in 2..100) title = directTxt
                 }
-
                 if (title.length < 2) continue
 
 
@@ -1085,21 +1229,30 @@ object MultiProviderRepository {
                 val img = el.selectFirst("img") ?: el.selectFirst("[data-src]")
                 var poster: String? = null
 
+                fun normalizePosterUrl(raw: String): String? {
+                    val clean = raw.trim()
+                    if (clean.isBlank() || clean.startsWith("data:", ignoreCase = true)) return null
+                    return when {
+                        clean.startsWith("//") -> "https:$clean"
+                        clean.startsWith("http") -> clean
+                        clean.startsWith("/") -> "${pageBaseUrl.trimEnd('/')}$clean"
+                        else -> "${pageBaseUrl.trimEnd('/')}/$clean"
+                    }
+                }
+
                 // 1. Try img attributes (data-src, src, etc.)
                 for (attr in provider.posterAttr) {
                     val raw = img?.attr(attr) ?: continue
-                    poster = when {
-                        raw.startsWith("http") -> raw
-                        raw.startsWith("/") -> "${pageBaseUrl.trimEnd('/')}$raw"
-                        raw.isNotBlank() -> "${pageBaseUrl.trimEnd('/')}/$raw"
-                        else -> null
-                    }
+                    poster = normalizePosterUrl(raw)
                     if (poster != null) break
                 }
 
-                // 2. Try abs:src fallback (Jsoup resolves relative URLs)
+                // 2. Try <picture><source srcset="..."> & abs:src fallback
                 if (poster == null) {
-                    poster = img?.attr("abs:src")?.takeIf { it.startsWith("http") }
+                    val srcset = el.selectFirst("picture source[srcset], source[srcset]")?.attr("srcset")
+                        ?.substringBefore(",")?.trim()?.substringBefore(" ")
+                    poster = srcset?.let(::normalizePosterUrl)
+                        ?: img?.attr("abs:src")?.let(::normalizePosterUrl)
                 }
 
                 // 3. Try background-image in style attribute (WeCima, Akwam)
@@ -1107,8 +1260,8 @@ object MultiProviderRepository {
                     val styleEl = el.selectFirst("[style*='background-image']")
                         ?: el.selectFirst(".br-thumb, .ak-poster, .imgSer, .poster, .pm-video-thumb")
                     val style = styleEl?.attr("style") ?: ""
-                    val bgMatch = Regex("""url\(['"]?(https?://[^'")\s]+)['"]?\)""").find(style)
-                    if (bgMatch != null) poster = bgMatch.groupValues[1]
+                    val bgMatch = Regex("""url\(['"]?((?:https?:)?//[^'")\s]+)['"]?\)""").find(style)
+                    if (bgMatch != null) poster = normalizePosterUrl(bgMatch.groupValues[1])
                 }
 
                 // 4. Try any child element's background-image style
@@ -1116,8 +1269,8 @@ object MultiProviderRepository {
                     for (child in el.allElements) {
                         val style = child.attr("style")
                         if (style.contains("background-image")) {
-                            val bgMatch = Regex("""url\(['"]?(https?://[^'")\s]+)['"]?\)""").find(style)
-                            if (bgMatch != null) { poster = bgMatch.groupValues[1]; break }
+                            val bgMatch = Regex("""url\(['"]?((?:https?:)?//[^'")\s]+)['"]?\)""").find(style)
+                            if (bgMatch != null) { poster = normalizePosterUrl(bgMatch.groupValues[1]); break }
                         }
                     }
                 }
@@ -1328,7 +1481,7 @@ object MultiProviderRepository {
         val template = if (type == ArabseedType.MOVIE) provider.moviesPath else provider.seriesPath
         if (template.isBlank()) return null
         if (provider.id == "esheeq" && type == ArabseedType.SERIES) {
-            return if (page <= 1) "/" else "/page/$page/"
+            return if (page <= 1) "/discover/" else "/discover/page/$page/"
         }
         // A single-page listing contributes on page one, then drops out cleanly.
         if (page > 1 && !template.contains("{page}")) return null
@@ -1363,98 +1516,149 @@ object MultiProviderRepository {
      */
     private fun categoryFeeds(categoryId: String): List<CategoryFeed> = when (categoryId) {
         "turkish_series" -> listOf(
+            CategoryFeed("esheeq", "/discover/", "/discover/page/{page}/"),
+            CategoryFeed("esheeq", "/category/alarshif/", "/category/alarshif/page/{page}/"),
             CategoryFeed("esheeq", "/son-bolumler/", "/son-bolumler/page/{page}/"),
-            CategoryFeed("esheeq", "/", "/page/{page}/"),
-            CategoryFeed("wecima", "/category.php?cat=turkish-series", "/category.php?cat=turkish-series&page={page}"),
-            CategoryFeed("akwam", "/category/مسلسلات-تركي", "/category/مسلسلات-تركي/page/{page}"),
-            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9/page/{page}/"),
+            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%aa%d8%b1%d9%83%d9%8a/page/{page}/"),
+            CategoryFeed("lodynet", "/dubbed-turkish-series-g/", "/dubbed-turkish-series-g/page/{page}/"),
+            CategoryFeed("prestige", "/cat03.php?cat=ty9-2025", "/cat03.php?cat=ty9-2025&page={page}"),
+            CategoryFeed("akwam", "/category/مسلسلات-تركي", "/category/مسلسلات-تركي?page={page}"),
+            CategoryFeed("arablionz", "/category/مسلسلات-تركي", "/category/مسلسلات-تركي/page/{page}"),
+            CategoryFeed("cima4u", "/category/مسلسلات-تركي", "/category/مسلسلات-تركي/page/{page}"),
             CategoryFeed("egydead", "/category/مسلسلات-تركية/", "/category/مسلسلات-تركية/page/{page}/"),
         )
         "turkish_movies" -> listOf(
             CategoryFeed("esheeq", "/category/yeni-filmler/", "/category/yeni-filmler/page/{page}/"),
-            CategoryFeed("wecima", "/category.php?cat=turkish-films", "/category.php?cat=turkish-films&page={page}"),
-            CategoryFeed("akwam", "/category/افلام-تركي", "/category/افلام-تركي/page/{page}"),
-            CategoryFeed("egybest", "/movies/turkish/?page=1", "/movies/turkish/?page={page}"),
+            CategoryFeed("lodynet", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%aa%d8%b1%d9%83%d9%8a%d8%a9-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/page/{page}/"),
+            CategoryFeed("prestige", "/cat03.php?cat=turkish3-movies2024", "/cat03.php?cat=turkish3-movies2024&page={page}"),
+            CategoryFeed("akwam", "/category/افلام-تركي", "/category/افلام-تركي?page={page}"),
+            CategoryFeed("arablionz", "/category/افلام-تركي", "/category/افلام-تركي/page/{page}"),
+            CategoryFeed("cima4u", "/category/افلام-تركي", "/category/افلام-تركي/page/{page}"),
             CategoryFeed("egydead", "/category/افلام-تركية/", "/category/افلام-تركية/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-turki/"),
         )
         "foreign_movies" -> listOf(
-            CategoryFeed("akwam", "/category/افلام-اجنبي", "/category/افلام-اجنبي/page/{page}"),
-            CategoryFeed("wecima", "/category.php?cat=foreign-films", "/category.php?cat=foreign-films&page={page}"),
-            CategoryFeed("egybest", "/movies/foreign/?page=1", "/movies/foreign/?page={page}"),
+            CategoryFeed("akwam", "/category/افلام-اجنبي", "/category/افلام-اجنبي?page={page}"),
+            CategoryFeed("faselhd", "/movies", "/movies?page={page}"),
+            CategoryFeed("faselhd", "/category/%D8%A3%D9%81%D9%84%D8%A7%D9%85-%D8%A3%D8%AC%D9%86%D8%A8%D9%8A%D8%A9/", "/category/%D8%A3%D9%81%D9%84%D8%A7%D9%85-%D8%A3%D8%AC%D9%86%D8%A8%D9%8A%D8%A9/page/{page}/"),
+            CategoryFeed("topcinema", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a-8/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a-8/page/{page}/"),
+            CategoryFeed("prestige", "/cat03.php?cat=aflamajnby3-2024", "/cat03.php?cat=aflamajnby3-2024&page={page}"),
+            CategoryFeed("arablionz", "/category/افلام-اجنبي", "/category/افلام-اجنبي/page/{page}"),
+            CategoryFeed("cima4u", "/category/افلام-اجنبي", "/category/افلام-اجنبي/page/{page}"),
+            CategoryFeed("iegybest", "/category.php?cat=aflam-ajnbe", "/category.php?cat=aflam-ajnbe&page={page}"),
             CategoryFeed("egydead", "/category/افلام-اجنبي/", "/category/افلام-اجنبي/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-ajnabi/"),
         )
         "arabic_movies" -> listOf(
-            CategoryFeed("wecima", "/category.php?cat=arabic-movies", "/category.php?cat=arabic-movies&page={page}"),
-            CategoryFeed("akwam", "/category/افلام-عربي", "/category/افلام-عربي/page/{page}"),
-            CategoryFeed("egybest", "/movies/arabic/?page=1", "/movies/arabic/?page={page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=aflam02-2024", "/cat03.php?cat=aflam02-2024&page={page}"),
+            CategoryFeed("iegybest", "/category.php?cat=aflam-arbe", "/category.php?cat=aflam-arbe&page={page}"),
+            CategoryFeed("akwam", "/category/افلام-عربي", "/category/افلام-عربي?page={page}"),
+            CategoryFeed("arablionz", "/category/افلام-عربي", "/category/افلام-عربي/page/{page}"),
+            CategoryFeed("cima4u", "/category/افلام-عربي", "/category/افلام-عربي/page/{page}"),
             CategoryFeed("egydead", "/category/افلام-عربي/", "/category/افلام-عربي/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-arabi/"),
         )
         "arabic_series" -> listOf(
             CategoryFeed("prestige", "/cat03.php?cat=arab8-2025", "/cat03.php?cat=arab8-2025&page={page}"),
-            CategoryFeed("prestige", "/cat03.php?cat=syy5-2025", "/cat03.php?cat=syy5-2025&page={page}"),
             CategoryFeed("prestige", "/cat03.php?cat=eg8-2025", "/cat03.php?cat=eg8-2025&page={page}"),
-            CategoryFeed("wecima", "/category.php?cat=arabic-tv-series", "/category.php?cat=arabic-tv-series&page={page}"),
-            CategoryFeed("akwam", "/category/مسلسلات-عربي", "/category/مسلسلات-عربي/page/{page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=syy5-2025", "/cat03.php?cat=syy5-2025&page={page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=5a7-2024", "/cat03.php?cat=5a7-2024&page={page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=prss7-2025", "/cat03.php?cat=prss7-2025&page={page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=rm42-2022", "/cat03.php?cat=rm42-2022&page={page}"),
+            CategoryFeed("wecima", "/arabic-series/", "/arabic-series/page/{page}/"),
+            CategoryFeed("akwam", "/category/مسلسلات-عربية", "/category/مسلسلات-عربية?page={page}"),
+            CategoryFeed("arablionz", "/category/مسلسلات-عربية", "/category/مسلسلات-عربية/page/{page}"),
+            CategoryFeed("cima4u", "/category/مسلسلات-عربية", "/category/مسلسلات-عربية/page/{page}"),
+            CategoryFeed("iegybest", "/category.php?cat=mslslat-arbe", "/category.php?cat=mslslat-arbe&page={page}"),
             CategoryFeed("egydead", "/category/مسلسلات-عربي/", "/category/مسلسلات-عربي/page/{page}/"),
         )
         "foreign_series" -> listOf(
-            CategoryFeed("akwam", "/category/مسلسلات-أجنبي", "/category/مسلسلات-أجنبي/page/{page}"),
-            CategoryFeed("wecima", "/category.php?cat=english-series", "/category.php?cat=english-series&page={page}"),
+            CategoryFeed("faselhd", "/series", "/series?page={page}"),
+            CategoryFeed("faselhd", "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A3%D8%AC%D9%86%D8%A8%D9%8A%D8%A9/", "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A3%D8%AC%D9%86%D8%A8%D9%8A%D8%A9/page/{page}/"),
+            CategoryFeed("topcinema", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/page/{page}/"),
+            CategoryFeed("akwam", "/category/مسلسلات-أجنبي", "/category/مسلسلات-أجنبي?page={page}"),
+            CategoryFeed("arablionz", "/category/مسلسلات-أجنبي", "/category/مسلسلات-أجنبي/page/{page}"),
+            CategoryFeed("cima4u", "/category/مسلسلات-أجنبي", "/category/مسلسلات-أجنبي/page/{page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=english1-2025", "/cat03.php?cat=english1-2025&page={page}"),
+            CategoryFeed("iegybest", "/category.php?cat=mslslat-ajnbeh", "/category.php?cat=mslslat-ajnbeh&page={page}"),
             CategoryFeed("egydead", "/category/مسلسلات-اجنبي/", "/category/مسلسلات-اجنبي/page/{page}/"),
             CategoryFeed("moviewatcher", "/tv-shows/page/{page}/"),
-            CategoryFeed("spacemov", "/tv-series/page/{page}/"),
         )
         "asian_series" -> listOf(
             CategoryFeed("aradrama", "/category/serie/korea/", "/category/serie/korea/page/{page}/"),
             CategoryFeed("aradrama", "/category/serie/", "/category/serie/page/{page}/"),
-            CategoryFeed("asia2tv", "/catalog?country=legacy-term-125", "/catalog?country=legacy-term-125&page={page}"),
-            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/page/{page}/"),
-            CategoryFeed("akwam", "/category/مسلسلات-أسيوي", "/category/مسلسلات-أسيوي/page/{page}"),
+            CategoryFeed("aradrama", "/category/recent-completed/", "/category/recent-completed/page/{page}/"),
+            CategoryFeed("aradrama", "/category/%d8%af%d8%b1%d8%a7%d9%85%d8%a7-%d8%aa%d9%85-%d8%a7%d8%b9%d8%a7%d8%af%d8%a9-%d8%b1%d9%81%d8%b9%d9%87%d8%a7/", "/category/%d8%af%d8%b1%d8%a7%d9%85%d8%a7-%d8%aa%d9%85-%d8%a7%d8%b9%d8%a7%d8%af%d8%a9-%d8%b1%d9%81%d8%b9%d9%87%d8%a7/page/{page}/"),
+            CategoryFeed("lodynet", "/korean-series-b/", "/korean-series-b/page/{page}/"),
+            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b5%d9%8a%d9%86%d9%8a%d8%a9-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%b5%d9%8a%d9%86%d9%8a%d8%a9-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/page/{page}/"),
+            CategoryFeed("faselhd", "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A2%D8%B3%D9%8A%D9%88%D9%8A%D8%A9/", "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A2%D8%B3%D9%8A%D9%88%D9%8A%D8%A9/page/{page}/"),
+            CategoryFeed("topcinema", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/page/{page}/"),
+            CategoryFeed("prestige", "/cat03.php?cat=asia", "/cat03.php?cat=asia&page={page}"),
+            CategoryFeed("akwam", "/category/مسلسلات-أسيوي", "/category/مسلسلات-أسيوي?page={page}"),
+            CategoryFeed("arablionz", "/category/مسلسلات-أسيوي", "/category/مسلسلات-أسيوي/page/{page}"),
+            CategoryFeed("cima4u", "/category/مسلسلات-أسيوي", "/category/مسلسلات-أسيوي/page/{page}"),
             CategoryFeed("egydead", "/category/مسلسلات-اسيوية/", "/category/مسلسلات-اسيوية/page/{page}/"),
         )
         "indian_series" -> listOf(
-            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d9%87/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d9%87/page/{page}/"),
+            CategoryFeed("lodynet", "/b%d8%a7%d9%84%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d8%a9-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/", "/b%d8%a7%d9%84%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%87%d9%86%d8%af%d9%8a%d8%a9-%d9%85%d8%aa%d8%b1%d8%ac%d9%85%d8%a9/page/{page}/"),
+            CategoryFeed("prestige", "/cat03.php?cat=2ind2-2025", "/cat03.php?cat=2ind2-2025&page={page}"),
             CategoryFeed("egydead", "/category/مسلسلات-هندية/", "/category/مسلسلات-هندية/page/{page}/"),
         )
         "dubbed_series" -> listOf(
-            CategoryFeed("lodynet", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/", "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d9%85%d8%af%d8%a8%d9%84%d8%ac%d8%a9/page/{page}/"),
+            CategoryFeed("lodynet", "/dubbed-turkish-series-g/", "/dubbed-turkish-series-g/page/{page}/"),
+            CategoryFeed("arablionz", "/category/مسلسلات-تركية-مدبلجة", "/category/مسلسلات-تركية-مدبلجة/page/{page}"),
+            CategoryFeed("cima4u", "/category/مسلسلات-تركية-مدبلجة", "/category/مسلسلات-تركية-مدبلجة/page/{page}"),
             CategoryFeed("egydead", "/category/مسلسلات-مدبلجة/", "/category/مسلسلات-مدبلجة/page/{page}/"),
         )
         "anime_series" -> listOf(
-            CategoryFeed("akwam", "/category/مسلسلات-الأنميات", "/category/مسلسلات-الأنميات/page/{page}"),
+            CategoryFeed("faselhd", "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A3%D9%86%D9%85%D9%8A/", "/category/%D9%85%D8%B3%D9%84%D8%B3%D9%84%D8%A7%D8%AA-%D8%A3%D9%86%D9%85%D9%8A/page/{page}/"),
+            CategoryFeed("topcinema", "/category/anime-series/", "/category/anime-series/page/{page}/"),
+            CategoryFeed("prestige", "/cat03.php?cat=anmei", "/cat03.php?cat=anmei&page={page}"),
+            CategoryFeed("akwam", "/category/مسلسلات-الأنميات", "/category/مسلسلات-الأنميات?page={page}"),
             CategoryFeed("egydead", "/category/مسلسلات-انمي/", "/category/مسلسلات-انمي/page/{page}/"),
-            CategoryFeed("lodynet", "/category/anime/page/1/", "/category/anime/page/{page}/"),
         )
         "dubbed_movies" -> listOf(
-            CategoryFeed("akwam", "/category/افلام-مدبلجة", "/category/افلام-مدبلجة/page/{page}"),
+            CategoryFeed("akwam", "/category/افلام-مدبلجة", "/category/افلام-مدبلجة?page={page}"),
+            CategoryFeed("arablionz", "/category/افلام-مدبلجة", "/category/افلام-مدبلجة/page/{page}"),
+            CategoryFeed("cima4u", "/category/افلام-مدبلجة", "/category/افلام-مدبلجة/page/{page}"),
             CategoryFeed("egydead", "/category/افلام-مدبلجة/", "/category/افلام-مدبلجة/page/{page}/"),
         )
         "asian_movies" -> listOf(
             CategoryFeed("aradrama", "/category/%d8%a7%d9%84%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%84%d8%a2%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/", "/category/%d8%a7%d9%84%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%84%d8%a2%d8%b3%d9%8a%d9%88%d9%8a%d8%a9/page/{page}/"),
-            CategoryFeed("asia2tv", "/catalog?country=legacy-term-125", "/catalog?country=legacy-term-125&page={page}"),
-            CategoryFeed("akwam", "/category/افلام-اسيوي", "/category/افلام-اسيوي/page/{page}"),
-            CategoryFeed("lodynet", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%83%d9%88%d8%b1%d9%8a%d8%a9/page/{page}/"),
+            CategoryFeed("lodynet", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9-a/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a%d8%a9-a/page/{page}/"),
+            CategoryFeed("faselhd", "/category/%D8%A3%D9%81%D9%84%D8%A7%D9%85-%D8%A2%D8%B3%D9%8A%D9%88%D9%8A%D8%A9/", "/category/%D8%A3%D9%81%D9%84%D8%A7%D9%85-%D8%A2%D8%B3%D9%8A%D9%88%D9%8A%D8%A9/page/{page}/"),
+            CategoryFeed("topcinema", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%b3%d9%8a%d9%88%d9%8a/page/{page}/"),
+            CategoryFeed("akwam", "/category/افلام-اسيوي", "/category/افلام-اسيوي?page={page}"),
+            CategoryFeed("arablionz", "/category/افلام-اسيوي", "/category/افلام-اسيوي/page/{page}"),
+            CategoryFeed("cima4u", "/category/افلام-اسيوي", "/category/افلام-اسيوي/page/{page}"),
             CategoryFeed("egydead", "/category/افلام-اسيوية/", "/category/افلام-اسيوية/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-asiawiya/"),
         )
         "indian_movies" -> listOf(
             CategoryFeed("lodynet", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a%d8%a9/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d9%87%d9%86%d8%af%d9%8a%d8%a9/page/{page}/"),
-            CategoryFeed("akwam", "/category/افلام-هندي", "/category/افلام-هندي/page/{page}"),
-            CategoryFeed("wecima", "/category.php?cat=hindi-films", "/category.php?cat=hindi-films&page={page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=hindi1-moviess", "/cat03.php?cat=hindi1-moviess&page={page}"),
+            CategoryFeed("iegybest", "/category.php?cat=aflam-hnde", "/category.php?cat=aflam-hnde&page={page}"),
+            CategoryFeed("akwam", "/category/افلام-هندي", "/category/افلام-هندي?page={page}"),
+            CategoryFeed("arablionz", "/category/افلام-هندي", "/category/افلام-هندي/page/{page}"),
+            CategoryFeed("cima4u", "/category/افلام-هندي", "/category/افلام-هندي/page/{page}"),
             CategoryFeed("egydead", "/category/افلام-هندي/", "/category/افلام-هندي/page/{page}/"),
             CategoryFeed("cima4up", "/collections/aflam-hindiya/"),
         )
         "animation_movies" -> listOf(
-            CategoryFeed("akwam", "/category/افلام-انمي", "/category/افلام-انمي/page/{page}"),
-            CategoryFeed("wecima", "/category.php?cat=anime-and-cartoons", "/category.php?cat=anime-and-cartoons&page={page}"),
+            CategoryFeed("faselhd", "/category/%D8%A3%D9%81%D9%84%D8%A7%D9%85-%D8%A3%D9%86%D9%85%D9%8A/", "/category/%D8%A3%D9%81%D9%84%D8%A7%D9%85-%D8%A3%D9%86%D9%85%D9%8A/page/{page}/"),
+            CategoryFeed("topcinema", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a-2/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a-2/page/{page}/"),
+            CategoryFeed("prestige", "/cat03.php?cat=anime1", "/cat03.php?cat=anime1&page={page}"),
+            CategoryFeed("akwam", "/category/افلام-انمي", "/category/افلام-انمي?page={page}"),
+            CategoryFeed("arablionz", "/category/افلام-كرتون", "/category/افلام-كرتون/page/{page}"),
+            CategoryFeed("cima4u", "/category/افلام-كرتون", "/category/افلام-كرتون/page/{page}"),
         )
         "anime_movies" -> listOf(
-            CategoryFeed("akwam", "/category/افلام-انمي", "/category/افلام-انمي/page/{page}"),
-            CategoryFeed("wecima", "/category.php?cat=anime-and-cartoons", "/category.php?cat=anime-and-cartoons&page={page}"),
-            CategoryFeed("lodynet", "/category/anime/page/1/", "/category/anime/page/{page}/"),
+            CategoryFeed("faselhd", "/category/%D8%A3%D9%81%D9%84%D8%A7%D9%85-%D8%A3%D9%86%D9%85%D9%8A/", "/category/%D8%A3%D9%81%D9%84%D8%A7%D9%85-%D8%A3%D9%86%D9%85%D9%8A/page/{page}/"),
+            CategoryFeed("topcinema", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a-2/", "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d9%86%d9%85%d9%8a-2/page/{page}/"),
+            CategoryFeed("prestige", "/cat03.php?cat=anime1", "/cat03.php?cat=anime1&page={page}"),
+            CategoryFeed("akwam", "/category/افلام-انمي", "/category/افلام-انمي?page={page}"),
+            CategoryFeed("arablionz", "/category/افلام-انمي", "/category/افلام-انمي/page/{page}"),
+            CategoryFeed("cima4u", "/category/افلام-انمي", "/category/افلام-انمي/page/{page}"),
         )
         "ramadan_2026" -> listOf(
             CategoryFeed("prestige", "/cat03.php?cat=ramdan2026", "/cat03.php?cat=ramdan2026&page={page}"),
@@ -1470,12 +1674,13 @@ object MultiProviderRepository {
         )
         "ramadan_2023" -> listOf(
             CategoryFeed("prestige", "/cat03.php?cat=ramda1-2023", "/cat03.php?cat=ramda1-2023&page={page}"),
+            CategoryFeed("prestige", "/cat03.php?cat=rm42-2022", "/cat03.php?cat=rm42-2022&page={page}"),
             CategoryFeed("egydead", "/category/مسلسلات-رمضان-2023/", "/category/مسلسلات-رمضان-2023/page/{page}/"),
         )
         else -> emptyList()
     }
 
-    private fun categoryCacheKey(categoryId: String, page: Int): String = "category:v5:$categoryId:$page"
+    private fun categoryCacheKey(categoryId: String, page: Int): String = "category:v7:$categoryId:$page"
 
     fun loadCachedCategory(categoryId: String, page: Int = 1): List<ArabseedItem>? {
         val key = categoryCacheKey(categoryId, page)
@@ -1584,11 +1789,22 @@ object MultiProviderRepository {
         submitted.filterNot { it.isDone }.forEach { it.cancel(true) }
         return ParallelItemsReport(results, completedTasks, tasks.size)
     }
+    private fun normalizeSearchQueryPunctuation(value: String): String = value
+        .replace('\u2018', '\'')
+        .replace('\u2019', '\'')
+        .replace('\u201A', '\'')
+        .replace('\u201B', '\'')
+        .replace('\u201C', '"')
+        .replace('\u201D', '"')
+        .replace('\u2013', '-')
+        .replace('\u2014', '-')
+        .trim()
+
     fun searchAll(query: String, forceRefresh: Boolean = false): List<ArabseedItem> {
-        val q = query.trim()
+        val q = normalizeSearchQueryPunctuation(query)
         if (q.isBlank()) return emptyList()
 
-        val key = "search:v7:${q.lowercase()}"
+        val key = "search:v9:${q.lowercase()}"
         val now = System.currentTimeMillis()
         if (!forceRefresh) {
             searchCache[key]?.let { (savedAt, items) ->
@@ -1601,12 +1817,19 @@ object MultiProviderRepository {
             }
         }
 
+        val normalizedArabic = SeriesCatalogParser.normalizeArabicSearchQuery(q)
+        val queryToRun = q
         val tasks = PROVIDERS.filter { it.enabled }.map { provider ->
             {
                 try {
-                    val encodedQuery = java.net.URLEncoder.encode(q, "UTF-8")
+                    val encodedQuery = java.net.URLEncoder.encode(queryToRun, "UTF-8")
                     val basePath = provider.searchPath.replace("{q}", encodedQuery)
-                    fetchProviderListing(provider, basePath, ArabseedType.MOVIE)
+                    var rows = fetchProviderListing(provider, basePath, ArabseedType.MOVIE)
+                    if (rows.isEmpty() && normalizedArabic.isNotBlank() && normalizedArabic != queryToRun) {
+                        val encNorm = java.net.URLEncoder.encode(normalizedArabic, "UTF-8")
+                        rows = fetchProviderListing(provider, provider.searchPath.replace("{q}", encNorm), ArabseedType.MOVIE)
+                    }
+                    rows
                 } catch (_: Exception) { emptyList() }
             }
         }
@@ -1707,13 +1930,35 @@ object MultiProviderRepository {
         return runCatching { java.net.URI(baseUrl).resolve(raw).toString() }.getOrDefault(raw)
     }
 
-    /** Accept plain public embed URLs and ordinary iframe markup stored in data attributes. */
+    private fun tryDecodeBase64HttpUrl(candidate: String): String? {
+        val raw = candidate.trim()
+        if (raw.length < 12) return null
+        for (variant in listOf(raw, raw.reversed())) {
+            val cleaned = variant.replace('-', '+').replace('_', '/')
+            val padded = cleaned + "=".repeat((4 - cleaned.length % 4) % 4)
+            val decoded = runCatching {
+                String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT), Charsets.UTF_8).trim()
+            }.getOrNull() ?: continue
+            if (decoded.startsWith("http://", true) || decoded.startsWith("https://", true)) {
+                return decoded
+            }
+        }
+        return null
+    }
+
+    /** Accept plain public embed URLs, reversed-Base64 values, wrapper links, and iframe markup stored in data attributes. */
     private fun serverUrlFromAttribute(rawValue: String, baseUrl: String): String {
         val decoded = Parser.unescapeEntities(rawValue.trim(), false)
             .replace("\\/", "/")
             .replace("\\\"", "\"")
         if (decoded.isBlank()) return ""
-        val direct = absoluteServerUrl(decoded.trim().trim('"', '\''), baseUrl)
+        val trimmed = decoded.trim().trim('"', '\'')
+        tryDecodeBase64HttpUrl(trimmed)?.let { b64Url ->
+            val unwrapped = decodeIdWrapperUrl(b64Url)
+            if (isServerCandidateUrl(unwrapped)) return unwrapped
+        }
+        val unwrappedDirect = decodeIdWrapperUrl(trimmed)
+        val direct = absoluteServerUrl(unwrappedDirect, baseUrl)
         if (isServerCandidateUrl(direct)) return direct
 
         val markup = Jsoup.parseBodyFragment(decoded, baseUrl)
@@ -1726,7 +1971,7 @@ object MultiProviderRepository {
                 }
             }
             .orEmpty()
-        val candidate = absoluteServerUrl(embedded, baseUrl)
+        val candidate = decodeIdWrapperUrl(absoluteServerUrl(embedded, baseUrl))
         return candidate.takeIf(::isServerCandidateUrl).orEmpty()
     }
 
@@ -1743,29 +1988,78 @@ object MultiProviderRepository {
             .containsMatchIn(uri.path.orEmpty())
     }
 
-    private fun isServerCandidateUrl(url: String): Boolean {
-        val uri = runCatching { java.net.URI(url.trim()) }.getOrNull() ?: return false
+    private fun isServerCandidateUrl(url: String, pageUrl: String? = null): Boolean {
+        val clean = url.trim()
+        val uri = runCatching { java.net.URI(clean) }.getOrNull() ?: return false
         val host = uri.host?.lowercase(java.util.Locale.ROOT).orEmpty()
-        val path = uri.path.orEmpty()
-        if (uri.scheme !in setOf("http", "https") || host.isBlank() || isAdServerUrl(url)) return false
-        if (Regex("(?i)\\.(apng|avif|bmp|gif|jpe?g|png|svg|webp)$").containsMatchIn(path)) return false
+        val path = uri.path.orEmpty().lowercase(java.util.Locale.ROOT)
+        if (uri.scheme !in setOf("http", "https") || host.isBlank() || isAdServerUrl(clean)) return false
+        val deadOrScamHosts = listOf(
+            "egybest.live", "shahid4u.cam", "shahid4u.tv", "shahid4u.to",
+            "cimanow.cc", "cimanow.info", "cimanow.net", "movies4u.icu", "spacemov.xyz",
+            "moviflex.net", "shot90.com", "cima4up-official.cyou",
+            "moviewatcher-offcial.cyou", "asia2tv.com", "mycima.help",
+            "govid.live", "luluvdo.com", "vidplayer.live", "shahied4u.vidplayer.live",
+        )
+        if (deadOrScamHosts.any { host == it || host.endsWith(".$it") }) return false
+        if (Regex("(?i)\\.(?:apng|avif|bmp|gif|jpe?g|png|svg|webp|css|js|ico|woff2?|ttf|eot|otf|xml|json|txt|pdf|zip|rar)$").containsMatchIn(path)) return false
         if (host == "youtube.com" || host.endsWith(".youtube.com") || host == "youtu.be") return false
+
+        // Never accept the item/source page itself as a server
+        if (pageUrl != null) {
+            val cleanPage = pageUrl.trim().trimEnd('/')
+            if (clean.trimEnd('/') == cleanPage || clean.substringBefore('?') == cleanPage.substringBefore('?')) {
+                return false
+            }
+        }
+
+        // Never accept site navigation, login, plans, catalog, etc.
+        val blockedRoutes = listOf(
+            "/login", "/logout", "/register", "/signup", "/signin", "/auth",
+            "/plans", "/pricing", "/privacy", "/terms", "/contact", "/about",
+            "/catalog", "/search", "/category", "/genre", "/tag", "/tags",
+            "/actor", "/director", "/filter", "/years", "/schedule", "/episode-schedule",
+            "/dmca", "/policy", "/faq", "/rss", "/feed", "/sitemap"
+        )
+        if (path.isEmpty() || path == "/" || blockedRoutes.any { path.contains(it) }) return false
+
+        // Informational content pages (movies, series, dramas) on provider sites must not be treated as video servers
+        // unless they explicitly have a playback marker (/watch, /servers, /embed, /player, vids.php, etc.)
+        val hasPlaybackMarker = path.contains("/watch") || path.contains("/servers") ||
+            path.contains("/embed") || path.contains("/player") || path.contains("/play") ||
+            path.contains("/video") || path.contains("/v/") || path.contains("/e/") ||
+            path.endsWith(".mp4") || path.endsWith(".m3u8") ||
+            path.contains("embed.php") || path.contains("play.php") || path.contains("downloads.php") ||
+            clean.contains("?watch=") || clean.contains("?embed=") || clean.contains("?play=") ||
+            clean.contains("&watch=") || clean.contains("&embed=") || clean.contains("&play=") ||
+            clean.contains("vid=") || clean.contains("vids.php") || clean.contains("video_player")
+        val isContentDetailRoute = path.startsWith("/movie/") || path.startsWith("/drama/") ||
+            path.startsWith("/series/") || path.startsWith("/selary/") || path.startsWith("/post/") ||
+            path.startsWith("/show/") || path.startsWith("/title/") || path.startsWith("/film/") ||
+            path.startsWith("/episode/")
+        if ((isContentDetailRoute || getProviderForUrl(clean) != null) && !hasPlaybackMarker) {
+            return false
+        }
+
         return true
     }
 
     private fun insideNonPlaybackContainer(element: org.jsoup.nodes.Element): Boolean {
+        if (element.hasAttr("data-profile-share") || element.hasClass("share") ||
+            element.attr("aria-label").contains("مشاركة") || element.attr("aria-label").contains("نسخ")
+        ) return true
         val markers = (listOf(element) + element.parents()).take(6)
-            .flatMap { listOf(it.id(), it.className()) }
+            .flatMap { listOf(it.id(), it.className(), it.tagName()) }
             .joinToString(" ")
         val contentNavigation = Regex(
             "(?i)(^|[\\s_-])(" +
                 "season[-_ ]?(tabs|list|nav|selector)|episode[-_ ]?(list|grid|tabs|nav|pagination)|" +
                 "episodes[-_ ]?(list|grid|nav)|eplist|eps-list|series[-_ ]?(list|grid|navigation)|" +
                 "part[-_ ]?(list|tabs)|poster|thumbnail|thumb|trailer|teaser|related|recommend|" +
-                "suggest|advert|banner|social)([\\s_-]|$)",
+                "suggest|advert|banner|social|share|profile-share|nav|navbar|menu|header|footer|" +
+                "sidebar|login|auth|account|plans|pricing|comment|review|report)([\\s_-]|$)",
         )
-        return contentNavigation
-            .containsMatchIn(markers)
+        return contentNavigation.containsMatchIn(markers)
     }
 
     private fun isSeriesNavigationLink(element: org.jsoup.nodes.Element, url: String): Boolean {
@@ -1791,13 +2085,61 @@ object MultiProviderRepository {
                     variants += parsed.newBuilder().setQueryParameter("watch", "1").build().toString()
                 }
             }
-            "cimanow" -> {
-                if (pageUrl.contains("/film/")) variants += pageUrl.replaceFirst("/film/", "/watch/")
+            "wecima" -> {
+                val parsed = pageUrl.toHttpUrlOrNull()
+                if (parsed != null && parsed.queryParameter("do") != "watch") {
+                    variants += parsed.newBuilder().setQueryParameter("do", "watch").build().toString()
+                }
+            }
+            "cimanow", "arabseed_here" -> {
+                val slug = pageUrl.trimEnd('/').substringAfterLast('/')
+                val origin = pageOrigin(pageUrl, provider.baseUrl).trimEnd('/')
+                if (slug.isNotBlank() && !pageUrl.contains("/watch")) {
+                    variants += "$origin/watch/$slug"
+                }
+            }
+            "shahid4u", "cimaclub", "topcinema" -> {
+                val trimmed = pageUrl.trimEnd('/')
+                if (!trimmed.endsWith("/watch")) variants += "$trimmed/watch/"
+            }
+            "arablionz", "fushaar", "cima4u" -> {
+                val parsed = pageUrl.trim().toHttpUrlOrNull()
+                if (parsed != null) {
+                    val segs = parsed.pathSegments.filter { it.isNotBlank() }
+                    if (segs.size == 1) {
+                        val root = "${parsed.scheme}://${parsed.host}"
+                        variants += "$root/watch/${segs[0]}/servers"
+                    }
+                }
+                val trimmed = pageUrl.trimEnd('/')
+                if (!trimmed.endsWith("/servers") && !trimmed.endsWith("/watch")) {
+                    variants += "$trimmed/watch"
+                }
+            }
+            "prestige", "iegybest", "cimawbas" -> {
+                val vid = Regex("""vid=([A-Za-z0-9]+)""").find(pageUrl)?.groupValues?.getOrNull(1).orEmpty()
+                if (vid.isNotBlank()) {
+                    val origin = pageOrigin(pageUrl, provider.baseUrl).trimEnd('/')
+                    variants += "$origin/play.php?vid=$vid"
+                    variants += "$origin/embed.php?vid=$vid"
+                }
             }
         }
         variants += pageUrl
         return variants.distinct()
     }
+
+    private fun extractServerAttr(el: org.jsoup.nodes.Element): String = listOf(
+        "data-embed-url", "data-embed", "data-watch", "data-src", "data-url",
+        "data-link", "data-video", "data-srcout", "abs:src", "src", "abs:href", "href"
+    ).firstNotNullOfOrNull { attr ->
+        el.attr(attr).trim().takeIf(String::isNotBlank)
+    }.orEmpty()
+
+    private fun extractCookiesHeader(headers: List<String>): String =
+        headers.mapNotNull { h -> h.substringBefore(';').trim().takeIf { it.contains('=') } }
+            .distinct()
+            .joinToString("; ")
 
     fun fetchServers(pageUrl: String): List<ArabseedServer> {
 
@@ -1811,60 +2153,70 @@ object MultiProviderRepository {
 
         try {
 
-            // 0. ArabSeed Here (https://arabseed.here) dedicated server resolver
-            if (pageUrl.contains("arabseed.here")) {
-                val watchUrl = when {
-                    pageUrl.contains("/film/") -> pageUrl.replace("/film/", "/watch/")
-                    pageUrl.contains("/episode/") -> pageUrl.replace("/episode/", "/watch/")
-                    pageUrl.contains("/watch/") -> pageUrl
-                    else -> "${baseUrl.trimEnd('/')}/watch/" + pageUrl.trimEnd('/').substringAfterLast('/')
-                }
+            // 0. MySeed.name / ArabSeed.here dedicated Laravel /watch/resolve extractor (with session cookies)
+            if (pageUrl.contains("arabseed.here") || pageUrl.contains("myseed.name")) {
+                val origin = pageOrigin(pageUrl, if (pageUrl.contains("myseed.name")) "https://myseed.name" else "https://arabseed.here").trimEnd('/')
+                val slug = pageUrl.trimEnd('/').substringAfterLast('/')
+                val watchUrl = if (pageUrl.contains("/watch")) pageUrl else "$origin/watch/$slug"
                 try {
-                    val wHtml = fetchHtml(watchUrl, pageUrl)
-                    val keyMatch = Regex("""const\s+watchResolveKey\s*=\s*["']([^"']+)["']""").find(wHtml)
-                    val csrfMatch = Regex("""const\s+csrfToken\s*=\s*["']([^"']+)["']""").find(wHtml)
-                    val serversJsonMatch = Regex("""const\s+servers\s*=\s*(\[.*?\]);""").find(wHtml)
+                    val getReq = Request.Builder().url(watchUrl)
+                        .header("User-Agent", UA).header("Referer", pageUrl).build()
+                    var wHtml = ""
+                    var cookieHeader = ""
+                    http.newCall(getReq).execute().use { res ->
+                        cookieHeader = extractCookiesHeader(res.headers("Set-Cookie"))
+                        wHtml = res.body?.string().orEmpty()
+                    }
+                    val keyMatch = Regex("""(?:const|let|var)\s+watchResolveKey\s*=\s*["']([^"']+)["']""").find(wHtml)
+                    val csrfMatch = Regex("""(?:const|let|var)\s+csrfToken\s*=\s*["']([^"']+)["']|name=["']csrf-token["']\s+content=["']([^"']+)["']""").find(wHtml)
+                    val serversJsonMatch = Regex("""(?:const|let|var)\s+servers\s*=\s*(\[.*?\]);""", RegexOption.DOT_MATCHES_ALL).find(wHtml)
                     if (keyMatch != null && csrfMatch != null && serversJsonMatch != null) {
                         val watchKey = keyMatch.groupValues[1]
-                        val csrfToken = csrfMatch.groupValues[1]
+                        val csrfToken = csrfMatch.groupValues[1].ifBlank { csrfMatch.groupValues[2] }
                         val serversArray = org.json.JSONArray(serversJsonMatch.groupValues[1])
-                        for (i in 0 until serversArray.length().coerceAtMost(6)) {
+                        val futures = (0 until serversArray.length().coerceAtMost(6)).map { i ->
                             val serverObj = serversArray.getJSONObject(i)
                             val token = serverObj.optString("resolve_token")
                             val sName = serverObj.optString("name", "سيرفر ${i + 1}")
-                            if (token.isNotBlank()) {
-                                try {
+                            pool.submit<Pair<String, String>?> {
+                                if (token.isBlank()) return@submit null
+                                runCatching {
                                     val postJson = JSONObject().apply {
                                         put("key", watchKey)
                                         put("token", token)
                                         put("human_signal", JSONObject.NULL)
                                     }
-                                    val resolveReq = Request.Builder()
-                                        .url("https://arabseed.here/watch/resolve")
+                                    val reqB = Request.Builder()
+                                        .url("$origin/watch/resolve")
                                         .post(postJson.toString().toRequestBody("application/json".toMediaType()))
                                         .header("User-Agent", UA)
                                         .header("Referer", watchUrl)
-                                        .header("Origin", "https://arabseed.here")
+                                        .header("Origin", origin)
                                         .header("Accept", "application/json")
                                         .header("X-CSRF-TOKEN", csrfToken)
                                         .header("X-Requested-With", "XMLHttpRequest")
-                                        .build()
-                                    http.newCall(resolveReq).execute().use { res ->
-                                        val resBody = res.body?.string().orEmpty()
-                                        val resJson = JSONObject(resBody)
-                                        if (resJson.optBoolean("ok", false)) {
-                                            val mPath = resJson.optString("url")
-                                            val mFull = if (mPath.startsWith("/")) "https://arabseed.here$mPath" else mPath
-                                            val mHtml = fetchHtml(mFull, watchUrl)
-                                            val ifrSrc = Regex("""<iframe\b[^>]*src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
-                                                .find(mHtml)?.groupValues?.get(1)?.trim().orEmpty()
-                                            val finalEmbed = ifrSrc.ifBlank { mFull }
-                                            if (isServerCandidateUrl(finalEmbed) && servers.none { it.embedUrl == finalEmbed }) {
-                                                servers += ArabseedServer("سيرفر ${servers.size + 1} ($sName)", finalEmbed)
-                                            }
-                                        }
+                                    if (cookieHeader.isNotBlank()) reqB.header("Cookie", cookieHeader)
+                                    http.newCall(reqB.build()).execute().use { res ->
+                                        val resJson = JSONObject(res.body?.string().orEmpty())
+                                        if (!resJson.optBoolean("ok", false)) return@submit null
+                                        val mPath = resJson.optString("url")
+                                        val mFull = absoluteServerUrl(mPath, origin)
+                                        val mReqB = Request.Builder().url(mFull)
+                                            .header("User-Agent", UA).header("Referer", watchUrl)
+                                        if (cookieHeader.isNotBlank()) mReqB.header("Cookie", cookieHeader)
+                                        val mHtml = http.newCall(mReqB.build()).execute().use { it.body?.string().orEmpty() }
+                                        val ifrSrc = Regex("""<iframe\b[^>]*src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+                                            .find(mHtml)?.groupValues?.get(1)?.trim().orEmpty()
+                                        val finalEmbed = absoluteServerUrl(ifrSrc.ifBlank { mFull }, origin)
+                                        if (isServerCandidateUrl(finalEmbed)) sName to finalEmbed else null
                                     }
-                                } catch (_: Exception) {}
+                                }.getOrNull()
+                            }
+                        }
+                        for (f in futures) {
+                            val pair = runCatching { f.get(4, TimeUnit.SECONDS) }.getOrNull() ?: continue
+                            if (servers.none { it.embedUrl == pair.second }) {
+                                servers += ArabseedServer("سيرفر ${servers.size + 1} (${pair.first})", pair.second)
                             }
                         }
                     }
@@ -1876,20 +2228,234 @@ object MultiProviderRepository {
                 try {
                     val html = fetchHtml(pageUrl, baseUrl)
                     val doc = Jsoup.parse(html, pageUrl)
-                    for (a in doc.select("a[href], [data-embed], [data-url], iframe[src]")) {
-                        val href = a.attr("abs:src").ifBlank { a.attr("data-embed").ifBlank { a.attr("data-url").ifBlank { a.attr("abs:href") } } }.trim()
+                    for (a in doc.select("a[href], [data-embed], [data-url], [data-src], iframe[src], li[data-url]")) {
+                        val href = a.attr("abs:src").ifBlank { a.attr("data-embed").ifBlank { a.attr("data-url").ifBlank { a.attr("data-src").ifBlank { a.attr("abs:href") } } } }.trim()
                         val text = a.text().trim()
-                        if (isServerCandidateUrl(href) && (
-                            href.contains("ok.ru") || href.contains("vidmoly") || href.contains("filemoon") ||
-                            href.contains("bysevepoin") || href.contains("minochinos") || href.contains("vkvideo") ||
-                            href.contains("dood") || href.contains("playmogo") || href.contains("hgcloud") ||
-                            href.contains("luluvid") || href.contains("streamtape") || href.contains("mixdrop") ||
-                            href.contains("embed")
-                        )) {
+                        if (isServerCandidateUrl(href, pageUrl)) {
                             if (servers.none { it.embedUrl == href }) {
                                 val sName = text.ifBlank { "سيرفر ${servers.size + 1}" }
-                                servers += ArabseedServer("سيرفر ${servers.size + 1} ($sName)", href)
+                                servers += ArabseedServer("آرا دراما - $sName", href)
                             }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 0c. Esheeq (قصة عشق) dedicated server extractor
+            if (pageUrl.contains("qesset") || pageUrl.contains("qeseh") || pageUrl.contains("3sk") || pageUrl.contains("qesen")) {
+                try {
+                    val html = fetchHtml(pageUrl, baseUrl)
+                    val doc = Jsoup.parse(html, pageUrl)
+                    val watchLink = doc.selectFirst("a[href*='watch?post='], a[href*='post=']")?.attr("href")?.trim().orEmpty()
+                    val targetUrl = watchLink.ifBlank { pageUrl }
+
+                    val postParam = targetUrl.substringAfter("post=", "").substringBefore("&")
+                    if (postParam.isNotBlank()) {
+                        try {
+                            val jsonStr = String(android.util.Base64.decode(postParam, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                            val jsonObj = org.json.JSONObject(jsonStr)
+                            val sArray = jsonObj.optJSONArray("servers")
+                            if (sArray != null) {
+                                for (i in 0 until sArray.length()) {
+                                    val sObj = sArray.getJSONObject(i)
+                                    val sName = sObj.optString("name", "سيرفر ${i + 1}")
+                                    val sId = sObj.optString("id")
+                                    val embedUrl = when {
+                                        sId.startsWith("http") -> sId
+                                        sName.contains("ok", ignoreCase = true) -> "https://ok.ru/videoembed/$sId"
+                                        sName.contains("Arab", ignoreCase = true) -> "https://arabhd.onl/embed-$sId.html"
+                                        sName.contains("turk", ignoreCase = true) || sName.contains("estream", ignoreCase = true) -> "https://vidmoly.to/embed-$sId.html"
+                                        else -> ""
+                                    }
+                                    if (embedUrl.isNotBlank() && isServerCandidateUrl(embedUrl, pageUrl) && servers.none { it.embedUrl == embedUrl }) {
+                                        servers += ArabseedServer("قصة عشق - $sName", embedUrl)
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+
+                    if (watchLink.isNotBlank()) {
+                        val wHtml = fetchHtml(watchLink, pageUrl)
+                        val wDoc = Jsoup.parse(wHtml, watchLink)
+                        for (ifr in wDoc.select("iframe[src]")) {
+                            val src = ifr.attr("abs:src").ifBlank { ifr.attr("src") }.trim()
+                            if (isServerCandidateUrl(src, pageUrl) && servers.none { it.embedUrl == src }) {
+                                servers += ArabseedServer("قصة عشق - سيرفر أساسي", src)
+                            }
+                        }
+                        for (li in wDoc.select("[data-server]")) {
+                            val sServer = li.attr("data-server").trim()
+                            val sName = li.attr("data-name").ifBlank { li.text().trim() }
+                            val embedUrl = when {
+                                sServer.startsWith("http") -> sServer
+                                sName.contains("ok", ignoreCase = true) -> "https://ok.ru/videoembed/$sServer"
+                                sName.contains("Arab", ignoreCase = true) -> "https://arabhd.onl/embed-$sServer.html"
+                                else -> ""
+                            }
+                            if (embedUrl.isNotBlank() && isServerCandidateUrl(embedUrl, pageUrl) && servers.none { it.embedUrl == embedUrl }) {
+                                servers += ArabseedServer("قصة عشق - $sName", embedUrl)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 0d. Lodynet Base64 JSON extractor (PostData.ServersWatch + PageData tokens)
+            if (pageUrl.contains("lodynet")) {
+                try {
+                    val lHtml = fetchHtml(pageUrl, baseUrl.ifBlank { "https://lodynet.watch/" })
+                    val tokenPlus1 = Regex(""""TokenPlus1"\s*:\s*"([^"]*)"""").find(lHtml)?.groupValues?.get(1).orEmpty()
+                    val tokenVidlo = Regex(""""TokenVidlo"\s*:\s*"([^"]*)"""").find(lHtml)?.groupValues?.get(1).orEmpty()
+                    val jsonArrMatch = Regex("""ServersWatch\s*:\s*(\[\{.*?\}\])""", RegexOption.DOT_MATCHES_ALL).find(lHtml)
+                    if (jsonArrMatch != null) {
+                        val sArray = org.json.JSONArray(jsonArrMatch.groupValues[1])
+                        for (i in 0 until sArray.length()) {
+                            val obj = sArray.getJSONObject(i)
+                            val sName = obj.optString("Name", "سيرفر ${i + 1}").trim()
+                            val sid = obj.optInt("Id", -1)
+                            val b64 = obj.optString("Embed").trim()
+                            if (b64.isBlank()) continue
+                            val decodedBase = runCatching {
+                                String(android.util.Base64.decode(b64, android.util.Base64.DEFAULT), Charsets.UTF_8).trim()
+                            }.getOrNull().orEmpty()
+                            val withToken = when {
+                                sid == 73 && tokenPlus1.isNotBlank() && !decodedBase.contains("st=") -> decodedBase + tokenPlus1
+                                sid == 116413 && tokenVidlo.isNotBlank() && !decodedBase.contains("st=") -> decodedBase + tokenVidlo
+                                else -> decodedBase
+                            }
+                            val resolvedEmbed = absoluteServerUrl(withToken, pageUrl)
+                            if (resolvedEmbed.startsWith("http") && isServerCandidateUrl(resolvedEmbed, pageUrl) &&
+                                servers.none { it.embedUrl == resolvedEmbed }
+                            ) {
+                                val label = if (sName.isNotBlank() && sName.length < 25) " ($sName)" else ""
+                                servers += ArabseedServer("لودي نت$label", resolvedEmbed)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 0f. Shahid4U.si API extractor (/api/play/movie/{id} and /api/play/tv/{id}/{s}/{e})
+            if (pageUrl.contains("shahid4u.si")) {
+                try {
+                    val siOrigin = pageOrigin(pageUrl, "https://www.shahid4u.si").trimEnd('/')
+                    val tvMatch = Regex("""/series/[^/]*-(\d+)/season-(\d+)/episode-(\d+)""").find(pageUrl)
+                    val movMatch = Regex("""/movie/[^/]*-(\d+)""").find(pageUrl)
+                    val watchPageMatch = Regex("""/watch/[^/]*-(\d+)""").find(pageUrl)
+                    val playApiPath = when {
+                        tvMatch != null -> "/api/play/tv/${tvMatch.groupValues[1]}/${tvMatch.groupValues[2]}/${tvMatch.groupValues[3]}"
+                        movMatch != null -> "/api/play/movie/${movMatch.groupValues[1]}"
+                        watchPageMatch != null -> "/api/play/movie/${watchPageMatch.groupValues[1]}"
+                        else -> ""
+                    }
+                    if (playApiPath.isNotBlank()) {
+                        val apiBody = fetchHtml("$siOrigin$playApiPath", pageUrl)
+                        val lines = JSONObject(apiBody).optJSONArray("lines")
+                        if (lines != null) {
+                            for (i in 0 until lines.length()) {
+                                val line = lines.getJSONObject(i)
+                                val sName = line.optString("name", "سيرفر ${i + 1}").trim()
+                                var rawU = line.optString("url").trim()
+                                if (rawU.startsWith("/api/hls/")) {
+                                    val hlsMeta = fetchHtml("$siOrigin$rawU", pageUrl)
+                                    val streamPath = runCatching { JSONObject(hlsMeta).optString("url") }.getOrDefault("")
+                                    if (streamPath.isNotBlank()) rawU = "$siOrigin$streamPath"
+                                }
+                                val abs = absoluteServerUrl(rawU, siOrigin)
+                                if (isServerCandidateUrl(abs, pageUrl) && servers.none { it.embedUrl == abs }) {
+                                    servers += ArabseedServer("شاهد فور يو VIP ($sName)", abs)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 0g. Movizland POST view=1 server extractor
+            if (pageUrl.contains("movizland")) {
+                try {
+                    val postReq = Request.Builder().url(pageUrl)
+                        .post(FormBody.Builder().add("view", "1").build())
+                        .header("User-Agent", UA).header("Referer", pageUrl).build()
+                    val mHtml = http.newCall(postReq).execute().use { it.body?.string().orEmpty() }
+                    if (mHtml.isNotBlank() && !AdBypassHelper.isCloudflareChallenge(mHtml)) {
+                        val mDoc = Jsoup.parse(mHtml, pageUrl)
+                        for (el in mDoc.select("iframe[src], [data-src], [data-embed], [data-link], [data-srcout]")) {
+                            if (insideNonPlaybackContainer(el)) continue
+                            val abs = serverUrlFromAttribute(extractServerAttr(el), pageUrl)
+                            if (isServerCandidateUrl(abs, pageUrl) && servers.none { it.embedUrl == abs }) {
+                                servers += ArabseedServer("موفيز لاند - سيرفر ${servers.size + 1}", abs)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 0h. EgyDead / Egidead POST watch=1 extractor
+            if ((pageUrl.contains("egidead") || pageUrl.contains("egydead")) && servers.isEmpty()) {
+                try {
+                    val postReq = Request.Builder().url(pageUrl)
+                        .post(FormBody.Builder().add("watch", "1").build())
+                        .header("User-Agent", UA).header("Referer", pageUrl).build()
+                    val eHtml = http.newCall(postReq).execute().use { it.body?.string().orEmpty() }
+                    if (eHtml.isNotBlank() && !AdBypassHelper.isCloudflareChallenge(eHtml)) {
+                        val eDoc = Jsoup.parse(eHtml, pageUrl)
+                        for (el in eDoc.select("ul.serversList li[data-link], [data-watch], [data-link], [data-embed], iframe[src]")) {
+                            if (insideNonPlaybackContainer(el)) continue
+                            val abs = serverUrlFromAttribute(extractServerAttr(el), pageUrl)
+                            if (isServerCandidateUrl(abs, pageUrl) && servers.none { it.embedUrl == abs }) {
+                                servers += ArabseedServer("إيجي ديد - سيرفر ${servers.size + 1}", abs)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 0e. TopCinema AJAX Server extractor (/watch/ -> Ajaxat/Single/Server.php)
+            if (pageUrl.contains("topcinema")) {
+                try {
+                    val watchUrl = if (pageUrl.trimEnd('/').endsWith("/watch")) pageUrl else "${pageUrl.trimEnd('/')}/watch/"
+                    val tcHtml = fetchHtml(watchUrl, pageUrl)
+                    val tcDoc = Jsoup.parse(tcHtml, watchUrl)
+                    for (ifr in tcDoc.select("iframe[src]")) {
+                        val src = absoluteServerUrl(ifr.attr("abs:src").ifBlank { ifr.attr("src") }, watchUrl)
+                        if (isServerCandidateUrl(src, watchUrl) && servers.none { it.embedUrl == src }) {
+                            servers += ArabseedServer("توب سينما - سيرفر 1", src)
+                        }
+                    }
+                    val ajaxBase = Regex("""MyAjaxURL\s*=\s*["']([^"']+)["']""").find(tcHtml)?.groupValues?.get(1)
+                        ?: "${baseUrl.trimEnd('/')}/wp-content/themes/movies2023/Ajaxat/"
+                    val items = tcDoc.select("li.server--item[data-id][data-server], li[data-watch]")
+                    val futures = items.take(7).map { li ->
+                        val pid = li.attr("data-id").ifBlank { li.attr("data-watch") }.trim()
+                        val srv = li.attr("data-server").ifBlank { "0" }.trim()
+                        val sName = li.text().trim()
+                        pool.submit<Pair<String, String>?> {
+                            if (pid.isBlank()) return@submit null
+                            try {
+                                val form = FormBody.Builder().add("id", pid).add("i", srv).build()
+                                val req = Request.Builder()
+                                    .url("${ajaxBase.trimEnd('/')}/Single/Server.php")
+                                    .post(form)
+                                    .header("User-Agent", UA)
+                                    .header("Referer", watchUrl)
+                                    .header("X-Requested-With", "XMLHttpRequest")
+                                    .build()
+                                val rHtml = http.newCall(req).execute().use { it.body?.string() ?: "" }
+                                val ifr = Jsoup.parse(rHtml).selectFirst("iframe[src]")?.let {
+                                    it.attr("abs:src").ifBlank { it.attr("src") }
+                                }?.trim().orEmpty()
+                                val absIfr = absoluteServerUrl(ifr, watchUrl)
+                                if (isServerCandidateUrl(absIfr, watchUrl)) sName to absIfr else null
+                            } catch (_: Exception) { null }
+                        }
+                    }
+                    for (f in futures) {
+                        val pair = runCatching { f.get(3, TimeUnit.SECONDS) }.getOrNull() ?: continue
+                        if (servers.none { it.embedUrl == pair.second }) {
+                            val label = if (pair.first.isNotBlank() && pair.first.length < 25) " (${pair.first})" else ""
+                            servers += ArabseedServer("توب سينما$label", pair.second)
                         }
                     }
                 } catch (_: Exception) {}
@@ -1970,135 +2536,134 @@ object MultiProviderRepository {
 
 
 
-            // 2. WeCima Servers (embed.php?vid=... & downloads.php?vid=...)
+            // 2. WeCima Servers (?do=watch -> /embed/{id}/ OR legacy embed.php?vid=...)
 
             if (pageUrl.contains("wecima") || pageUrl.contains("myweecima")) {
-
+                val origin = baseUrl.trimEnd('/').ifBlank { "https://wecima.cc" }
                 val vid = Regex("vid=([a-zA-Z0-9]+)").find(pageUrl)?.groupValues?.get(1) ?: ""
 
                 if (vid.isNotBlank()) {
-
-                    val embedUrl = "${baseUrl.trimEnd('/')}/embed.php?vid=$vid"
+                    val embedUrl = "$origin/embed.php?vid=$vid"
                     if (isServerCandidateUrl(embedUrl)) {
                         servers += ArabseedServer("سيرفر 1 (فائق السرعة)", embedUrl)
                     }
-
                     try {
-
-                        val downloadPage = "${baseUrl.trimEnd('/')}/downloads.php?vid=$vid"
+                        val downloadPage = "$origin/downloads.php?vid=$vid"
                         val dlHtml = fetchHtml(downloadPage, pageUrl)
-
                         val dlDoc = Jsoup.parse(dlHtml, downloadPage)
-
                         for (a in dlDoc.select("a[href]")) {
-
                             val h = a.attr("href").trim()
-
                             val sName = a.text().trim().replace(Regex("(?i)(وي سيما|wecima)"), "").trim()
-
                             if (isServerCandidateUrl(h) && (
-
                                 h.contains("uqload") || h.contains("vikingfile") || h.contains("turboviplay") ||
-
                                 h.contains("usersdrive") || h.contains("gofile") || h.contains("vidspeed") ||
-
                                 h.contains("forafile") || h.contains("down.") || h.contains("vidoba")
-
                             )) {
-
                                 if (servers.none { it.embedUrl == h }) {
-
                                     val label = if (sName.isNotBlank() && sName.length < 25) " ($sName)" else ""
-
                                     servers += ArabseedServer("سيرفر ${servers.size + 1}$label", h)
-
                                 }
-
                             }
-
                         }
-
                     } catch (_: Exception) {}
-
+                } else {
+                    try {
+                        val watchUrl = if (pageUrl.contains("?do=watch")) pageUrl else {
+                            if (pageUrl.contains("?")) "$pageUrl&do=watch" else "${pageUrl.trimEnd('/')}/?do=watch"
+                        }
+                        val wHtml = fetchHtml(watchUrl, pageUrl)
+                        val wDoc = Jsoup.parse(wHtml, watchUrl)
+                        for (ifr in wDoc.select("iframe[src], iframe[data-src]")) {
+                            var src = ifr.attr("abs:src").ifBlank { ifr.attr("abs:data-src").ifBlank { ifr.attr("src") } }.trim()
+                            if (src.contains("wecima", ignoreCase = true) && src.contains("/embed/")) {
+                                val innerHtml = fetchHtml(src, watchUrl)
+                                val innerIfr = Jsoup.parse(innerHtml, src).selectFirst("iframe[src], iframe[data-src]")
+                                    ?.let { it.attr("abs:src").ifBlank { it.attr("src") } }?.trim().orEmpty()
+                                if (innerIfr.isNotBlank()) src = innerIfr
+                            }
+                            if (isServerCandidateUrl(src, pageUrl) && servers.none { it.embedUrl == src }) {
+                                servers += ArabseedServer("وي سيما - سيرفر ${servers.size + 1}", src)
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
-
             }
 
-
-
-            // 3. FaselHD special embed buttons -> AJAX call to /ajax/embed
+            // 3. FaselHD servers (.tabs-ul li[onclick*='video_player'], iframe[data-src], or /ajax/embed)
 
             if (pageUrl.contains("fasel")) {
-
-                val fHtml = fetchHtml(pageUrl, "$baseUrl/")
-
-                val fDoc = Jsoup.parse(fHtml, pageUrl)
-
-                val embedButtons = fDoc.select("button.btn-service[data-embed], [data-embed]")
-
-                val futures = mutableListOf<Future<Pair<String, String>?>>()
-
-                for ((idx, btn) in embedButtons.take(6).withIndex()) {
-
-                    val embedId = btn.attr("data-embed").trim()
-
-                    val sName = btn.text().trim().replace(Regex("(?i)(فاصل|fasel)"), "").trim()
-
-                    if (embedId.isNotBlank()) {
-
-                        futures += pool.submit<Pair<String, String>?> {
-
-                            try {
-
-                                val formBody = FormBody.Builder().add("id", embedId).build()
-
-                                val postReq = Request.Builder()
-
-                                    .url(baseUrl.trimEnd('/') + "/ajax/embed")
-
-                                    .post(formBody)
-
-                                    .header("User-Agent", UA)
-
-                                    .header("Referer", pageUrl)
-
-                                    .header("X-Requested-With", "XMLHttpRequest")
-
-                                    .build()
-
-                                val respHtml = http.newCall(postReq).execute().use { it.body?.string() ?: "" }
-
-                                val ifr = Jsoup.parse(respHtml).selectFirst("iframe")?.attr("src")?.trim() ?: ""
-
-                                val absoluteIframe = absoluteServerUrl(ifr, pageUrl)
-                                if (isServerCandidateUrl(absoluteIframe)) sName to absoluteIframe else null
-
-                            } catch (_: Exception) { null }
-
-                        }
-
+                var fHtml = ""
+                var finalFaselUrl = pageUrl
+                var faselCookies = ""
+                runCatching {
+                    val fReq = Request.Builder().url(pageUrl)
+                        .header("User-Agent", UA).header("Referer", "$baseUrl/").build()
+                    http.newCall(fReq).execute().use { res ->
+                        finalFaselUrl = res.request.url.toString()
+                        faselCookies = extractCookiesHeader(res.headers("Set-Cookie"))
+                        fHtml = res.body?.string().orEmpty()
                     }
+                }
+                if (fHtml.isBlank()) {
+                    val pair = fetchHtmlAndFinalUrl(pageUrl, "$baseUrl/")
+                    fHtml = pair.first
+                    finalFaselUrl = pair.second
+                }
+                val faselBase = pageOrigin(finalFaselUrl, baseUrl).trimEnd('/')
+                val fDoc = Jsoup.parse(fHtml, finalFaselUrl)
 
+                // Modern faselhd.cc player_iframe + tabs-ul onclick='player_iframe.location.href = ...'
+                for (tab in fDoc.select(".tabs-ul li[onclick], ul.tabs-ul li[onclick], [onclick*='video_player']")) {
+                    val onclick = tab.attr("onclick")
+                    val vpUrl = Regex("""['"](https?://[^'"]*video_player[^'"]*)['"]""").find(onclick)?.groupValues?.get(1).orEmpty()
+                    val sName = tab.text().trim().replace(Regex("(?i)(فاصل|fasel|سيرفر المشاهدة)"), "").trim()
+                    if (vpUrl.isNotBlank() && servers.none { it.embedUrl == vpUrl }) {
+                        val label = if (sName.isNotBlank() && sName.length < 25) " ($sName)" else ""
+                        servers += ArabseedServer("فاصل إعلاني$label", vpUrl)
+                    }
+                }
+                for (ifr in fDoc.select("iframe[name='player_iframe'], iframe[data-src*='video_player']")) {
+                    val vpUrl = ifr.attr("abs:src").ifBlank { ifr.attr("abs:data-src").ifBlank { ifr.attr("data-src") } }.trim()
+                    if (vpUrl.isNotBlank() && isServerCandidateUrl(vpUrl, finalFaselUrl) && servers.none { it.embedUrl == vpUrl }) {
+                        servers += ArabseedServer("فاصل إعلاني - أساسي", vpUrl)
+                    }
                 }
 
-                for (f in futures) {
-
-                    try {
-
-                        val pair = f.get(3, TimeUnit.SECONDS)
-
-                        if (pair != null && servers.none { it.embedUrl == pair.second }) {
-
-                            val label = if (pair.first.isNotBlank() && pair.first.length < 25) " (${pair.first})" else ""
-
-                            servers += ArabseedServer("سيرفر ${servers.size + 1}$label", pair.second)
-
+                // AJAX embed buttons (POST {faselBase}/ajax/embed with id)
+                val embedButtons = fDoc.select("button.btn-service[data-embed], [data-embed]")
+                val futures = mutableListOf<Future<Pair<String, String>?>>()
+                for (btn in embedButtons.take(6)) {
+                    val embedId = btn.attr("data-embed").trim()
+                    val sName = btn.text().trim().replace(Regex("(?i)(فاصل|fasel)"), "").trim()
+                    if (embedId.isNotBlank()) {
+                        futures += pool.submit<Pair<String, String>?> {
+                            try {
+                                val formBody = FormBody.Builder().add("id", embedId).build()
+                                val postBuilder = Request.Builder()
+                                    .url("$faselBase/ajax/embed")
+                                    .post(formBody)
+                                    .header("User-Agent", UA)
+                                    .header("Referer", finalFaselUrl)
+                                    .header("Origin", faselBase)
+                                    .header("X-Requested-With", "XMLHttpRequest")
+                                if (faselCookies.isNotBlank()) postBuilder.header("Cookie", faselCookies)
+                                val respHtml = http.newCall(postBuilder.build()).execute().use { it.body?.string() ?: "" }
+                                val ifr = Jsoup.parse(respHtml).selectFirst("iframe")?.attr("src")?.trim() ?: ""
+                                val absoluteIframe = absoluteServerUrl(ifr, finalFaselUrl)
+                                if (isServerCandidateUrl(absoluteIframe, finalFaselUrl)) sName to absoluteIframe else null
+                            } catch (_: Exception) { null }
                         }
-
-                    } catch (_: Exception) {}
-
+                    }
                 }
-
+                for (f in futures) {
+                    try {
+                        val pair = f.get(3, TimeUnit.SECONDS)
+                        if (pair != null && servers.none { it.embedUrl == pair.second }) {
+                            val label = if (pair.first.isNotBlank() && pair.first.length < 25) " (${pair.first})" else ""
+                            servers += ArabseedServer("سيرفر ${servers.size + 1}$label", pair.second)
+                        }
+                    } catch (_: Exception) {}
+                }
             }
 
 
@@ -2123,7 +2688,7 @@ object MultiProviderRepository {
                     val resolvedSrc = if (src.contains("shot90.com", ignoreCase = true)) {
                         AdBypassHelper.decodeShot90Url(src) ?: src
                     } else src
-                    if (isServerCandidateUrl(resolvedSrc) && !isSeriesNavigationLink(element, resolvedSrc) &&
+                    if (isServerCandidateUrl(resolvedSrc, sourcePage) && !isSeriesNavigationLink(element, resolvedSrc) &&
                         servers.none { it.embedUrl == resolvedSrc }
                     ) {
                         servers += ArabseedServer("سيرفر ${servers.size + 1}", resolvedSrc)
@@ -2134,26 +2699,16 @@ object MultiProviderRepository {
                 // Constrain plain anchors to player/server containers so navigation
                 // links from the page are never mistaken for playable sources.
                 val serverElements = doc.select(
-                    "[data-embed], [data-src], [data-link], [data-url], [data-video], " +
+                    "[data-embed-url], [data-embed], [data-watch], [data-src], [data-link], [data-url], [data-video], [data-srcout], " +
                         ".servers a, a.server-btn, .watch-buttons a, .ep-sv a, .episode-sv a, " +
                         ".server-item, .server-block a, li.server a, .tab-pane a[href], " +
                         "#serversList li, #serversList a[href], .list_servers li, .list_servers a[href], " +
                         ".download-servers-list a[href], .donwload-servers-list a[href], #playeroptionsul a[href]",
                 )
                 for (element in serverElements) {
-                    val link = element.attr("data-embed").ifBlank {
-                        element.attr("data-src").ifBlank {
-                            element.attr("data-url").ifBlank {
-                                element.attr("data-link").ifBlank {
-                                    element.attr("data-video").ifBlank {
-                                        element.attr("abs:href").ifBlank { element.attr("href") }
-                                    }
-                                }
-                            }
-                        }
-                    }.trim()
+                    val link = extractServerAttr(element)
                     val absoluteLink = serverUrlFromAttribute(link, sourcePage)
-                    if (!isServerCandidateUrl(absoluteLink) || isSeriesNavigationLink(element, absoluteLink) ||
+                    if (!isServerCandidateUrl(absoluteLink, sourcePage) || isSeriesNavigationLink(element, absoluteLink) ||
                         servers.any { it.embedUrl == absoluteLink }
                     ) continue
                     val serverName = element.text().trim()
@@ -2180,7 +2735,7 @@ object MultiProviderRepository {
                                     .add("nume", nume)
                                     .add("type", type)
                                     .build()
-                                val req = Request.Builder()
+                                    val req = Request.Builder()
                                     .url(ajaxUrl)
                                     .post(form)
                                     .header("User-Agent", UA)
@@ -2190,7 +2745,7 @@ object MultiProviderRepository {
                                 val respStr = http.newCall(req).execute().use { it.body?.string() ?: "" }
                                 val ifr = Jsoup.parse(respStr).selectFirst("iframe[src]")?.attr("src")?.trim() ?: ""
                                 val absIfr = absoluteServerUrl(ifr, sourcePage)
-                                if (isServerCandidateUrl(absIfr) && servers.none { it.embedUrl == absIfr }) {
+                                if (isServerCandidateUrl(absIfr, sourcePage) && servers.none { it.embedUrl == absIfr }) {
                                     val label = if (sName.isNotBlank() && sName.length < 25) " ($sName)" else ""
                                     servers += ArabseedServer("سيرفر ${servers.size + 1}$label", absIfr)
                                 }
@@ -2210,7 +2765,7 @@ object MultiProviderRepository {
                     for (pattern in jsPatterns) {
                         pattern.findAll(html).forEach { match ->
                             val url = absoluteServerUrl(match.groupValues[1].replace("\\/", "/").trim(), sourcePage)
-                            if (isServerCandidateUrl(url) && servers.none { it.embedUrl == url }) {
+                            if (isServerCandidateUrl(url, sourcePage) && servers.none { it.embedUrl == url }) {
                                 servers += ArabseedServer("سيرفر ${servers.size + 1}", url)
                             }
                         }
@@ -2218,6 +2773,32 @@ object MultiProviderRepository {
                     }
                 }
                 if (servers.isNotEmpty()) break
+
+                // 4d. If page still has no servers, follow explicit /servers or /watch subpage link
+                val watchSubLink = doc.selectFirst("a[href*='/servers'], a[href*='/watch/'], a[href*='do=watch'], a.btn-watch")
+                    ?.attr("abs:href")?.trim().orEmpty()
+                if (watchSubLink.isNotBlank() && watchSubLink != sourcePage && watchSubLink != pageUrl &&
+                    isConfiguredProviderHostOrSame(provider, watchSubLink, pageUrl)
+                ) {
+                    val subHtml = fetchHtml(watchSubLink, sourcePage)
+                    if (subHtml.isNotBlank() && !AdBypassHelper.isCloudflareChallenge(subHtml)) {
+                        val subDoc = Jsoup.parse(subHtml, watchSubLink)
+                        for (el in subDoc.select("iframe[src], [data-embed-url], [data-embed], [data-watch], [data-src], [data-link], [data-url], [data-video]")) {
+                            val raw = extractServerAttr(el)
+                            val abs = serverUrlFromAttribute(raw, watchSubLink)
+                            if (isServerCandidateUrl(abs, watchSubLink) && !isSeriesNavigationLink(el, abs) &&
+                                servers.none { it.embedUrl == abs }
+                            ) {
+                                val sName = el.text().trim()
+                                    .replace(Regex("(?i)(أكوام|فاصل|وي سيما|إيجي بست|لودي نت|عرب ليونز|فشار|مشاهدة|سيرفر|server)"), "")
+                                    .trim()
+                                val label = if (sName.isNotBlank() && sName.length < 25) " ($sName)" else ""
+                                servers += ArabseedServer("سيرفر ${servers.size + 1}$label", abs)
+                            }
+                        }
+                    }
+                    if (servers.isNotEmpty()) break
+                }
             }
 
             // A provider content page itself is never treated as a video URL.
@@ -2278,7 +2859,10 @@ object MultiProviderRepository {
         }
         searchQueries += normalizedTitle
         searchQueries += title.trim()
-        val distinctQueries = searchQueries.filter(String::isNotBlank).distinct()
+        val distinctQueries = searchQueries
+            .map(::normalizeSearchQueryPunctuation)
+            .filter(String::isNotBlank)
+            .distinct()
 
         val originalProvider = getProviderForUrl(originalPageUrl)
         val sourceKey = originalProvider?.id ?: if (isArabseedPage(originalPageUrl)) {
@@ -2403,7 +2987,7 @@ object MultiProviderRepository {
                         if (!targetEpisodeUrl.isNullOrBlank() && targetEpisodeUrl != originalPageUrl) {
                             val arabseedServers = ArabseedRepository.fetchEpisodeServers(targetEpisodeUrl)
                             arabseedServers
-                                .filter { isServerCandidateUrl(it.embedUrl) }
+                                .filter { isServerCandidateUrl(it.embedUrl, targetEpisodeUrl) }
                                 .forEachIndexed { index, server ->
                                     if (server.embedUrl != originalPageUrl) {
                                         val tagged = server.copy(
@@ -2516,17 +3100,17 @@ object MultiProviderRepository {
         // 1. Latin tokens matching (Foreign, English, Anime, Korean titles)
         if (tLat.isNotEmpty() && cLat.isNotEmpty()) {
             val sharedLat = tLat.intersect(cLat)
-            if (sharedLat.size == tLat.size) return true
-            if (tLat.size >= 2 && sharedLat.size >= tLat.size - 1 && (sharedLat.size.toDouble() / cLat.size) >= 0.45) return true
-            if (tLat.size == 1 && sharedLat.size == 1 && cLat.size <= 3) return true
+            if (sharedLat.size == tLat.size && (cLat.size == tLat.size || (sharedLat.size.toDouble() / cLat.size) >= 0.70)) return true
+            if (tLat.size >= 3 && sharedLat.size >= tLat.size - 1 && (sharedLat.size.toDouble() / cLat.size) >= 0.70) return true
+            if (tLat.size == 1 && sharedLat.size == 1 && cLat.size == 1) return true
         }
 
         // 2. Arabic tokens matching (Arabic, Turkish, Dubbed titles)
         if (tAr.isNotEmpty() && cAr.isNotEmpty()) {
             val sharedAr = tAr.intersect(cAr)
-            if (sharedAr.size == tAr.size) return true
-            if (tAr.size >= 2 && sharedAr.size >= tAr.size - 1 && (sharedAr.size.toDouble() / cAr.size) >= 0.45) return true
-            if (tAr.size == 1 && sharedAr.size == 1 && cAr.size <= 3) return true
+            if (sharedAr.size == tAr.size && (cAr.size == tAr.size || (sharedAr.size.toDouble() / cAr.size) >= 0.70)) return true
+            if (tAr.size >= 3 && sharedAr.size >= tAr.size - 1 && (sharedAr.size.toDouble() / cAr.size) >= 0.70) return true
+            if (tAr.size == 1 && sharedAr.size == 1 && cAr.size == 1) return true
         }
 
         // 3. Combined exact token match
@@ -2574,8 +3158,9 @@ object MultiProviderRepository {
 
         val cardsCount = doc.select(".br-card, .MovieBlock, .GridItem, .postDiv, article.MovieItem, a.movie-card").size
         val hasPlayer = doc.select(
-            "iframe, .watch-box, #watch-player, .player-container, .watchServers, a.btn-watch, " +
-            "[data-link], [data-url], [data-src], [data-embed], ul.servers, .servers, #servers, .watch-servers"
+            "iframe, .watch-box, #watch-player, .player-container, .watchServers, a.btn-watch, button.btn-service, " +
+            "[data-link], [data-url], [data-src], [data-embed], [data-watch], [data-embed-url], " +
+            "ul.servers, ul.serversList, .list_servers, .servers, #servers, .watch-servers"
         ).isNotEmpty()
         if (cardsCount > 25 && !hasPlayer) {
             return true
@@ -2622,6 +3207,10 @@ object MultiProviderRepository {
         referer: String,
         client: OkHttpClient = http,
     ): List<ArabseedServer> {
+        if (getProviderForUrl(pageUrl) != null) {
+            val dedicated = fetchServers(pageUrl)
+            if (dedicated.isNotEmpty()) return dedicated.take(10)
+        }
         val result = mutableListOf<ArabseedServer>()
         try {
             val html = fetchHtmlWithClient(pageUrl, referer, client)
@@ -2634,22 +3223,21 @@ object MultiProviderRepository {
             for (ifr in doc.select("iframe[src]")) {
                 if (insideNonPlaybackContainer(ifr)) continue
                 val src = ifr.attr("abs:src").ifBlank { ifr.attr("src") }.trim()
-                if (isServerCandidateUrl(src) && result.none { it.embedUrl == src }) {
+                if (isServerCandidateUrl(src, pageUrl) && result.none { it.embedUrl == src }) {
                     result += ArabseedServer("سيرفر ", src)
                 }
             }
-            for (el in doc.select("[data-embed],[data-src],[data-url],[data-video],.servers a,a.server-btn")) {
+            for (el in doc.select("[data-embed-url],[data-embed],[data-watch],[data-src],[data-link],[data-url],[data-video],.servers a,a.server-btn")) {
                 if (insideNonPlaybackContainer(el)) continue
-                val link = el.attr("data-embed").ifBlank { el.attr("data-src").ifBlank { el.attr("data-url").ifBlank { el.attr("data-video").ifBlank { el.attr("href") } } } }.trim()
-                val abs = serverUrlFromAttribute(link, pageUrl)
-                if (isServerCandidateUrl(abs) && result.none { it.embedUrl == abs }) {
+                val abs = serverUrlFromAttribute(extractServerAttr(el), pageUrl)
+                if (isServerCandidateUrl(abs, pageUrl) && result.none { it.embedUrl == abs }) {
                     result += ArabseedServer("سيرفر ", abs)
                 }
             }
             // متابعة صفحة المشاهدة الفرعية إن لم نجد سيرفرات في الصفحة الرئيسية
             if (result.isEmpty()) {
                 val watchLink = doc.selectFirst("a[href*='/watch/'], a[href*='/servers/'], a[href*='/view/'], a.btn-watch, a[href*='watch']")?.attr("abs:href")?.trim().orEmpty()
-                if (watchLink.isNotBlank() && watchLink != pageUrl && isServerCandidateUrl(watchLink)) {
+                if (watchLink.isNotBlank() && watchLink != pageUrl && isServerCandidateUrl(watchLink, pageUrl)) {
                     val watchHtml = fetchHtmlWithClient(watchLink, pageUrl, client)
                     if (watchHtml.isNotBlank()) {
                         val wDoc = Jsoup.parse(watchHtml, watchLink)
@@ -2657,7 +3245,7 @@ object MultiProviderRepository {
                             for (ifr in wDoc.select("iframe[src]")) {
                                 if (insideNonPlaybackContainer(ifr)) continue
                                 val src = ifr.attr("abs:src").ifBlank { ifr.attr("src") }.trim()
-                                if (isServerCandidateUrl(src) && result.none { it.embedUrl == src }) {
+                                if (isServerCandidateUrl(src, pageUrl) && result.none { it.embedUrl == src }) {
                                     result += ArabseedServer("سيرفر ", src)
                                 }
                             }
@@ -2665,7 +3253,7 @@ object MultiProviderRepository {
                                 if (insideNonPlaybackContainer(el)) continue
                                 val link = el.attr("data-embed").ifBlank { el.attr("data-src").ifBlank { el.attr("data-url").ifBlank { el.attr("data-video").ifBlank { el.attr("href") } } } }.trim()
                                 val abs = serverUrlFromAttribute(link, watchLink)
-                                if (isServerCandidateUrl(abs) && result.none { it.embedUrl == abs }) {
+                                if (isServerCandidateUrl(abs, pageUrl) && result.none { it.embedUrl == abs }) {
                                     result += ArabseedServer("سيرفر ", abs)
                                 }
                             }
@@ -2717,6 +3305,18 @@ object MultiProviderRepository {
 
         try { servers = fetchServers(item.pageUrl) } catch (_: Exception) {}
 
+        // ── Failover: if the primary provider returned 0 servers, search across other providers ──
+        if (servers.isEmpty()) {
+            try {
+                servers = fetchServersAllProviders(
+                    title = item.title,
+                    originalPageUrl = item.pageUrl,
+                    type = item.type,
+                    requestedYear = item.year
+                )
+            } catch (_: Exception) {}
+        }
+
         // ── Smart pre-resolution: test servers in parallel, pick first working ──
         if (servers.isNotEmpty()) {
             preResolved = resolveFirstWorkingStream(servers, item.pageUrl)
@@ -2732,16 +3332,15 @@ object MultiProviderRepository {
         if (servers.isNotEmpty()) {
             detailCache[item.pageUrl] = detail
             detailCacheAt[item.pageUrl] = System.currentTimeMillis()
-            CatalogDiskCache.saveDetail("providers:detail:v3:" + item.pageUrl, detail)
+            CatalogDiskCache.saveDetail("providers:detail:v4:" + item.pageUrl, detail)
         }
 
         return detail
     }
 
     /**
-     * Tests all embed servers in parallel (up to 8 at once).
-     * Returns the first direct-playable URL (.mp4 / .m3u8) found, or null.
-     * Timeout per server: 10 seconds.
+     * Tests embed servers in parallel (up to 8 at once).
+     * Returns IMMEDIATELY on the first direct-playable URL (.mp4 / .m3u8) found.
      */
     private fun resolveFirstWorkingStream(
         servers: List<ArabseedServer>,
@@ -2749,45 +3348,162 @@ object MultiProviderRepository {
     ): String? {
         if (servers.isEmpty()) return null
 
-        // Already have a direct stream on a server? Return it immediately.
+        // Already have a verified direct stream on a server? Return it immediately.
         servers.firstOrNull { s ->
-            !s.directStreamUrl.isNullOrBlank() &&
-                (s.directStreamUrl.contains(".mp4") || s.directStreamUrl.contains(".m3u8"))
+            val direct = s.directStreamUrl.orEmpty()
+            direct.isNotBlank() &&
+                (direct.contains(".mp4") || direct.contains(".m3u8")) &&
+                isVerifiedPlayableStream(direct, pageReferer)
         }?.directStreamUrl?.let { return it }
 
         val ecs = ExecutorCompletionService<String?>(pool)
         val futures = servers.take(8).map { server ->
             ecs.submit(Callable<String?> {
                 try {
-                    resolveEmbedToStream(server.embedUrl, pageReferer)
+                    resolveStream(server.embedUrl, pageReferer)
                 } catch (_: Exception) { null }
             })
         }
 
         var found: String? = null
-        repeat(futures.size) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4)
+        for (ignored in futures.indices) {
+            val remaining = deadline - System.nanoTime()
+            if (remaining <= 0L) break
             try {
-                val result = ecs.poll(10, TimeUnit.SECONDS)
-                val stream = result?.get()
-                if (!stream.isNullOrBlank() && found == null) {
+                val result = ecs.poll(remaining, TimeUnit.NANOSECONDS) ?: break
+                val stream = result.get()
+                if (!stream.isNullOrBlank()) {
                     found = stream
+                    break
                 }
             } catch (_: Exception) {}
         }
-        // Cancel remaining
+        // Cancel remaining immediately once found or timed out
         futures.forEach { it.cancel(true) }
         return found
     }
 
-    /**
-     * Resolves a single embed URL to a direct .mp4 / .m3u8 stream.
-     * Handles: direct .mp4/.m3u8, iframes, JWPlayer, Vidmoly, Voe, Doodstream,
-     *          Streamtape, Vidsharing, Vidara, Uqload, Govid, Mixdrop, etc.
-     */
+    private fun isConfiguredProviderHostOrSame(provider: ProviderConfig?, candidateUrl: String, pageUrl: String): Boolean {
+        if (provider != null && isConfiguredProviderHost(provider, candidateUrl)) return true
+        return hostMatches(candidateUrl, pageUrl)
+    }
+
+    /** Unwrap wrapper URLs like `vid/?id=...`, `?mycimafsd=...`, or `sayyarh.com?url=...`. */
+    fun decodeIdWrapperUrl(rawUrl: String, depth: Int = 0): String {
+        val clean = rawUrl.trim()
+        if (depth > 3 || clean.isBlank()) return clean
+        val parsed = runCatching { clean.toHttpUrlOrNull() }.getOrNull()
+        val idParam = parsed?.queryParameter("id")
+            ?: parsed?.queryParameter("mycimafsd")
+            ?: when {
+                clean.contains("mycimafsd=") -> clean.substringAfter("mycimafsd=").substringBefore("&")
+                clean.contains("id=") -> clean.substringAfter("id=").substringBefore("&")
+                else -> null
+            }
+        if (!idParam.isNullOrBlank()) {
+            tryDecodeBase64HttpUrl(idParam)?.let { decoded ->
+                return decodeIdWrapperUrl(decoded, depth + 1)
+            }
+        }
+        val nestedUrl = parsed?.queryParameter("url")
+        if (!nestedUrl.isNullOrBlank() && nestedUrl.startsWith("http", true)) {
+            return decodeIdWrapperUrl(nestedUrl, depth + 1)
+        }
+        return clean
+    }
+
+    /** Decode VOE's modern MKGMa JSON script payload or legacy 'hls' / 'e' properties. */
+    fun decodeVoeHtmlStream(html: String): String? {
+        if (html.isBlank()) return null
+        Regex("""['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(html)
+            ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
+
+        Regex("""'e':\s*'([A-Za-z0-9+/=]{50,})'""").find(html)?.groupValues?.get(1)?.let { enc ->
+            runCatching { String(android.util.Base64.decode(enc, android.util.Base64.DEFAULT)) }
+                .getOrNull()?.let { decoded ->
+                    Regex("""['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE)
+                        .find(decoded)?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
+                }
+        }
+
+        // Modern VOE MKGMa <script type="application/json">["..."]</script> encoding
+        val jsonScripts = Regex("""<script\s+type=["']application/json["'][^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
+            .findAll(html)
+        for (match in jsonScripts) {
+            val rawArray = match.groupValues.getOrNull(1)?.trim().orEmpty()
+            if (rawArray.length < 40) continue
+            val decodedUrl = runCatching {
+                val arr = org.json.JSONArray(rawArray)
+                val enc = arr.optString(0).takeIf { it.length >= 40 } ?: return@runCatching null
+                val rot = buildString(enc.length) {
+                    for (ch in enc) {
+                        append(when (ch) {
+                            in 'A'..'Z' -> ('A'.code + (ch.code - 'A'.code + 13) % 26).toChar()
+                            in 'a'..'z' -> ('a'.code + (ch.code - 'a'.code + 13) % 26).toChar()
+                            else -> ch
+                        })
+                    }
+                }
+                var cleaned = rot
+                for (tok in arrayOf("@$", "^^", "~@", "%?", "*~", "!!", "#&")) {
+                    cleaned = cleaned.replace(tok, "_")
+                }
+                cleaned = cleaned.replace("_", "")
+                val step1 = String(android.util.Base64.decode(cleaned, android.util.Base64.DEFAULT), Charsets.ISO_8859_1)
+                val step2Reversed = buildString(step1.length) {
+                    for (i in step1.length - 1 downTo 0) {
+                        append(((step1[i].code - 3 + 256) % 256).toChar())
+                    }
+                }
+                val jsonStr = String(android.util.Base64.decode(step2Reversed, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                val obj = JSONObject(jsonStr)
+                listOf("source", "hls", "mp4")
+                    .map { obj.optString(it).trim() }
+                    .firstOrNull { it.startsWith("http", ignoreCase = true) }
+            }.getOrNull()
+            if (!decodedUrl.isNullOrBlank()) return decodedUrl
+        }
+        return null
+    }
+
     /** Public entry-point used by FlutterMediaBridge for the "media.resolve" channel. */
     fun resolveStream(embedUrl: String, referer: String): String? =
-        resolveEmbedToStream(embedUrl, referer)
-            ?.takeIf { isVerifiedPlayableStream(it, referer) }
+        resolveStreamWithReferer(embedUrl, referer)?.url
+
+    /** Resolves an embed URL and returns both the direct stream and the exact Referer accepted by its CDN. */
+    fun resolveStreamWithReferer(embedUrl: String, referer: String): ResolvedStreamResult? {
+        val normalizedEmbed = decodeIdWrapperUrl(embedUrl)
+        val cacheKey = "$normalizedEmbed\n$referer"
+        val now = System.currentTimeMillis()
+        resolvedStreamCache[cacheKey]?.let { (savedAt, cachedResult) ->
+            if (now - savedAt < STREAM_RESOLVE_TTL_MS && cachedResult.url.isNotBlank()) return cachedResult
+        }
+        val (candidateStream, finalEmbedUrl) = resolveEmbedToStreamWithMeta(normalizedEmbed, referer, depth = 0)
+            ?: return null
+        val finalOrigin = pageOrigin(finalEmbedUrl).let { if (it.isNotBlank()) "$it/" else "" }
+        val origOrigin = pageOrigin(normalizedEmbed).let { if (it.isNotBlank()) "$it/" else "" }
+        val refererCandidates = listOf(
+            finalOrigin,
+            finalEmbedUrl,
+            origOrigin,
+            normalizedEmbed,
+            referer.trim(),
+            "",
+        ).distinct()
+        val workingReferer = verifyPlayableStreamWithReferer(candidateStream, refererCandidates) ?: return null
+        val result = ResolvedStreamResult(url = candidateStream, referer = workingReferer)
+        resolvedStreamCache[cacheKey] = now to result
+        return result
+    }
+
+    /** Probes candidate Referer headers in priority order and returns the first accepted Referer, or null. */
+    fun verifyPlayableStreamWithReferer(streamUrl: String, refererCandidates: List<String>): String? {
+        for (candidate in refererCandidates.distinct()) {
+            if (isVerifiedPlayableStream(streamUrl, candidate)) return candidate
+        }
+        return null
+    }
 
     /**
      * Checks that an extracted URL responds as video/HLS rather than an error,
@@ -2812,7 +3528,7 @@ object MultiProviderRepository {
             .apply { if (referer.isNotBlank()) header("Referer", referer) }
             .build()
         val playable = try {
-            http.newCall(request).execute().use { response ->
+            probeHttp.newCall(request).execute().use { response ->
                 val finalUrl = response.request.url.toString()
                 if (!response.isSuccessful || isAdServerUrl(finalUrl)) return@use false
                 val body = response.body ?: return@use false
@@ -2879,87 +3595,229 @@ object MultiProviderRepository {
         return playable
     }
 
+    /**
+     * Verifies whether an embed webpage is actually alive and not a deleted-file,
+     * 404/5xx, parked, homepage, or CPA trap page before falling back to WebView playback.
+     */
+    fun isEmbedUrlAlive(embedUrl: String, referer: String): Boolean {
+        val parsed = embedUrl.toHttpUrlOrNull() ?: return false
+        if (parsed.scheme !in setOf("http", "https") || !isServerCandidateUrl(embedUrl)) return false
+        val cacheKey = "$embedUrl\n$referer"
+        val now = System.currentTimeMillis()
+        embedAliveCache[cacheKey]?.let { cached ->
+            if (now - cached.checkedAt < STREAM_PROBE_TTL_MS) return cached.playable
+        }
+
+        val request = Request.Builder()
+            .url(parsed)
+            .get()
+            .header("User-Agent", UA)
+            .header("Accept", "text/html,application/xhtml+xml,video/*,*/*;q=0.8")
+            .apply { if (referer.isNotBlank()) header("Referer", referer) }
+            .build()
+
+        val alive = try {
+            probeHttp.newCall(request).execute().use { response ->
+                val finalUrl = response.request.url.toString()
+                if (isAdServerUrl(finalUrl) || !isServerCandidateUrl(finalUrl)) return@use false
+                if (response.code == 403 || response.code == 404 || response.code == 410 || response.code >= 500) {
+                    return@use false
+                }
+
+                val bodyBytes = ByteArray(4096)
+                val count = response.body?.byteStream()?.use { it.read(bodyBytes).coerceAtLeast(0) } ?: 0
+                val snippet = String(bodyBytes, 0, count, Charsets.UTF_8).lowercase(java.util.Locale.ROOT)
+
+                val deadMarkers = listOf(
+                    "file was deleted", "file has been deleted", "file not found",
+                    "video not found", "this video has been removed", "video has expired",
+                    "no longer available", "404 not found", "page not found",
+                    "opencpamodal", "sorry, the file you requested"
+                )
+                if (deadMarkers.any(snippet::contains)) return@use false
+
+                response.isSuccessful
+            }
+        } catch (_: Exception) {
+            false
+        }
+        embedAliveCache[cacheKey] = StreamProbe(now, alive)
+        return alive
+    }
+
+    private fun decodeBase64UrlBytes(raw: String): ByteArray {
+        val normalized = raw.trim().replace('-', '+').replace('_', '/')
+        val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
+        return android.util.Base64.decode(padded, android.util.Base64.DEFAULT)
+    }
+
+    /** Decrypt Byse/Vidsharing SPA `/api/videos/{code}` AES-256-GCM playback payloads. */
+    private fun decodeByseStream(embedUrl: String): String? {
+        val origin = pageOrigin(embedUrl).trimEnd('/')
+        val code = embedUrl.substringBefore('?').trimEnd('/').substringAfterLast('/')
+        if (origin.isBlank() || code.isBlank() || code.length < 4) return null
+        return runCatching {
+            val req = Request.Builder().url("$origin/api/videos/$code")
+                .header("User-Agent", UA).header("Referer", embedUrl).header("Accept", "application/json").build()
+            val apiJson = probeHttp.newCall(req).execute().use { it.body?.string().orEmpty() }
+            if (apiJson.isBlank()) return@runCatching null
+            val playback = JSONObject(apiJson).optJSONObject("playback") ?: return@runCatching null
+            val keyParts = playback.optJSONArray("key_parts") ?: return@runCatching null
+            val version = playback.optString("version").trim().toIntOrNull()
+            val chosenParts = if (version != null && version in 1..20) {
+                val i1 = version - 1
+                val i2 = (31 - version) - 1
+                if (i1 in 0 until keyParts.length() && i2 in 0 until keyParts.length()) {
+                    listOf(keyParts.optString(i1), keyParts.optString(i2))
+                } else emptyList()
+            } else emptyList()
+            val parts = if (chosenParts.isNotEmpty()) chosenParts else (0 until keyParts.length()).map { keyParts.optString(it) }
+            val keyOut = java.io.ByteArrayOutputStream()
+            for (p in parts) {
+                if (p.isNotBlank()) keyOut.write(decodeBase64UrlBytes(p))
+            }
+            val keyBytes = keyOut.toByteArray()
+            val ivBytes = decodeBase64UrlBytes(playback.optString("iv"))
+            val cipherBytes = decodeBase64UrlBytes(playback.optString("payload"))
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, ivBytes))
+            val plain = String(cipher.doFinal(cipherBytes), Charsets.UTF_8)
+            val sources = JSONObject(plain).optJSONArray("sources") ?: return@runCatching null
+            (0 until sources.length()).mapNotNull { idx ->
+                sources.optJSONObject(idx)?.optString("url")?.replace("\\/", "/")?.trim()
+                    ?.takeIf { it.startsWith("http", true) }
+            }.firstOrNull()
+        }.getOrNull()
+    }
+
     private fun unpackDeanEdwards(script: String): String {
         return try {
-            val regex = Regex("""eval\(function\(p,a,c,k,e,[rd]\).+?return p\}\('(.*?)',(\d+),(\d+),'((?:[^'\\]|\\.)*)'\.split\('\|'\)""", RegexOption.DOT_MATCHES_ALL)
-            val match = regex.find(script) ?: return ""
-            val p = match.groupValues[1]
-            val aStr = match.groupValues[2]
-            val cStr = match.groupValues[3]
-            val kStr = match.groupValues[4]
-            val a = aStr.toIntOrNull() ?: return ""
-            val c = cStr.toIntOrNull() ?: return ""
-            val k = kStr.split('|')
-            fun baseN(num: Int, base: Int): String {
-                val digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                var n = num
-                val sb = StringBuilder()
-                while (n > 0) {
-                    sb.insert(0, digits[n % base])
-                    n /= base
+            val regex = Regex(
+                """eval\s*\(\s*function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*[rd]\s*\)\s*\{.*?\}\s*\(\s*(['"])((?:\\.|[^\\])*?)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])((?:\\.|[^\\])*?)\5\.split\s*\(\s*['"]\|['"]\s*\)""",
+                RegexOption.DOT_MATCHES_ALL,
+            )
+            val sb = StringBuilder()
+            for (match in regex.findAll(script)) {
+                val p = match.groupValues[2]
+                    .replace("\\'", "'")
+                    .replace("\\\"", "\"")
+                    .replace("\\\\", "\\")
+                val a = match.groupValues[3].toIntOrNull()?.coerceIn(2, 62) ?: continue
+                val c = match.groupValues[4].toIntOrNull() ?: continue
+                val k = match.groupValues[6].split('|')
+                fun baseN(num: Int): String {
+                    val prefix = if (num < a) "" else baseN(num / a)
+                    val rem = num % a
+                    val ch = if (rem > 35) (rem + 29).toChar().toString() else rem.toString(36)
+                    return prefix + ch
                 }
-                return if (sb.isEmpty()) "0" else sb.toString()
+                val dict = HashMap<String, String>(c)
+                for (i in (c - 1) downTo 0) {
+                    val key = if (a <= 10) i.toString() else baseN(i)
+                    val word = if (i < k.size && k[i].isNotEmpty()) k[i] else key
+                    dict[key] = word
+                }
+                sb.append(Regex("""\b\w+\b""").replace(p) { m -> dict[m.value] ?: m.value }).append('\n')
             }
-            val dict = HashMap<String, String>(c)
-            for (i in 0 until c) {
-                val key = if (a <= 10) i.toString() else baseN(i, a)
-                val word = if (i < k.size && k[i].isNotEmpty()) k[i] else key
-                dict[key] = word
-            }
-            val wordRegex = Regex("""\b\w+\b""")
-            wordRegex.replace(p) { m -> dict[m.value] ?: m.value }
+            sb.toString()
         } catch (_: Exception) { "" }
     }
 
-    private fun resolveEmbedToStream(embedUrl: String, referer: String): String? {
-        if (embedUrl.isBlank()) return null
-        if (isAdServerUrl(embedUrl)) return null
+    private fun resolveEmbedToStream(embedUrl: String, referer: String): String? =
+        resolveEmbedToStreamWithMeta(embedUrl, referer, 0)?.first
 
-        // 1. Already a direct stream
-        val path = embedUrl.substringBefore("?").lowercase()
-        if (path.endsWith(".mp4") || path.endsWith(".m3u8")) return embedUrl
+    /** Resolves an embed page and returns (directStreamUrl, finalRedirectedEmbedUrl). */
+    fun resolveEmbedToStreamWithMeta(
+        embedUrl: String,
+        referer: String,
+        depth: Int = 0,
+    ): Pair<String, String>? {
+        if (depth > 3 || embedUrl.isBlank()) return null
+        val targetUrl = decodeIdWrapperUrl(embedUrl)
+        if (isAdServerUrl(targetUrl)) return null
 
-        // 2. Fetch the embed page HTML
-        val html = try {
-            fetchHtmlSafe(embedUrl, referer)
+        // 1. Already a direct stream (including shahid4u.si /api/hls/stream/...)
+        val path = targetUrl.substringBefore("?").lowercase()
+        if (path.endsWith(".mp4") || path.endsWith(".m3u8") || targetUrl.contains("/api/hls/stream/")) {
+            return targetUrl to referer.ifBlank { targetUrl }
+        }
+
+        // 2. Fetch the embed page HTML + capture final redirect URL
+        val (html, finalEmbedUrl) = try {
+            fetchHtmlAndFinalUrl(targetUrl, referer)
         } catch (_: Exception) { return null }
         if (html.isBlank()) return null
 
-        val unpackedJs = if (html.contains("eval(function(p,a,c,k,e")) unpackDeanEdwards(html) else ""
+        val lowerFinal = finalEmbedUrl.lowercase(java.util.Locale.ROOT)
+        if (html.trimStart().startsWith("#EXTM3U")) {
+            return finalEmbedUrl to referer.ifBlank { pageOrigin(finalEmbedUrl) }
+        }
+
+        val unpackedJs = if (html.contains("eval") && html.contains("function(p,a,c,k,e")) unpackDeanEdwards(html) else ""
         val searchScope = if (unpackedJs.isNotBlank()) "$html\n$unpackedJs" else html
 
-        // ── Provider-specific extractors ────────────────────────────
+        fun normalizeStreamCandidate(raw: String): String? {
+            val cleaned = raw.replace("\\/", "/").replace("&amp;", "&").trim()
+            val withScheme = when {
+                cleaned.startsWith("//") -> "https:$cleaned"
+                cleaned.startsWith("/") -> absoluteServerUrl(cleaned, finalEmbedUrl)
+                else -> cleaned
+            }
+            return withScheme.takeIf { it.startsWith("http") && !isAdUrl(it) && !it.contains("thumb") && !it.contains("poster") }
+        }
 
-        // Voe.sx
-        if (embedUrl.contains("voe.sx") || embedUrl.contains("voe.")) {
-            Regex("""['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE).find(searchScope)
-                ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
-            // base64 encoded sources
-            Regex("""'e':\s*'([A-Za-z0-9+/=]{50,})'""").find(searchScope)?.groupValues?.get(1)?.let { enc ->
-                runCatching {
-                    String(android.util.Base64.decode(enc, android.util.Base64.DEFAULT))
-                }.getOrNull()?.let { decoded ->
-                    Regex("""['"]hls['"]\s*:\s*['"]([^'"]+\.m3u8[^'"]*)['"]""", RegexOption.IGNORE_CASE)
-                        .find(decoded)?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
-                }
+        fun hit(url: String): Pair<String, String> = url to finalEmbedUrl
+
+        // Byse / Vidsharing SPA (AES-256-GCM /api/videos/{code})
+        if (lowerFinal.contains("byse") || lowerFinal.contains("vidsharing") || html.contains("Byse Frontend")) {
+            decodeByseStream(finalEmbedUrl)?.let { return hit(it) }
+        }
+
+        // MyCima-MY ArtPlayer (shahid4u.bid data-watch)
+        Regex("""videoUrl\s*=\s*["']([^"']+\.(?:mp4|m3u8)[^"']*)["']""", RegexOption.IGNORE_CASE)
+            .find(searchScope)?.groupValues?.get(1)?.let(::normalizeStreamCandidate)?.let { return hit(it) }
+
+        // XFileSharing unpacked `var links={"hls4":"...","hls2":"...","hls3":"..."}` (Minochinos, Callistanise, Fastvid, Earnvids)
+        val xfsUrls = Regex("""["']hls[234]?["']\s*:\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+            .findAll(searchScope).mapNotNull { normalizeStreamCandidate(it.groupValues[1]) }.toList()
+        (xfsUrls.firstOrNull { it.contains(".m3u8", true) } ?: xfsUrls.firstOrNull())?.let { return hit(it) }
+
+        // ── Follow JS redirects on embed landing pages (e.g. voe.sx -> mirror) ──
+        if (html.length < 4096 && (html.contains("Redirecting") || html.contains("window.location"))) {
+            val jsRedirect = Regex("""window\.location(?:\.href)?\s*=\s*['"](https?://[^'"]+)['"]""", RegexOption.IGNORE_CASE)
+                .find(html)?.groupValues?.get(1)?.trim()
+            if (!jsRedirect.isNullOrBlank() && jsRedirect != finalEmbedUrl && jsRedirect != targetUrl) {
+                resolveEmbedToStreamWithMeta(jsRedirect, finalEmbedUrl, depth + 1)?.let { return it }
             }
         }
 
-        // Doodstream
-        if (embedUrl.contains("dood") || embedUrl.contains("ds2play") || embedUrl.contains("dooood")) {
+        // ── Provider-specific extractors ────────────────────────────
+
+        // Voe.sx / Voe mirrors (MKGMa JSON + legacy patterns)
+        if (finalEmbedUrl.contains("voe.") || targetUrl.contains("voe.") || html.contains("MKGMa")) {
+            decodeVoeHtmlStream(searchScope)?.let { return hit(it) }
+        }
+
+        // Doodstream / Playmogo / D000d / Myvidplay
+        if (lowerFinal.contains("dood") || lowerFinal.contains("ds2play") || lowerFinal.contains("dooood") ||
+            lowerFinal.contains("d000d") || lowerFinal.contains("playmogo") || lowerFinal.contains("doodstream") ||
+            lowerFinal.contains("myvidplay") || lowerFinal.contains("doply") || searchScope.contains("/pass_md5/")
+        ) {
             val passMatch = Regex("""\$\.get\s*\(\s*'(/pass_md5/[^']+)'""").find(searchScope)
+                ?: Regex("""['"](/pass_md5/[^'"]+)['"]""").find(searchScope)
             passMatch?.groupValues?.get(1)?.let { passPath ->
                 val tokenMatch = Regex("""token=([a-zA-Z0-9]+)""").find(searchScope)
                 val token = tokenMatch?.groupValues?.get(1) ?: ""
-                val baseHost = try { java.net.URI(embedUrl).let { "${it.scheme}://${it.host}" } } catch (_: Exception) { "" }
+                val baseHost = pageOrigin(finalEmbedUrl).ifBlank { pageOrigin(targetUrl) }
                 if (baseHost.isNotBlank()) {
                     try {
                         val passReq = Request.Builder().url("$baseHost$passPath")
-                            .header("User-Agent", UA).header("Referer", embedUrl).build()
-                        val passResult = http.newCall(passReq).execute().use { it.body?.string() ?: "" }
-                        if (passResult.isNotBlank()) {
-                            val streamUrl = "${passResult.trim()}${System.currentTimeMillis()}?token=$token&expiry=${System.currentTimeMillis() + 60000}"
-                            return streamUrl
+                            .header("User-Agent", UA).header("Referer", finalEmbedUrl).build()
+                        val passResult = probeHttp.newCall(passReq).execute().use { it.body?.string() ?: "" }
+                        if (passResult.trim().startsWith("http")) {
+                            val nowMs = System.currentTimeMillis()
+                            val streamUrl = "${passResult.trim()}$nowMs?token=$token&expiry=${nowMs + 60000}"
+                            return hit(streamUrl)
                         }
                     } catch (_: Exception) {}
                 }
@@ -2967,94 +3825,101 @@ object MultiProviderRepository {
         }
 
         // Streamtape
-        if (embedUrl.contains("streamtape")) {
+        if (lowerFinal.contains("streamtape")) {
             Regex("""id=([a-zA-Z0-9_-]+)&expires""").find(searchScope)?.groupValues?.get(1)?.let { id ->
                 Regex("""'[^']*'\s*\+\s*'([^']+)'""").find(searchScope)?.groupValues?.get(1)?.let { token ->
-                    return "https://streamtape.com/get_video?id=$id&expires=&ip=&token=$token&stream=1"
+                    return hit("https://streamtape.com/get_video?id=$id&expires=&ip=&token=$token&stream=1")
                 }
             }
             // Alternative Streamtape pattern
             Regex("""document\.getElementById\(['"]\S+['"]\)\.innerHTML\s*=\s*["']([^"']+)["']""").find(searchScope)
                 ?.groupValues?.get(1)?.let { raw ->
-                    if (raw.contains("streamtape")) return "https:$raw"
+                    if (raw.contains("streamtape")) return hit(if (raw.startsWith("//")) "https:$raw" else raw)
                 }
         }
 
         // Vidmoly
-        if (embedUrl.contains("vidmoly")) {
+        if (lowerFinal.contains("vidmoly")) {
             Regex("""['"]?(https?://[^\s'"<>]+\.m3u8[^\s'"<>]*)['"]?""").find(searchScope)
-                ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
+                ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return hit(it) }
         }
 
         // Uqload / Govid / Vidsharing (sources: [...])
         Regex("""sources\s*:\s*\[\s*['"]([^'"]+\.(?:mp4|m3u8)[^'"]*)['"]""").find(searchScope)
-            ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
+            ?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return hit(it) }
 
-        // Mixdrop
-        if (embedUrl.contains("mixdrop")) {
+        // Mixdrop / Mxdrop
+        if (lowerFinal.contains("mixdrop") || lowerFinal.contains("mxdrop")) {
             Regex("""(?:MDCore\.wurl|\"wurl\"|wurl)\s*[:=]\s*["']([^"']+)["']""").find(searchScope)
                 ?.groupValues?.get(1)?.let { wurl ->
-                    val cleanWurl = if (wurl.startsWith("//")) "https:$wurl" else wurl
-                    return cleanWurl
+                    normalizeStreamCandidate(wurl)?.let { return hit(it) }
                 }
         }
 
         // Vidara / Sugbaioug API
-        if (embedUrl.contains("vidara.") || embedUrl.contains("sugbaioug.")) {
-            val fileCode = embedUrl.trimEnd('/').substringAfterLast('/')
+        if (lowerFinal.contains("vidara.") || lowerFinal.contains("sugbaioug.")) {
+            val fileCode = finalEmbedUrl.trimEnd('/').substringAfterLast('/')
             if (fileCode.isNotBlank()) {
                 try {
                     val body = """{"filecode":"$fileCode","device":"android"}"""
                     val req = Request.Builder().url("https://vidara.to/api/stream")
                         .post(body.toRequestBody("application/json".toMediaType()))
-                        .header("User-Agent", UA).header("Referer", embedUrl).build()
-                    http.newCall(req).execute().use { r ->
+                        .header("User-Agent", UA).header("Referer", finalEmbedUrl).build()
+                    probeHttp.newCall(req).execute().use { r ->
                         Regex(""""streaming_url"\s*:\s*"([^"]+)"""").find(r.body?.string() ?: "")
                             ?.groupValues?.get(1)?.replace("\\/", "/")?.takeIf { it.startsWith("http") }
-                            ?.let { return it }
+                            ?.let { return hit(it) }
                     }
                 } catch (_: Exception) {}
             }
         }
 
-        // ── Generic extractors ────────────────────────────────────────
+        // ── Generic extractors (search both HTML and unpacked JS) ─────
 
         // Direct <source src="..."> tags
-        Regex("""<source\s+[^>]*src=['"]([^'"]+\.(?:mp4|m3u8)(?:\?[^'"]*)?)['"']""", RegexOption.IGNORE_CASE)
-            .findAll(html).mapNotNull { it.groupValues.getOrNull(1)?.replace("&amp;", "&")?.trim() }
-            .firstOrNull { it.startsWith("http") }?.let { return it }
+        Regex("""<source\s+[^>]*src=['"]([^'"]+\.(?:mp4|m3u8)(?:\?[^'"]*)?)['"]""", RegexOption.IGNORE_CASE)
+            .findAll(searchScope).mapNotNull { normalizeStreamCandidate(it.groupValues.getOrNull(1).orEmpty()) }
+            .firstOrNull()?.let { return hit(it) }
 
-        // Any URL containing .m3u8 or .mp4
-        Regex("""['"]?(https?://[^\s'"<>]+\.(?:m3u8|mp4)(?:\?[^\s'"<>]*)?)['"]?""", RegexOption.IGNORE_CASE)
-            .findAll(html).mapNotNull { it.groupValues.getOrNull(1) }
-            .firstOrNull { it.startsWith("http") && !it.contains("thumb") && !it.contains("poster") }
-            ?.let { return it }
+        // Any URL containing .m3u8 or .mp4 (including protocol-relative // urls from unpacked players)
+        Regex("""['"]?((?:https?:)?//[^\s'"<>\\]+\.(?:m3u8|mp4)(?:\?[^\s'"<>\\]*)?)['"]?""", RegexOption.IGNORE_CASE)
+            .findAll(searchScope).mapNotNull { normalizeStreamCandidate(it.groupValues.getOrNull(1).orEmpty()) }
+            .firstOrNull()?.let { return hit(it) }
 
         // JWPlayer / VideoJS sources
-        Regex("""(?:file|src)\s*:\s*['"]([^'"]+\.(?:mp4|m3u8)[^'"]*)['"]""", RegexOption.IGNORE_CASE)
-            .find(html)?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
+        Regex("""(?:file|src)\s*:\s*['"]((?:https?:)?//[^'"]+\.(?:mp4|m3u8)[^'"]*)['"]""", RegexOption.IGNORE_CASE)
+            .findAll(searchScope).mapNotNull { normalizeStreamCandidate(it.groupValues.getOrNull(1).orEmpty()) }
+            .firstOrNull()?.let { return hit(it) }
 
-        // Follow iframe hop (one level deep)
-        val ifrSrc = Jsoup.parse(html, embedUrl).select("iframe[src]")
-            .firstOrNull { !isAdUrl(it.attr("src")) }
+        // Follow visible iframe hop (one level deep; skip hidden 0x0 tracking iframes like govid's mycima.help)
+        val ifrSrc = Jsoup.parse(searchScope, finalEmbedUrl).select("iframe[src]")
+            .firstOrNull { ifr ->
+                val rawSrc = ifr.attr("src").trim()
+                val style = ifr.attr("style").lowercase()
+                val w = ifr.attr("width").trim()
+                val h = ifr.attr("height").trim()
+                val isHidden = w == "0" || h == "0" || style.contains("display:none") ||
+                    style.contains("display: none") || style.contains("visibility:hidden")
+                !isHidden && !isAdUrl(rawSrc) && !isAdServerUrl(rawSrc) && !rawSrc.contains("mycima.help", true)
+            }
             ?.attr("abs:src")?.trim() ?: ""
-        if (ifrSrc.isNotBlank() && ifrSrc != embedUrl) {
-            return resolveEmbedToStream(ifrSrc, embedUrl)
+        if (ifrSrc.isNotBlank() && ifrSrc != finalEmbedUrl && ifrSrc != targetUrl) {
+            return resolveEmbedToStreamWithMeta(ifrSrc, finalEmbedUrl, depth + 1)
         }
 
         // Hex-encoded stream URL
-        Regex("""['"]?(68747470[0-9a-fA-F]{30,})['"]?""").findAll(html).forEach { m ->
+        Regex("""['"]?(68747470[0-9a-fA-F]{30,})['"]?""").findAll(searchScope).forEach { m ->
             val dec = hexToStringMPR(m.groupValues[1])
-            if (dec.startsWith("http") && (dec.contains(".m3u8") || dec.contains(".mp4"))) return dec
+            if (dec.startsWith("http") && (dec.contains(".m3u8") || dec.contains(".mp4"))) return hit(dec)
         }
 
         // atob() Base64 URLs
-        Regex("""atob\(['"]([A-Za-z0-9+/=]{20,})['"]""").findAll(html).forEach { m ->
+        Regex("""atob\(['"]([A-Za-z0-9+/=]{20,})['"]""").findAll(searchScope).forEach { m ->
             val decoded = runCatching {
                 String(android.util.Base64.decode(m.groupValues[1], android.util.Base64.DEFAULT))
             }.getOrNull() ?: return@forEach
-            Regex("""['"]?(https?://[^\s'"<>]+\.(?:m3u8|mp4)[^\s'"<>]*)['"]?""")
-                .find(decoded)?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { return it }
+            Regex("""['"]?((?:https?:)?//[^\s'"<>]+\.(?:m3u8|mp4)[^\s'"<>]*)['"]?""")
+                .find(decoded)?.groupValues?.get(1)?.let(::normalizeStreamCandidate)?.let { return hit(it) }
         }
 
         return null
@@ -3104,8 +3969,11 @@ object MultiProviderRepository {
             val requestedSeasonPageNumber = seasonNumbersOnly?.singleOrNull()
                 ?.takeIf { pageSeasonNumber == it }
             val selectors = listOf(
+                ".pwr-season-panel a[href]", ".epslist a[href]", "a.episode-card",
+                "a.sh-episode-tile", ".Small--Box a", ".episode a", ".episodes a",
                 ".episodes-list a", ".EpisodesList li a", ".eplister li a",
-                ".eps-list li a", ".eps a", "a.episode__item", ".episode__item a", "a.ep-item",
+                ".eps-list li a", ".eps a", "a.ep", "a.episode__item", ".episode__item a", "a.ep-item",
+                "div.block-post a[href*='/clarus/']", "a[href*='/clarus/']",
                 "a[href*='%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-']", "a[href*='الحلقة']",
                 "a[href*='episode']", "a[href*='ep-']", ".postDiv a[href*='serie']",
                 ".episodes-list [data-url], .episodes-list [data-href]",
@@ -3129,7 +3997,7 @@ object MultiProviderRepository {
                             val txt = el.text().trim().ifBlank { el.attr("title").trim() }
                             val hasEpisodeListParent = el.parents().any { ancestor ->
                                 val marker = "${ancestor.className()} ${ancestor.id()}".lowercase()
-                                listOf("episode", "episodes", "eplist", "eps-list", "episodeslist", "eps", "episodios")
+                                listOf("episode", "episodes", "eplist", "eps-list", "episodeslist", "epslist", "eps", "episodios", "pwr-season-panel")
                                     .any(marker::contains)
                             } || el.classNames().any { className ->
                                 className.contains("episode", ignoreCase = true)
@@ -3185,8 +4053,8 @@ object MultiProviderRepository {
                         pageHtml.takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
                     },
                     parseEpisodes = ::collectEpisodes,
-                    maxPages = if (forceRefresh) 8 else 4,
-                    timeoutSeconds = if (forceRefresh) 15 else 8,
+                    maxPages = if (forceRefresh) 30 else 15,
+                    timeoutSeconds = if (forceRefresh) 16 else 9,
                 )
                 for (ep in paginated) {
                     val existingIndex = rawEpisodes.indexOfFirst {
@@ -3319,7 +4187,7 @@ object MultiProviderRepository {
                             visibleEpisodeNumbers[number].orEmpty(),
                         ))
                 }
-                .take(30)
+                .take(50)
             val seasonPageCompletion = ExecutorCompletionService<Pair<Int, List<Triple<String, String, Int?>>>>(seasonPagePool)
             val seasonPageFutures = seasonPagesToFetch.map { (seasonNumber, seasonUrl) ->
                 seasonPageCompletion.submit(Callable {
@@ -3341,16 +4209,20 @@ object MultiProviderRepository {
                                 Triple(title, href, number ?: seasonNumber)
                             }
                         },
-                        maxPages = if (forceRefresh) 8 else 4,
-                        timeoutSeconds = if (forceRefresh) 15 else 8,
+                        maxPages = if (forceRefresh) 24 else 12,
+                        timeoutSeconds = if (forceRefresh) 14 else 9,
                     )
                     seasonNumber to paginated
                 })
             }
-            // A series page is on the first paint path, so keep its initial
-            // season lookup short. Background mirror lookups get enough time
-            // to walk paginated episode lists instead of being cut off early.
-            val seasonPageWaitSeconds = if (forceRefresh || seasonNumbersOnly != null) 22L else 5L
+            // A series page is on the first paint path, so keep short series fast while
+            // giving 12+ season shows enough budget to collect all seasons cleanly.
+            val seasonPageWaitSeconds = when {
+                seasonPagesToFetch.size >= 12 -> 16L
+                seasonPagesToFetch.size >= 4 -> 12L
+                seasonNumbersOnly != null -> 10L
+                else -> 9L
+            }
             val seasonPageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seasonPageWaitSeconds)
             val seasonPageAssignments = mutableSetOf<String>()
             var unfinishedSeasonPages = seasonPageFutures.size
@@ -3536,7 +4408,7 @@ object MultiProviderRepository {
             if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                 seasonCache[item.pageUrl] = bundle
                 seasonCacheAt[item.pageUrl] = System.currentTimeMillis()
-                CatalogDiskCache.saveSeasonBundle("providers:seasons:v24:" + item.pageUrl, bundle)
+                CatalogDiskCache.saveSeasonBundle("providers:seasons:v26:" + item.pageUrl, bundle)
             }
             bundle
         } catch (_: Exception) {
@@ -3639,7 +4511,7 @@ object MultiProviderRepository {
         primaryBundle: ArabseedSeasonBundle,
         forceRefresh: Boolean = false,
     ): ArabseedSeasonBundle {
-        val cacheKey = "combined:seasons:v23:${item.pageUrl}"
+        val cacheKey = "combined:seasons:v26:${item.pageUrl}"
         if (!forceRefresh) loadCachedMergedSeasonBundle(item.pageUrl)?.let { cached ->
             if (!needsSeasonEnrichment(item, cached) &&
                 (primaryBundle.seasons.isEmpty() ||
@@ -3679,7 +4551,11 @@ object MultiProviderRepository {
                 if (arColon.length >= 3) add(arColon)
                 if (cleanAr.length >= 3) add(cleanAr)
             }
-        }.distinct()
+        }
+            .map(::normalizeSearchQueryPunctuation)
+            .filter(String::isNotBlank)
+            .distinct()
+            .take(2)
 
         val targetIdentityKeys = buildList {
             add(titleKey)
@@ -3691,7 +4567,8 @@ object MultiProviderRepository {
 
         val directDiscoveredEpisodes = java.util.concurrent.ConcurrentLinkedQueue<ArabseedEpisode>()
         val year = releaseYear(item)
-        val allEnabledProviders = PROVIDERS.filter { it.enabled }
+        val originalProviderId = getProviderForUrl(item.pageUrl)?.id
+        val allEnabledProviders = PROVIDERS.filter { it.enabled && it.id != originalProviderId }
         val primaryProviders = allEnabledProviders.filter { it.isPrimary }
         val backupProviders = allEnabledProviders.filter { !it.isPrimary }
 
@@ -3759,16 +4636,16 @@ object MultiProviderRepository {
             }
         }
 
-        // Fast Stage 1: Priority search on the 4 primary providers (Arabseed, Akwam, WeCima, FaselHD)
+        // Fast Stage 1: Parallel priority search across active primary providers
         val primaryTasks = primaryProviders.map { makeSearchTask(it) }
-        val primaryDiscovered = collectParallel(primaryTasks, timeoutSeconds = 5)
+        val primaryDiscovered = collectParallel(primaryTasks, timeoutSeconds = 3)
 
         // Stage 2: Only fallback to backup providers if primary providers returned zero results
         val discovered = if (primaryDiscovered.isNotEmpty() || directDiscoveredEpisodes.isNotEmpty()) {
             primaryDiscovered
         } else {
             val backupTasks = backupProviders.map { makeSearchTask(it) }
-            collectParallel(backupTasks, timeoutSeconds = 6)
+            collectParallel(backupTasks, timeoutSeconds = 3)
         }
         val primaryUrl = SeriesCatalogParser.normalizedUrl(item.pageUrl)
         val candidates = selectSeriesPages(discovered)
@@ -3811,18 +4688,27 @@ object MultiProviderRepository {
             .mapNotNull { rows -> rows.maxByOrNull(::catalogMetadataScore) }
             .take(PROVIDERS.count { it.enabled })
             .map { it to null }
-        // Prioritize primary providers first, bounded to 8 mirrors max for lightning fast load
+        // Prioritize external canonical mirrors first (e.g. Shahid4U.si, WeCima, Esheeq)
+        // before local season-tab fallback links so one provider's extra season tabs never
+        // crowd out complete multi-season mirrors.
         val mirrorLimit = 8
-        val mirrors = (canonicalMirrors + localSeasonMirrors + seasonPageMirrors)
+        val primaryMirrorHost = runCatching { java.net.URI.create(item.pageUrl).host.orEmpty().lowercase().removePrefix("www.") }.getOrDefault("")
+        val externalMirrors = (canonicalMirrors + seasonPageMirrors)
             .distinctBy { SeriesCatalogParser.normalizedUrl(it.first.pageUrl) }
             .sortedWith(
                 compareByDescending<Pair<ArabseedItem, Set<Int>?>> { (mirror, _) ->
+                    val mirrorHost = runCatching { java.net.URI.create(mirror.pageUrl).host.orEmpty().lowercase().removePrefix("www.") }.getOrDefault("")
+                    if (mirrorHost.isNotBlank() && mirrorHost != primaryMirrorHost) 1 else 0
+                }.thenByDescending { (mirror, _) ->
                     val provider = getProviderForUrl(mirror.pageUrl)
                     if (provider?.isPrimary == true) 2 else 0
                 }.thenByDescending { (mirror, _) ->
                     catalogMetadataScore(mirror)
                 }
             )
+        val remainingSlots = (mirrorLimit - externalMirrors.size).coerceAtLeast(1)
+        val mirrors = (externalMirrors.take(mirrorLimit) + localSeasonMirrors.take(remainingSlots))
+            .distinctBy { SeriesCatalogParser.normalizedUrl(it.first.pageUrl) }
             .take(mirrorLimit)
 
         val discoveredProviders = discovered
@@ -3866,22 +4752,24 @@ object MultiProviderRepository {
             completion.submit(Callable {
                 mirror to fetchSeasonsAndEpisodes(
                     mirror,
-                    forceRefresh = true,
+                    forceRefresh = false,
                     seasonNumbersOnly = seasonNumbers,
                 )
             })
         }
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
-        repeat(futures.size) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
+        var unfinished = futures.size
+        while (unfinished > 0) {
             val remaining = deadline - System.nanoTime()
-            if (remaining <= 0L) return@repeat
+            if (remaining <= 0L) break
             val finished = try {
-                completion.poll(remaining, TimeUnit.NANOSECONDS) ?: return@repeat
+                completion.poll(remaining, TimeUnit.NANOSECONDS) ?: break
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
-                return@repeat
+                break
             }
-            val completedBundle = runCatching { finished.get() }.getOrNull() ?: return@repeat
+            unfinished--
+            val completedBundle = runCatching { finished.get() }.getOrNull() ?: continue
             val (sourceItem, sourceBundle) = completedBundle
             val sourceCounts = sourceBundle.seasons.joinToString(",") {
                 "${it.number}:${it.episodes.size}"
@@ -3902,10 +4790,10 @@ object MultiProviderRepository {
             if (partial.seasons.isNotEmpty() || partial.relatedParts.isNotEmpty()) {
                 CatalogDiskCache.saveSeasonBundle(cacheKey, partial)
             }
-            val allSeasonsGood = partial.seasons.isNotEmpty() && partial.seasons.all { it.episodes.size >= 5 }
-            if (allSeasonsGood && System.nanoTime() > (deadline - TimeUnit.SECONDS.toNanos(4))) {
-                android.util.Log.i(TAG, "Early break in season enrichment: all seasons have 5+ episodes")
-                return@repeat
+            val allSeasonsContiguous = partial.seasons.isNotEmpty() && !needsSeasonEnrichment(item, partial)
+            if (allSeasonsContiguous) {
+                android.util.Log.i(TAG, "Early break in season enrichment: contiguous seasons ready")
+                break
             }
         }
         futures.filterNot { it.isDone }.forEach { it.cancel(true) }
@@ -3936,6 +4824,32 @@ object MultiProviderRepository {
                 "episodeCounts=$episodeCounts unresolvedSparse=$unresolvedSparseSeason",
         )
         return merged
+    }
+
+    /** Fetch all mirrors synchronously so incomplete seasons/episodes never flash partial lists. */
+    fun fetchFullSeasonBundleSync(
+        item: ArabseedItem,
+        primaryBundle: ArabseedSeasonBundle,
+        forceRefresh: Boolean = false,
+    ): ArabseedSeasonBundle {
+        val cached = loadCachedMergedSeasonBundle(item.pageUrl)
+        val combinedCurrent = cached?.let { mergeProviderSeasonBundles(listOf(item to it, item to primaryBundle)) }
+            ?: primaryBundle
+        if (!forceRefresh && combinedCurrent.seasons.isNotEmpty() && !needsSeasonEnrichment(item, combinedCurrent)) {
+            return combinedCurrent
+        }
+        val key = SeriesCatalogParser.normalizedUrl(item.pageUrl)
+        return try {
+            if (key.isNotBlank()) seasonAggregationInFlight.add(key)
+            val result = fetchSeasonBundleAcrossProviders(item, combinedCurrent, forceRefresh)
+            recordSeasonEnrichmentAttempt(item, result)
+            result
+        } catch (error: Exception) {
+            android.util.Log.w(TAG, "Full season sync failed for provider=${item.providerName}", error)
+            combinedCurrent
+        } finally {
+            if (key.isNotBlank()) seasonAggregationInFlight.remove(key)
+        }
     }
 
     /** Return cached/primary data immediately and continue cross-provider enrichment off the UI request. */
@@ -4017,6 +4931,14 @@ object MultiProviderRepository {
     fun isSeasonAggregationRunning(pageUrl: String): Boolean =
         SeriesCatalogParser.normalizedUrl(pageUrl) in seasonAggregationInFlight
 
+    fun cacheCompletePrimarySeasonBundle(item: ArabseedItem, bundle: ArabseedSeasonBundle): ArabseedSeasonBundle {
+        if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
+            CatalogDiskCache.saveSeasonBundle("combined:seasons:v26:${item.pageUrl}", bundle)
+            recordSeasonEnrichmentAttempt(item, bundle)
+        }
+        return bundle
+    }
+
     fun shouldRefreshSeasonBundle(item: ArabseedItem): Boolean {
         if (item.type != ArabseedType.SERIES) return false
         val normalizedPage = SeriesCatalogParser.normalizedUrl(item.pageUrl)
@@ -4070,7 +4992,7 @@ object MultiProviderRepository {
     }
 
     private fun seasonEnrichmentAttemptKey(pageUrl: String): String =
-        "combined:season-attempt:v19:$pageUrl"
+        "combined:season-attempt:v22:$pageUrl"
 
     private fun needsSeasonEnrichment(item: ArabseedItem, bundle: ArabseedSeasonBundle): Boolean {
         if (item.type != ArabseedType.SERIES) return false
@@ -4078,7 +5000,7 @@ object MultiProviderRepository {
         if (allEpisodes.isEmpty()) return true
         for (season in bundle.seasons) {
             val epNumbers = season.episodes.map { it.number }.filter { it > 0 }.distinct().sorted()
-            if (epNumbers.size < 3) return true
+            if (epNumbers.isEmpty()) return true
             for (i in 1 until epNumbers.size) {
                 if (epNumbers[i] - epNumbers[i - 1] > 1) return true
             }
