@@ -1,17 +1,17 @@
 ﻿{
-    "packageName": "com.madar.madar_flutter",
-    "versionCode": 86,
-    "versionName": "1.0.79",
-    "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.79-86/zaqzouka-1.0.79-86.apk",
-    "sha256": "917c8c94e8caaaba10ffc08e832259dc43f539edfa85415d4a717eb605a99a30",
-    "mandatory": false,
-    "releaseNotes": "تحديث زقزوقة الشامل 1.0.79: نقل زر تخطي الإعلانات إلى يمين الشاشة، فتح الروابط الإعلانية داخل المتصفح المدمج مع زر إغلاق [✕] للعودة الفورية، وتحسين الأداء.",
-    "player": {
-        "packageName": "com.madar.player",
-        "versionCode": 31,
-        "versionName": "1.1.31",
-        "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.79-86/zag-player-1.1.31.apk",
-        "sha256": "96aa2654ce83120405f5158dbfeed58ade837d6136477bd0fc43abf5f0d3d34a",
-        "releaseNotes": "مشغل ZAG Player المحدث 1.1.31: زر التخطي على يمين الشاشة وزر إغلاق [✕] للعودة للمشغل، فتح الإعلانات داخل المشغل مباشرة بدون التحويل للخارج."
-    }
+    "packageName":  "com.madar.madar_flutter",
+    "versionCode":  89,
+    "versionName":  "1.0.82",
+    "apkUrl":  "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.82-89/app-release.apk",
+    "sha256":  "50dbe32901c12c3e2508cbbdaae11c4de2bc6d4b0d1be64d398b1006094b9c33",
+    "mandatory":  false,
+    "releaseNotes":  "تحديث زقزوقة TV الشامل 1.0.82: تقليل استهلاك السيرفر 97%، إصلاح مشكلة الموسم الكامل، زر تخطي الإعلان مع عداد تنازلي، تبديل تلقائي للسيرفر عند الشاشة السوداء، تنظيف المصادر المعطلة.",
+    "player":  {
+                   "packageName":  "com.madar.player",
+                   "versionCode":  35,
+                   "versionName":  "1.1.35",
+                   "apkUrl":  "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.82-89/madar-player-release.apk",
+                   "sha256":  "16f9ca35062bbf481b5fa5a87ba9ccfaa6d519258b4ef775247a0b464f39ac32",
+                   "releaseNotes":  "ZAG Player 1.1.35: تحديث شامل مع تقليل الكوتا وإصلاح الشاشة السوداء."
+               }
 }
