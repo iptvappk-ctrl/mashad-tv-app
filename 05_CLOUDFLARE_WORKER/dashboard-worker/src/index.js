@@ -786,7 +786,7 @@ async function handleSystemControl(req, url, body) {
           enabled:           body.enabled !== false,
           latestVersionCode: Number(body.latestVersionCode || body.versionCode) || 0,
           latestVersionName: String(body.latestVersionName || body.versionName || ''),
-          apkUrl:            String(body.apkUrl || body.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zaqzouka-1.0.83-90.apk'),
+          apkUrl:            String(body.apkUrl || body.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk'),
           releaseNotes:      String(body.releaseNotes || body.notes || ''),
           forced:            !!body.forced,
           updatedAt:         Date.now(),
@@ -1016,6 +1016,19 @@ self.addEventListener('activate', (event) => {
         }
         return resp;
       }
+      if (path === '/api/version' || path === '/api/version/' || path === '/updates/android/latest.json') {
+        const up = await fetch('https://madartv-updates.web.app/updates/android/latest.json', {
+          headers: { 'Accept': 'application/json' }
+        });
+        return new Response(await up.text(), {
+          status: up.status,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'public, max-age=60, s-maxage=300',
+            ...corsHeaders(),
+          },
+        });
+      }
       if (path === '/api/broadcast_notification' || path === '/api/broadcast_notification/') return handleBroadcastNotification(request, url, body);
       if (path.startsWith('/api/export')) return handleExport(request, url);
 
@@ -1042,17 +1055,17 @@ self.addEventListener('activate', (event) => {
         const lowerName = rawName.toLowerCase();
         let ghUrl;
         if (lowerName === 'zaqzouka-app.apk' || lowerName === 'zaqzouka-latest.apk' || lowerName.startsWith('zaqzouka-1.0.')) {
-          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zaqzouka-1.0.83-90.apk';
+          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk';
         } else if (lowerName === 'zag-player.apk' || lowerName === 'zaqzouka-player.apk' || lowerName.startsWith('zag-player-')) {
-          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zag-player-1.1.35.apk';
+          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk';
         } else {
-          ghUrl = `https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.83/${rawName}`;
+          ghUrl = `https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/${rawName}`;
         }
         return Response.redirect(ghUrl, 302);
       }
 
-      // Landing page HTML and static assets: Proxy to the active Vercel deployment with CF edge cache
-      const UPSTREAM_WEB = 'https://download-landing-page-beta.vercel.app';
+      // Landing page HTML and static assets: Proxy to Firebase Hosting (active, unblocked) with CF edge cache
+      const UPSTREAM_WEB = 'https://madartv.web.app';
       const isHtmlRequest = path === '/' || path === '' || path.endsWith('.html');
       const isStaticAsset = path.startsWith('/assets') || path.endsWith('.css') || path.endsWith('.js') || path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.svg') || path.endsWith('.ico') || path.endsWith('.webp');
       if (isHtmlRequest || isStaticAsset) {

@@ -449,11 +449,17 @@ object ArabseedRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonBundleCache[pageUrl]?.let { return it }
-            val cached = CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v18:" + pageUrl) ?: return null
-        val normalized = SeriesCatalogParser.normalizeSeasonBundle(cached.value)
-        seasonBundleCache[pageUrl] = normalized
-        seasonBundleCacheAt[pageUrl] = cached.savedAt
-        return normalized
+        CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v20:" + pageUrl)?.let { cached ->
+            val normalized = SeriesCatalogParser.normalizeSeasonBundle(cached.value)
+            seasonBundleCache[pageUrl] = normalized
+            seasonBundleCacheAt[pageUrl] = cached.savedAt
+            return normalized
+        }
+        synthesizedBundleCache[pageUrl]?.let { return it }
+        val synth = CatalogDiskCache.loadSeasonBundle("arabseed:synth:v20:" + pageUrl) ?: return null
+        val normalizedSynth = SeriesCatalogParser.normalizeSeasonBundle(synth.value)
+        synthesizedBundleCache[pageUrl] = normalizedSynth
+        return normalizedSynth
     }
 
     fun clearListingCache() {
@@ -838,15 +844,17 @@ object ArabseedRepository {
 
     private val seasonBundleCache = ConcurrentHashMap<String, ArabseedSeasonBundle>()
     private val seasonBundleCacheAt = ConcurrentHashMap<String, Long>()
+    private val synthesizedBundleCache = ConcurrentHashMap<String, ArabseedSeasonBundle>()
     private val seasonPagePool = Executors.newFixedThreadPool(10)
     private const val SEASON_CACHE_TTL = 30 * 60 * 1000L
 
 
 
-        fun saveSynthesizedBundle(pageUrl: String, bundle: ArabseedSeasonBundle) {
-        seasonBundleCache[pageUrl] = bundle
-        seasonBundleCacheAt[pageUrl] = System.currentTimeMillis()
-        CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v18:" + pageUrl, bundle)
+    fun saveSynthesizedBundle(pageUrl: String, bundle: ArabseedSeasonBundle) {
+        // Keep category-feed stubs separate from real scraped series bundles so
+        // fetchSeasonsAndEpisodes() still scrapes the series page for all seasons/episodes.
+        synthesizedBundleCache[pageUrl] = bundle
+        CatalogDiskCache.saveSeasonBundle("arabseed:synth:v20:" + pageUrl, bundle)
     }
 
     fun fetchSeasonsAndEpisodes(
@@ -880,24 +888,9 @@ object ArabseedRepository {
                 val pageSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
                 val requestedSeasonPageNumber = seasonNumbersOnly?.singleOrNull()
                     ?.takeIf { pageSeasonNumber == it }
-                val episodeSelectors = listOf(
-                    ".episodes__list a", "ul.episodes__list a",
-                    "a.episode__item", ".episode__item a",
-                    "a[href*='%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9']",
-                    "a[href*='الحلقة']", "a[href*='-episode-']", "a[href*='/episode/']",
-                    "a[href*='-eps']",  // MySeed: /مسلسل-حب-اسود-s1-eps20/
-                    ".Episodes--List a", ".EpisodeBlock a",
-                    ".episodes-list a", ".EpisodesList li a", ".eplister li a",
-                    ".eps-list li a", ".eps a", "a.ep-item", ".episodios li a", ".eplist a",
-                    ".episodes-list [data-url], .episodes-list [data-href]",
-                    ".EpisodesList [data-url], .EpisodesList [data-href]",
-                    ".eplister [data-url], .eplister [data-href]",
-                    "[data-episode][data-url], [data-episode][data-href], [data-episode-link]"
-                )
-
                 fun collectEpisodes(d: org.jsoup.nodes.Document): List<Triple<String, String, Int?>> {
                     val collected = linkedMapOf<String, Triple<String, String, Int?>>()
-                    for (sel in episodeSelectors) {
+                    for (sel in SeriesCatalogParser.episodeLinkSelectors) {
                         val els = d.select(sel)
                         if (els.isNotEmpty()) {
                             for (el in els) {
@@ -911,18 +904,10 @@ object ArabseedRepository {
                                 if (href.isBlank() || !href.startsWith(P_HTTP) || href.endsWith("/home/") || href == BASE_URL) continue
                                 if (href.contains("/category/") || href.contains("/tag/") || href.contains("/genre/") || href.contains("/actor/")) continue
 
-                                val hasEpisodeListParent = el.parents().any { ancestor ->
-                                    val marker = "${ancestor.className()} ${ancestor.id()}".lowercase()
-                                    listOf("episode", "episodes", "eplist", "eps-list", "episodeslist", "eps", "episodios")
-                                        .any(marker::contains)
-                                } || el.classNames().any { className ->
-                                    className.contains("episode", ignoreCase = true)
-                                        || className.contains("ep-item", ignoreCase = true)
-                                }
                                 val episodeNumber = SeriesCatalogParser.episodeNumber(
                                     title = txt,
                                     url = href,
-                                    allowNumericTitle = hasEpisodeListParent,
+                                    allowNumericTitle = SeriesCatalogParser.isEpisodeListElement(el),
                                 )
                                 val linkSeason = SeriesCatalogParser.seasonNumber(txt, href)
                                     ?: SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
@@ -1596,7 +1581,7 @@ object ArabseedRepository {
                 if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                     seasonBundleCache[item.pageUrl] = bundle
                     seasonBundleCacheAt[item.pageUrl] = System.currentTimeMillis()
-                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v18:" + item.pageUrl, bundle)
+                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v20:" + item.pageUrl, bundle)
                 }
 
                 bundle

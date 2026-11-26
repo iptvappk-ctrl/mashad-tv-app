@@ -20,18 +20,27 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ..._cache, _source: 'memory_cache' });
   }
 
-  try {
-    const response = await fetch('https://zaqzouka-dashboard-api.vercel.app/api/status');
-    if (response.ok) {
-      const result = await response.json();
-      _cache = result;
-      _cacheTime = now;
-      return res.status(200).json({ ...result, _source: 'dashboard_api' });
+  const upstreams = [
+    'https://dashboard-api-indol-eight.vercel.app/api/status',
+    'https://zaafilm.com/api/status',
+  ];
+
+  for (const upstreamUrl of upstreams) {
+    try {
+      const response = await fetch(upstreamUrl);
+      if (response.ok) {
+        const result = await response.json();
+        _cache = result;
+        _cacheTime = now;
+        return res.status(200).json({ ...result, _source: 'dashboard_api' });
+      }
+    } catch (err) {
+      // Try next upstream endpoint
     }
-  } catch (err) {
-    if (_cache) {
-      return res.status(200).json({ ..._cache, _source: 'memory_stale' });
-    }
+  }
+
+  if (_cache) {
+    return res.status(200).json({ ..._cache, _source: 'memory_stale' });
   }
 
   return res.status(200).json({

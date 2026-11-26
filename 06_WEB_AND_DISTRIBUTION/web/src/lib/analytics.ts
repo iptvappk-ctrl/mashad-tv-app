@@ -2,7 +2,7 @@
 
 import type { Analytics } from "firebase/analytics";
 
-const CLOUD_TELEMETRY_API = "https://dashboard-api-amber-chi.vercel.app";
+const CLOUD_TELEMETRY_API = "https://dashboard-api-indol-eight.vercel.app";
 const STATUS_CDN_API = "https://dashboard-api-indol-eight.vercel.app/api/status";
 
 // ─── 🔐 Kill Switch Checker (called from layout/page on mount) ───────────────

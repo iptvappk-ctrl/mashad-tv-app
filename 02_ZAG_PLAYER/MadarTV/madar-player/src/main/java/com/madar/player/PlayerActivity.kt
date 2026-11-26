@@ -6,6 +6,8 @@ import android.content.Intent
 import android.util.Base64
 import android.util.Log
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.os.Build
 import android.os.Bundle
@@ -90,13 +92,23 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.BaseDataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.PlayerView
+import okhttp3.ConnectionPool
+import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import androidx.mediarouter.app.MediaRouteButton
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
@@ -147,6 +159,12 @@ object PlayerAdManager {
     const val DEFAULT_SMART_DIRECT_URL =
         "https://asiafilm.org/4/01e00aeb7c4b214f9e9469bcfc2b0486"
 
+    private const val PREFS_NAME = "madar_player"
+    private const val KEY_AD_ENABLED = "zag_ad_enabled"
+    private const val KEY_AD_URL = "zag_ad_url"
+    private const val KEY_AD_HTML = "zag_ad_html"
+    private const val KEY_AD_DELAY = "zag_ad_delay"
+
     private val legacyMarkers = listOf(
         "uplcm.com",
         "nap5k.com",
@@ -161,11 +179,35 @@ object PlayerAdManager {
         "12335274",
     )
 
-    var adHtmlSnippet: String = ""
-    var adUrl: String = DEFAULT_SMART_DIRECT_URL
-    var isAdEnabled: Boolean = true
-    var skipDelaySeconds: Int = 5
+    var adHtmlSnippet by mutableStateOf("")
+    var adUrl by mutableStateOf(DEFAULT_SMART_DIRECT_URL)
+    var isAdEnabled by mutableStateOf(true)
+    var skipDelaySeconds by mutableIntStateOf(5)
     @Volatile var lastStatusSyncMs: Long = 0L
+
+    fun loadFromPrefs(context: Context) {
+        runCatching {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            if (!prefs.contains(KEY_AD_ENABLED)) return
+            isAdEnabled = prefs.getBoolean(KEY_AD_ENABLED, true)
+            skipDelaySeconds = prefs.getInt(KEY_AD_DELAY, 5).coerceIn(3, 15)
+            val savedHtml = sanitizeAdValue(prefs.getString(KEY_AD_HTML, "").orEmpty())
+            val savedUrl = sanitizeAdValue(prefs.getString(KEY_AD_URL, "").orEmpty())
+            adHtmlSnippet = savedHtml
+            adUrl = if (!isAdEnabled) "" else savedUrl.ifBlank { DEFAULT_SMART_DIRECT_URL }
+        }
+    }
+
+    fun saveToPrefs(context: Context) {
+        runCatching {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(KEY_AD_ENABLED, isAdEnabled)
+                .putString(KEY_AD_URL, adUrl)
+                .putString(KEY_AD_HTML, adHtmlSnippet)
+                .putInt(KEY_AD_DELAY, skipDelaySeconds)
+                .apply()
+        }
+    }
 
     fun sanitizeAdValue(raw: String): String {
         val cleaned = raw.trim()
@@ -177,6 +219,49 @@ object PlayerAdManager {
     fun resolvedDirectAdUrl(): String {
         if (!isAdEnabled) return ""
         return sanitizeAdValue(adUrl).ifBlank { DEFAULT_SMART_DIRECT_URL }
+    }
+
+    fun applyRemoteConfig(
+        context: Context,
+        rootJson: JSONObject,
+        ownerAd: JSONObject?,
+        partnerAd: JSONObject?,
+        systemStatus: String,
+    ) {
+        val rootActiveSource = rootJson.optString("active_source", "").lowercase(Locale.ROOT)
+        val ownerActiveSource = ownerAd?.optString("active_source", "").orEmpty().lowercase(Locale.ROOT)
+        val activeSource = ownerActiveSource.ifBlank { rootActiveSource }.ifBlank { "owner" }
+        val overridePartner = ownerAd?.optBoolean("override_partner", false) ?: false
+
+        val selectedAd = when {
+            systemStatus != "active" || activeSource == "disabled" -> null
+            overridePartner -> ownerAd ?: partnerAd
+            activeSource == "partner" -> partnerAd
+            activeSource == "owner" -> ownerAd ?: partnerAd
+            else -> ownerAd ?: partnerAd
+        }
+
+        val rootVideoEnabled = rootJson.optBoolean("video_enabled", true)
+        val adEnabled = selectedAd != null &&
+            selectedAd.optBoolean("enabled", true) &&
+            selectedAd.optBoolean("video_enabled", rootVideoEnabled)
+
+        if (!adEnabled) {
+            isAdEnabled = false
+            adHtmlSnippet = ""
+            adUrl = ""
+        } else {
+            val activeObj = selectedAd!!
+            isAdEnabled = true
+            skipDelaySeconds = activeObj.optInt("skip_delay_seconds", 5).coerceIn(3, 15)
+            val cleanHtml = sanitizeAdValue(activeObj.optString("ad_html").orEmpty())
+            val fallbackPartnerUrl = sanitizeAdValue(partnerAd?.optString("ad_url").orEmpty())
+            val cleanUrl = sanitizeAdValue(activeObj.optString("ad_url").orEmpty())
+                .ifBlank { fallbackPartnerUrl }
+            adHtmlSnippet = cleanHtml
+            adUrl = cleanUrl.ifBlank { DEFAULT_SMART_DIRECT_URL }
+        }
+        saveToPrefs(context)
     }
 }
 
@@ -206,8 +291,9 @@ class PlayerActivity : ComponentActivity() {
         activityScope.launch(Dispatchers.IO) {
             val endpoints = listOf(
                 "https://dashboard-api-indol-eight.vercel.app/api/system_control",
-                "https://madartv-default-rtdb.firebaseio.com/system_control.json",
-                "https://zaafilm.com/api/status"
+                "https://dashboard-api-amber-chi.vercel.app/api/system_control",
+                "https://zaafilm.com/api/status",
+                "https://madartv-default-rtdb.firebaseio.com/system_control.json"
             )
             for (endpoint in endpoints) {
                 try {
@@ -216,7 +302,7 @@ class PlayerActivity : ComponentActivity() {
                         readTimeout = 3000
                         requestMethod = "GET"
                         setRequestProperty("Accept", "application/json")
-                        setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ZAG-Player")
+                        setRequestProperty("User-Agent", MOBILE_CHROME_UA)
                     }
                     if (conn.responseCode == 200) {
                         val text = conn.inputStream.bufferedReader().use { it.readText() }
@@ -237,7 +323,7 @@ class PlayerActivity : ComponentActivity() {
                                 val adConn = (URL("https://madartv-default-rtdb.firebaseio.com/system_control/owner_ad_config.json").openConnection() as HttpURLConnection).apply {
                                     connectTimeout = 2500
                                     readTimeout = 2500
-                                    setRequestProperty("User-Agent", "Mozilla/5.0 ZAG-Player")
+                                    setRequestProperty("User-Agent", MOBILE_CHROME_UA)
                                 }
                                 if (adConn.responseCode == 200) {
                                     val adText = adConn.inputStream.bufferedReader().use { it.readText() }
@@ -253,7 +339,7 @@ class PlayerActivity : ComponentActivity() {
                                 val pConn = (URL("https://madartv-default-rtdb.firebaseio.com/system_control/ad_config.json").openConnection() as HttpURLConnection).apply {
                                     connectTimeout = 2500
                                     readTimeout = 2500
-                                    setRequestProperty("User-Agent", "Mozilla/5.0 ZAG-Player")
+                                    setRequestProperty("User-Agent", MOBILE_CHROME_UA)
                                 }
                                 if (pConn.responseCode == 200) {
                                     val pText = pConn.inputStream.bufferedReader().use { it.readText() }
@@ -264,29 +350,15 @@ class PlayerActivity : ComponentActivity() {
                             } catch (e: Exception) {}
                         }
 
-                        val overridePartner = ownerAd?.optBoolean("override_partner", false) ?: false
-                        val activeSource = ownerAd?.optString("active_source", "owner")?.lowercase(Locale.ROOT).orEmpty()
-                        val selectedAd = when {
-                            activeSource == "disabled" -> null
-                            overridePartner || ownerAd?.optBoolean("enabled", false) == true -> ownerAd
-                            partnerAd?.optBoolean("enabled", false) == true -> partnerAd
-                            else -> ownerAd ?: partnerAd
-                        }
-                        if (activeSource == "disabled" || (selectedAd != null && !selectedAd.optBoolean("enabled", true))) {
-                            PlayerAdManager.isAdEnabled = false
-                            PlayerAdManager.adHtmlSnippet = ""
-                            PlayerAdManager.adUrl = ""
-                        } else {
-                            PlayerAdManager.isAdEnabled = true
-                            PlayerAdManager.skipDelaySeconds = (selectedAd?.optInt("skip_delay_seconds", 5) ?: 5).coerceIn(3, 15)
-                            val cleanHtml = PlayerAdManager.sanitizeAdValue(selectedAd?.optString("ad_html").orEmpty())
-                            val cleanUrl = PlayerAdManager.sanitizeAdValue(selectedAd?.optString("ad_url").orEmpty())
-                            PlayerAdManager.adHtmlSnippet = cleanHtml
-                            PlayerAdManager.adUrl = cleanUrl.ifBlank { PlayerAdManager.DEFAULT_SMART_DIRECT_URL }
-                        }
-
-                        PlayerAdManager.lastStatusSyncMs = System.currentTimeMillis()
                         withContext(Dispatchers.Main) {
+                            PlayerAdManager.applyRemoteConfig(
+                                context = applicationContext,
+                                rootJson = json,
+                                ownerAd = ownerAd,
+                                partnerAd = partnerAd,
+                                systemStatus = status,
+                            )
+                            PlayerAdManager.lastStatusSyncMs = System.currentTimeMillis()
                             if (status == "wiped" || status == "frozen" || !playerEnabled) {
                                 isPlayerBlocked.value = true
                                 blockMessage.value = msg
@@ -400,6 +472,7 @@ class PlayerActivity : ComponentActivity() {
         } catch (_: Throwable) {}
         overridePendingTransition(R.anim.player_enter, R.anim.player_exit)
 
+        PlayerAdManager.loadFromPrefs(applicationContext)
         extractStreamFromIntent(intent)
 
         startStatusPolling()
@@ -429,18 +502,39 @@ class PlayerActivity : ComponentActivity() {
 
                     if (isPlaying) {
                         val sessionKey = playbackSessionToken.intValue
-                        val directAdUrl = remember(sessionKey) { PlayerAdManager.resolvedDirectAdUrl() }
-                        val htmlAdSnippet = remember(sessionKey) { PlayerAdManager.sanitizeAdValue(PlayerAdManager.adHtmlSnippet) }
+                        val isRemoteStream = url.startsWith("http://", ignoreCase = true) ||
+                            url.startsWith("https://", ignoreCase = true)
+                        val directAdUrl = PlayerAdManager.resolvedDirectAdUrl()
+                        val htmlAdSnippet = PlayerAdManager.sanitizeAdValue(PlayerAdManager.adHtmlSnippet)
+                        val adSkipSeconds = PlayerAdManager.skipDelaySeconds
                         var isPreRollShowing by remember(sessionKey) {
-                            mutableStateOf(PlayerAdManager.isAdEnabled && (directAdUrl.isNotBlank() || htmlAdSnippet.isNotBlank()))
+                            mutableStateOf(
+                                isRemoteStream &&
+                                    PlayerAdManager.isAdEnabled &&
+                                    (directAdUrl.isNotBlank() || htmlAdSnippet.isNotBlank())
+                            )
                         }
                         var inAppWebAdUrl by remember(sessionKey) { mutableStateOf<String?>(null) }
+
+                        LaunchedEffect(sessionKey, PlayerAdManager.isAdEnabled, directAdUrl, htmlAdSnippet) {
+                            if (!PlayerAdManager.isAdEnabled || !isRemoteStream) {
+                                isPreRollShowing = false
+                            }
+                        }
 
                         BackHandler {
                             if (inAppWebAdUrl != null) {
                                 inAppWebAdUrl = null
                             } else if (isPreRollShowing) {
-                                isPreRollShowing = false
+                                // Do not let Hardware Back bypass the pre-roll ad into the video;
+                                // either close the playback session cleanly or let user finish watching.
+                                if (launchedFromExternalIntent) {
+                                    finish()
+                                } else {
+                                    currentStreamUrl.value = ""
+                                    isPreRollShowing = false
+                                    exitFullscreen()
+                                }
                             } else if (launchedFromExternalIntent) {
                                 finish()
                             } else {
@@ -483,7 +577,7 @@ class PlayerActivity : ComponentActivity() {
                                 PreRollAdOverlay(
                                     adHtml = htmlAdSnippet,
                                     adUrl = directAdUrl,
-                                    skipDelaySeconds = PlayerAdManager.skipDelaySeconds,
+                                    skipDelaySeconds = adSkipSeconds,
                                     onSkipAd = { isPreRollShowing = false },
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -649,6 +743,226 @@ private fun isYouTubeStream(url: String): Boolean {
 // YouTube IFrame API: use https://www.youtube.com as the base URL so YouTube
 // treats the embed as first-party (avoids Error 153 / origin restriction).
 private const val YOUTUBE_EMBED_ORIGIN = "https://www.youtube.com"
+private const val MOBILE_CHROME_UA =
+    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+private fun isAsciiHeaderValue(value: String): Boolean =
+    value.all { ch -> ch.code in 0x20..0x7E }
+
+/**
+ * Custom Media3 HttpDataSource backed by OkHttp with raw UTF-8 header forwarding
+ * (`addUnsafeNonAscii`), preserving invisible UTF-8 tokens required by live CDNs
+ * while HttpURLConnection/DefaultHttpDataSource corrupts them to ISO-8859-1.
+ */
+@UnstableApi
+private class Utf8OkHttpDataSource(
+    private val client: OkHttpClient,
+    private val userAgent: String,
+    private val defaultRequestProperties: Map<String, String>
+) : BaseDataSource(true), HttpDataSource {
+
+    class Factory(
+        private val client: OkHttpClient = sharedHttpClient,
+        private val userAgent: String = "Mozilla/5.0"
+    ) : HttpDataSource.Factory {
+        private var defaultProperties: Map<String, String> = emptyMap()
+
+        override fun setDefaultRequestProperties(
+            defaultRequestProperties: MutableMap<String, String>
+        ): HttpDataSource.Factory {
+            this.defaultProperties = defaultRequestProperties.toMap()
+            return this
+        }
+
+        override fun createDataSource(): HttpDataSource =
+            Utf8OkHttpDataSource(client, userAgent, defaultProperties)
+    }
+
+    companion object {
+        val sharedHttpClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectionPool(ConnectionPool(16, 5, java.util.concurrent.TimeUnit.MINUTES))
+                .protocols(listOf(Protocol.HTTP_1_1))
+                .connectTimeout(12, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
+    }
+
+    private val instanceProperties = LinkedHashMap<String, String>()
+    private var currentDataSpec: DataSpec? = null
+    private var currentResponse: Response? = null
+    private var responseStream: java.io.InputStream? = null
+    private var opened = false
+    private var bytesToRead: Long = C.LENGTH_UNSET.toLong()
+    private var bytesRead: Long = 0L
+
+    override fun setRequestProperty(name: String, value: String) {
+        synchronized(instanceProperties) {
+            instanceProperties[name] = value
+        }
+    }
+
+    override fun clearRequestProperty(name: String) {
+        synchronized(instanceProperties) {
+            instanceProperties.remove(name)
+        }
+    }
+
+    override fun clearAllRequestProperties() {
+        synchronized(instanceProperties) {
+            instanceProperties.clear()
+        }
+    }
+
+    override fun getResponseCode(): Int = currentResponse?.code ?: -1
+
+    override fun getResponseHeaders(): MutableMap<String, MutableList<String>> {
+        val resp = currentResponse ?: return mutableMapOf()
+        val out = LinkedHashMap<String, MutableList<String>>()
+        for ((k, v) in resp.headers.toMultimap()) {
+            out[k] = v.toMutableList()
+        }
+        return out
+    }
+
+    override fun getUri(): Uri? =
+        currentResponse?.request?.url?.toString()?.let(Uri::parse) ?: currentDataSpec?.uri
+
+    override fun open(dataSpec: DataSpec): Long {
+        this.currentDataSpec = dataSpec
+        this.bytesRead = 0L
+        this.bytesToRead = C.LENGTH_UNSET.toLong()
+        transferInitializing(dataSpec)
+
+        val mergedHeaders = LinkedHashMap<String, String>()
+        fun putCaseInsensitive(k: String, v: String) {
+            val cleanV = v.replace("\r", "").replace("\n", "")
+            val existing = mergedHeaders.keys.firstOrNull { it.equals(k, ignoreCase = true) }
+            if (existing != null) mergedHeaders.remove(existing)
+            if (cleanV.isNotBlank()) mergedHeaders[k] = cleanV
+        }
+        defaultRequestProperties.forEach { (k, v) -> putCaseInsensitive(k, v) }
+        synchronized(instanceProperties) {
+            instanceProperties.forEach { (k, v) -> putCaseInsensitive(k, v) }
+        }
+        dataSpec.httpRequestHeaders.forEach { (k, v) -> putCaseInsensitive(k, v) }
+        if (mergedHeaders.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+            mergedHeaders["User-Agent"] = userAgent
+        }
+        if (dataSpec.position != 0L || dataSpec.length != C.LENGTH_UNSET.toLong()) {
+            val rangeEnd = if (dataSpec.length != C.LENGTH_UNSET.toLong()) {
+                (dataSpec.position + dataSpec.length - 1).toString()
+            } else ""
+            putCaseInsensitive("Range", "bytes=${dataSpec.position}-$rangeEnd")
+        }
+
+        val headersBuilder = Headers.Builder()
+        mergedHeaders.forEach { (k, v) ->
+            headersBuilder.addUnsafeNonAscii(k, v)
+        }
+
+        val reqBuilder = Request.Builder()
+            .url(dataSpec.uri.toString())
+            .headers(headersBuilder.build())
+        val body = dataSpec.httpBody?.toRequestBody("application/octet-stream".toMediaTypeOrNull())
+        when (dataSpec.httpMethod) {
+            DataSpec.HTTP_METHOD_POST -> reqBuilder.post(body ?: ByteArray(0).toRequestBody(null))
+            DataSpec.HTTP_METHOD_HEAD -> reqBuilder.head()
+            else -> reqBuilder.get()
+        }
+
+        val response = try {
+            client.newCall(reqBuilder.build()).execute()
+        } catch (ioe: java.io.IOException) {
+            throw HttpDataSource.HttpDataSourceException.createForIOException(
+                ioe,
+                dataSpec,
+                HttpDataSource.HttpDataSourceException.TYPE_OPEN
+            )
+        }
+        currentResponse = response
+        val code = response.code
+        val responseHeaders = getResponseHeaders()
+        if (!response.isSuccessful) {
+            val errBody = runCatching { response.body?.bytes() }.getOrNull() ?: ByteArray(0)
+            closeConnectionQuietly()
+            throw HttpDataSource.InvalidResponseCodeException(
+                code,
+                response.message,
+                null,
+                responseHeaders,
+                dataSpec,
+                errBody
+            )
+        }
+
+        val respBody = response.body ?: run {
+            closeConnectionQuietly()
+            throw HttpDataSource.HttpDataSourceException(
+                "Empty response body",
+                dataSpec,
+                PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+                HttpDataSource.HttpDataSourceException.TYPE_OPEN
+            )
+        }
+        responseStream = respBody.byteStream()
+        val contentLength = respBody.contentLength()
+        bytesToRead = if (dataSpec.length != C.LENGTH_UNSET.toLong()) {
+            dataSpec.length
+        } else if (contentLength >= 0L) {
+            contentLength
+        } else {
+            C.LENGTH_UNSET.toLong()
+        }
+        opened = true
+        transferStarted(dataSpec)
+        return bytesToRead
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        if (length == 0) return 0
+        if (bytesToRead != C.LENGTH_UNSET.toLong()) {
+            val rem = bytesToRead - bytesRead
+            if (rem <= 0L) return C.RESULT_END_OF_INPUT
+        }
+        val toRead = if (bytesToRead != C.LENGTH_UNSET.toLong()) {
+            minOf(length.toLong(), bytesToRead - bytesRead).toInt()
+        } else length
+        val readCount = try {
+            responseStream?.read(buffer, offset, toRead) ?: -1
+        } catch (ioe: java.io.IOException) {
+            throw HttpDataSource.HttpDataSourceException.createForIOException(
+                ioe,
+                currentDataSpec!!,
+                HttpDataSource.HttpDataSourceException.TYPE_READ
+            )
+        }
+        if (readCount == -1) return C.RESULT_END_OF_INPUT
+        bytesRead += readCount
+        bytesTransferred(readCount)
+        return readCount
+    }
+
+    override fun close() {
+        currentDataSpec = null
+        closeConnectionQuietly()
+        if (opened) {
+            opened = false
+            transferEnded()
+        }
+    }
+
+    private fun closeConnectionQuietly() {
+        runCatching { responseStream?.close() }
+        runCatching { currentResponse?.close() }
+        responseStream = null
+        currentResponse = null
+    }
+}
 
 private fun extractYouTubeId(url: String): String {
     return when {
@@ -657,7 +971,166 @@ private fun extractYouTubeId(url: String): String {
         url.contains("v=") -> url.substringAfter("v=").substringBefore("&")
         url.contains("youtu.be/") -> url.substringAfter("youtu.be/").substringBefore("?").substringBefore("&")
         else -> ""
-    }
+    }.substringBefore("#").trim()
+}
+
+private fun isYouTubeVideoEmbeddable(videoId: String): Boolean {
+    if (videoId.isBlank()) return false
+    return runCatching {
+        val conn = (URL("https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=$videoId&format=json").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 2000
+            readTimeout = 2000
+            setRequestProperty("User-Agent", MOBILE_CHROME_UA)
+        }
+        val code = conn.responseCode
+        conn.disconnect()
+        code == 200
+    }.getOrDefault(true)
+}
+
+private fun buildYouTubeIFrameHtml(
+    videoId: String,
+    subtitlesEnabled: Boolean = true,
+    pausedForAd: Boolean = false,
+): String {
+    val ccPolicy = if (subtitlesEnabled) 1 else 0
+    val autoplayFlag = if (pausedForAd) 0 else 1
+    val pausedJs = if (pausedForAd) "true" else "false"
+    return """
+        <!DOCTYPE html>
+        <html lang="ar">
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <meta name="referrer" content="strict-origin-when-cross-origin">
+        <style>
+          * { margin:0; padding:0; box-sizing:border-box; }
+          html, body { width:100vw; height:100vh; overflow:hidden; background:#000; }
+          #player { position:fixed; inset:0; width:100vw !important; height:100vh !important; border:none; }
+        </style>
+        </head>
+        <body>
+        <div id="player"></div>
+        <script>
+          var tag = document.createElement('script');
+          tag.src = "https://www.youtube.com/iframe_api";
+          var firstScriptTag = document.getElementsByTagName('script')[0];
+          firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+
+          var player = null;
+          var wantCaptions = ${if (subtitlesEnabled) "true" else "false"};
+          window.__zagPausedForAd = $pausedJs;
+          window.__zagGetPlayer = function() { return player; };
+          window.__zagPlay = function() {
+            try { if (player && player.unMute) player.unMute(); if (player && player.playVideo) player.playVideo(); } catch(e) {}
+          };
+          window.__zagPause = function() {
+            try { if (player && player.pauseVideo) player.pauseVideo(); } catch(e) {}
+          };
+          window.__zagSeekTo = function(sec) {
+            try { if (player && player.seekTo) { player.seekTo(sec, true); player.playVideo(); } } catch(e) {}
+          };
+          window.__zagSetSpeed = function(rate) {
+            try { if (player && player.setPlaybackRate) player.setPlaybackRate(rate); } catch(e) {}
+          };
+          window.__zagSetQuality = function(q) {
+            try {
+              if (player) {
+                if (typeof player.setPlaybackQualityRange === 'function') player.setPlaybackQualityRange(q, q);
+                if (typeof player.setPlaybackQuality === 'function') player.setPlaybackQuality(q);
+              }
+            } catch(e) {}
+          };
+          window.__zagSetCaptions = function(enable) {
+            wantCaptions = !!enable;
+            try {
+              if (!player) return;
+              if (!wantCaptions) {
+                if (player.unloadModule) player.unloadModule('captions');
+                if (player.setOption) player.setOption('captions', 'track', {});
+              } else {
+                if (player.loadModule) player.loadModule('captions');
+                if (player.setOption) player.setOption('captions', 'track', { languageCode: 'ar' });
+              }
+            } catch(e) {}
+          };
+
+          function reportQualities() {
+            try {
+              if (!player || !window.MadarBridge || !window.MadarBridge.onQualityLevels) return;
+              var levels = (typeof player.getAvailableQualityLevels === 'function') ? player.getAvailableQualityLevels() : [];
+              var cur = (typeof player.getPlaybackQuality === 'function') ? player.getPlaybackQuality() : '';
+              if (levels && levels.length) {
+                window.MadarBridge.onQualityLevels(JSON.stringify(levels), cur || '');
+              }
+            } catch(e) {}
+          }
+
+          function onYouTubeIframeAPIReady() {
+            player = new YT.Player('player', {
+              width: '100%',
+              height: '100%',
+              videoId: '$videoId',
+              host: 'https://www.youtube.com',
+              playerVars: {
+                autoplay: $autoplayFlag,
+                playsinline: 1,
+                controls: 0,
+                rel: 0,
+                modestbranding: 1,
+                iv_load_policy: 3,
+                fs: 0,
+                disablekb: 1,
+                enablejsapi: 1,
+                cc_load_policy: $ccPolicy,
+                cc_lang_pref: 'ar',
+                hl: 'ar',
+                origin: 'https://www.youtube.com'
+              },
+              events: {
+                'onReady': function(e) {
+                  try {
+                    e.target.unMute();
+                    e.target.setVolume(100);
+                    if (!window.__zagPausedForAd) {
+                      e.target.playVideo();
+                    }
+                  } catch(x) {}
+                  reportQualities();
+                },
+                'onStateChange': function(e) {
+                  reportQualities();
+                  if (!window.MadarBridge) return;
+                  if (e.data === 1) window.MadarBridge.onStateChange('playing');
+                  else if (e.data === 2) window.MadarBridge.onStateChange('paused');
+                  else if (e.data === 3) window.MadarBridge.onStateChange('buffering');
+                  else if (e.data === 0) window.MadarBridge.onStateChange('ended');
+                },
+                'onPlaybackQualityChange': function() { reportQualities(); },
+                'onError': function(e) {
+                  if (window.MadarBridge) window.MadarBridge.onPlayerError(e.data);
+                }
+              }
+            });
+          }
+
+          setInterval(function() {
+            try {
+              if (player && typeof player.getCurrentTime === 'function') {
+                var cur = player.getCurrentTime() || 0;
+                var dur = player.getDuration() || 0;
+                var state = (typeof player.getPlayerState === 'function') ? player.getPlayerState() : -1;
+                if (window.MadarBridge) {
+                  window.MadarBridge.onTimeUpdate(cur, dur);
+                  if (state === 1 && cur > 0.15) window.MadarBridge.onStateChange('playing');
+                }
+              }
+            } catch(e) {}
+          }, 350);
+        </script>
+        </body>
+        </html>
+    """.trimIndent()
 }
 
 private fun formatTime(seconds: Long): String {
@@ -1414,6 +1887,35 @@ private fun handleInAppAdWebNavigation(view: WebView?, rawUrl: String): Boolean 
     return true
 }
 
+private fun isWebViewVisuallyPainted(webView: WebView, sampleBitmap: Bitmap): Boolean {
+    return runCatching {
+        if (webView.width < 32 || webView.height < 32) return@runCatching false
+        sampleBitmap.eraseColor(AndroidColor.BLACK)
+        val canvas = Canvas(sampleBitmap)
+        canvas.scale(sampleBitmap.width.toFloat() / webView.width, sampleBitmap.height.toFloat() / webView.height)
+        webView.draw(canvas)
+
+        val corner = sampleBitmap.getPixel(0, 0)
+        val cR = AndroidColor.red(corner)
+        val cG = AndroidColor.green(corner)
+        val cB = AndroidColor.blue(corner)
+        var diffPixels = 0
+        for (y in 0 until sampleBitmap.height) {
+            for (x in 0 until sampleBitmap.width) {
+                val px = sampleBitmap.getPixel(x, y)
+                val dr = kotlin.math.abs(AndroidColor.red(px) - cR)
+                val dg = kotlin.math.abs(AndroidColor.green(px) - cG)
+                val db = kotlin.math.abs(AndroidColor.blue(px) - cB)
+                if (dr + dg + db >= 28) {
+                    diffPixels++
+                    if (diffPixels >= 14) return@runCatching true
+                }
+            }
+        }
+        false
+    }.getOrDefault(false)
+}
+
 @Composable
 private fun PreRollAdOverlay(
     adHtml: String,
@@ -1422,23 +1924,99 @@ private fun PreRollAdOverlay(
     onSkipAd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var countdown by remember { mutableIntStateOf(skipDelaySeconds) }
-    var canSkip by remember { mutableStateOf(skipDelaySeconds <= 0) }
-    var adPageLoaded by remember { mutableStateOf(adHtml.isNotBlank()) }
+    val totalDelay = skipDelaySeconds.coerceAtLeast(1)
+    var countdown by remember(adUrl, adHtml, totalDelay) { mutableIntStateOf(totalDelay) }
+    var canSkip by remember(adUrl, adHtml) { mutableStateOf(false) }
+    var adPageFinished by remember(adUrl, adHtml) { mutableStateOf(false) }
+    var hasCommittedVisual by remember(adUrl, adHtml) { mutableStateOf(false) }
+    var lastPageStartMs by remember(adUrl, adHtml) { mutableLongStateOf(System.currentTimeMillis()) }
+    var lastPageFinishMs by remember(adUrl, adHtml) { mutableLongStateOf(0L) }
+    var adVisualReady by remember(adUrl, adHtml) { mutableStateOf(false) }
+    var adLoadFailed by remember(adUrl, adHtml) { mutableStateOf(false) }
+    var userInteracted by remember(adUrl, adHtml) { mutableStateOf(false) }
+    var adWebView by remember { mutableStateOf<WebView?>(null) }
+    val sampleBitmap = remember { Bitmap.createBitmap(24, 16, Bitmap.Config.ARGB_8888) }
+    DisposableEffect(sampleBitmap) {
+        onDispose {
+            if (!sampleBitmap.isRecycled) sampleBitmap.recycle()
+        }
+    }
 
-    LaunchedEffect(Unit) {
-        var waitMs = 0
-        while (!adPageLoaded && waitMs < 3500) {
+    // Wait strictly until redirect trampolines finish AND real ad visuals render on screen before starting countdown
+    LaunchedEffect(adWebView, adLoadFailed) {
+        if (adVisualReady) return@LaunchedEffect
+        if (adLoadFailed) {
             kotlinx.coroutines.delay(250)
-            waitMs += 250
+            onSkipAd()
+            return@LaunchedEffect
         }
-        while (countdown > 0) {
+        val wv = adWebView ?: return@LaunchedEffect
+        var domVisible = false
+        var elapsed = 0L
+        while (!adVisualReady && !adLoadFailed && elapsed < 14_000L) {
+            val nowMs = System.currentTimeMillis()
+            val settledAfterNav = (nowMs - lastPageStartMs) >= 350L
+            if (settledAfterNav && (adPageFinished || hasCommittedVisual || adHtml.isNotBlank())) {
+                wv.evaluateJavascript(
+                    """(function(){
+                        if (!document || !document.body) return 'loading';
+                        if (document.readyState !== 'complete') return 'loading';
+                        var textLen = (document.body.innerText || '').trim().length;
+                        if (document.getElementById('submit-form') && textLen < 20) return 'redirect';
+                        var w = window.innerWidth || document.documentElement.clientWidth || 0;
+                        var h = window.innerHeight || document.documentElement.clientHeight || 0;
+                        if (w <= 0 || h <= 0) return 'loading';
+                        if (textLen >= 30) return 'visible';
+                        var els = document.querySelectorAll('img,iframe,video,canvas,svg,button,a,input,div,section');
+                        for (var i = 0; i < els.length && i < 60; i++) {
+                            var el = els[i];
+                            var st = window.getComputedStyle(el);
+                            if (!st || st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity || '1') <= 0.05) continue;
+                            var r = el.getBoundingClientRect();
+                            if (r.width >= 32 && r.height >= 24 && r.bottom > 0 && r.right > 0 && r.top < h && r.left < w) {
+                                var tag = el.tagName;
+                                if (tag === 'IMG' || tag === 'IFRAME' || tag === 'VIDEO' || tag === 'CANVAS' || tag === 'SVG' || tag === 'BUTTON' || tag === 'A') return 'visible';
+                                if ((st.backgroundImage && st.backgroundImage !== 'none') || ((el.innerText || '').trim().length >= 8)) return 'visible';
+                            }
+                        }
+                        return 'blank';
+                    })();""".trimIndent()
+                ) { raw ->
+                    val state = raw?.trim()?.trim('"') ?: "loading"
+                    domVisible = (state == "visible")
+                }
+
+                val pixelsPainted = isWebViewVisuallyPainted(wv, sampleBitmap)
+                val elapsedAfterFinish = if (lastPageFinishMs > 0L) (nowMs - lastPageFinishMs) else 0L
+                if ((pixelsPainted && domVisible) ||
+                    (adPageFinished && domVisible && elapsedAfterFinish >= 1_500L)
+                ) {
+                    adVisualReady = true
+                    break
+                }
+            }
+            kotlinx.coroutines.delay(200)
+            elapsed += 200L
+        }
+        if (!adVisualReady) {
+            // Ad failed to paint any visible content within timeout — proceed cleanly instead of wasting countdown on a black screen
+            onSkipAd()
+        }
+    }
+
+    // Start countdown strictly AFTER the ad screen visually appears to the user
+    LaunchedEffect(adVisualReady, totalDelay) {
+        if (!adVisualReady) return@LaunchedEffect
+        countdown = totalDelay
+        for (sec in totalDelay downTo 1) {
+            countdown = sec
             kotlinx.coroutines.delay(1000)
-            countdown--
         }
+        countdown = 0
         canSkip = true
-        // Auto-dismiss ad when visible display countdown reaches 0
-        onSkipAd()
+        if (!userInteracted) {
+            onSkipAd()
+        }
     }
 
     Box(
@@ -1449,6 +2027,7 @@ private fun PreRollAdOverlay(
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
+                    adWebView = this
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -1457,24 +2036,97 @@ private fun PreRollAdOverlay(
                         javaScriptEnabled = true
                         domStorageEnabled = true
                         javaScriptCanOpenWindowsAutomatically = true
+                        setSupportMultipleWindows(true)
                         loadWithOverviewMode = true
                         useWideViewPort = true
                         mediaPlaybackRequiresUserGesture = false
                         allowFileAccess = false
                         mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         cacheMode = WebSettings.LOAD_DEFAULT
+                        userAgentString = MOBILE_CHROME_UA
                     }
                     setBackgroundColor(android.graphics.Color.BLACK)
+                    setOnTouchListener { _, event ->
+                        if (event?.action == android.view.MotionEvent.ACTION_DOWN) {
+                            userInteracted = true
+                        }
+                        false
+                    }
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                            super.onProgressChanged(view, newProgress)
+                            if (newProgress >= 95 && !view?.url.isNullOrBlank() && view?.url != "about:blank") {
+                                adPageFinished = true
+                                if (lastPageFinishMs == 0L) lastPageFinishMs = System.currentTimeMillis()
+                            }
+                        }
+
+                        override fun onCreateWindow(
+                            view: WebView?,
+                            isDialog: Boolean,
+                            isUserGesture: Boolean,
+                            resultMsg: android.os.Message?
+                        ): Boolean {
+                            val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                            val popupWebView = WebView(ctx).apply {
+                                webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(popup: WebView?, req: WebResourceRequest?): Boolean {
+                                        val popupUrl = req?.url?.toString().orEmpty()
+                                        if (popupUrl.startsWith("http://", true) || popupUrl.startsWith("https://", true)) {
+                                            view?.loadUrl(popupUrl)
+                                        } else {
+                                            handleInAppAdWebNavigation(view, popupUrl)
+                                        }
+                                        return true
+                                    }
+                                }
+                            }
+                            transport.webView = popupWebView
+                            resultMsg.sendToTarget()
+                            return true
+                        }
+                    }
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                             return handleInAppAdWebNavigation(view, request?.url?.toString().orEmpty())
+                        }
+
+                        override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
+                            val loaded = url.orEmpty().trim()
+                            if (loaded.isNotEmpty() && loaded != "about:blank") {
+                                adPageFinished = false
+                                hasCommittedVisual = false
+                                lastPageStartMs = System.currentTimeMillis()
+                                lastPageFinishMs = 0L
+                            }
+                        }
+
+                        override fun onPageCommitVisible(view: WebView?, url: String?) {
+                            super.onPageCommitVisible(view, url)
+                            val loaded = url.orEmpty().trim()
+                            if (loaded.isNotEmpty() && loaded != "about:blank") {
+                                hasCommittedVisual = true
+                            }
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             val loaded = url.orEmpty().trim()
                             if (loaded.isNotEmpty() && loaded != "about:blank") {
-                                adPageLoaded = true
+                                adPageFinished = true
+                                lastPageFinishMs = System.currentTimeMillis()
+                            }
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: android.webkit.WebResourceError?
+                        ) {
+                            super.onReceivedError(view, request, error)
+                            if (request?.isForMainFrame == true) {
+                                adLoadFailed = true
                             }
                         }
                     }
@@ -1488,52 +2140,29 @@ private fun PreRollAdOverlay(
             modifier = Modifier.fillMaxSize()
         )
 
-        // ── Top Left: Sponsored Ad Badge ──
+        // ── Bottom-Start: Subtle Sponsored Ad Badge (never covers top header UI of the ad) ──
         Box(
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 24.dp, start = 20.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xCC000000))
-                .border(1.dp, Color(0x66D4AF37), RoundedCornerShape(8.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .align(Alignment.BottomStart)
+                .padding(bottom = 14.dp, start = 16.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0x99000000))
+                .border(0.8.dp, Color(0x55D4AF37), RoundedCornerShape(6.dp))
+                .padding(horizontal = 9.dp, vertical = 4.dp)
         ) {
             Text(
                 text = "إعلان مدعوم",
-                color = Color(0xFFFFE082),
-                fontSize = 12.sp,
+                color = Color(0xFFFFE082).copy(alpha = 0.88f),
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold
             )
         }
 
-        // ── Top Right: Close / Return to Player Button [✕ عودة للمشغل] ──
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 24.dp, end = 20.dp)
-        ) {
-            Button(
-                onClick = onSkipAd,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xCC1E1420)),
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, Color(0xFFD4AF37).copy(alpha = 0.6f)),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
-            ) {
-                Text(
-                    text = "✕  عودة للمشغل",
-                    color = Color(0xFFFFE082),
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        // ── Center-Right (في نص الصفحة على اليمين): Prominent Skip Ad Button ──
+        // ── Center-Right: Loading indicator BEFORE ad appears, then strict countdown ──
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 28.dp)
+                .padding(end = 24.dp)
         ) {
             if (canSkip) {
                 Button(
@@ -1543,14 +2172,14 @@ private fun PreRollAdOverlay(
                         contentColor = Color.Black
                     ),
                     shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 14.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 10.dp),
                     border = BorderStroke(2.dp, Color(0xFFFFE082))
                 ) {
                     Text(
                         text = "تخطي الإعلان ⏩",
                         color = Color.Black,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Black
                     )
                 }
@@ -1558,9 +2187,9 @@ private fun PreRollAdOverlay(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xEE12151C))
+                        .background(Color(0xE012151C))
                         .border(1.5.dp, Color(0xFFD4AF37).copy(alpha = 0.6f), RoundedCornerShape(14.dp))
-                        .padding(horizontal = 18.dp, vertical = 12.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1569,13 +2198,13 @@ private fun PreRollAdOverlay(
                         CircularProgressIndicator(
                             color = Color(0xFFD4AF37),
                             strokeWidth = 2.5.dp,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(9.dp))
                         Text(
-                            text = "تخطي بعد ( $countdown )",
+                            text = if (!adVisualReady) "جاري تحميل الإعلان..." else "تخطي بعد ( $countdown )",
                             color = Color.White,
-                            fontSize = 14.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
@@ -1624,7 +2253,7 @@ private fun InAppBrowserOverlay(
                     )
                 }
 
-                // [✕ عودة للمشغل] Button
+                // [✕ إغلاق] Button
                 Button(
                     onClick = onClose,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB94E3C)),
@@ -1633,7 +2262,7 @@ private fun InAppBrowserOverlay(
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
                 ) {
                     Text(
-                        text = "✕  عودة للمشغل",
+                        text = "✕  إغلاق",
                         color = Color.White,
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold
@@ -1702,7 +2331,6 @@ private fun PlayerScreen(
     val isEmbedPage = !isDirectStream
     var useWebViewFallback by remember(effectiveStreamUrl) { mutableStateOf(isEmbedPage) }
     var exoRetryKey by remember(effectiveStreamUrl) { mutableIntStateOf(0) }
-    var showPreRollAd by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var isBuffering by remember(effectiveStreamUrl) { mutableStateOf(!isYouTube) }
     var playbackError by remember(effectiveStreamUrl) { mutableStateOf<String?>(null) }
     var sourceDiagnostic by remember(effectiveStreamUrl) { mutableStateOf<String?>(null) }
@@ -1715,8 +2343,12 @@ private fun PlayerScreen(
     var ytSliderValue by remember(effectiveStreamUrl) { mutableStateOf<Float?>(null) }
     var ytIsPlaying by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var ytIsBuffering by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var ytEnded by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var ytAvailableQualities by remember(effectiveStreamUrl) { mutableStateOf<List<String>>(emptyList()) }
+    var ytSelectedQuality by remember(effectiveStreamUrl) { mutableStateOf("auto") }
+    var ytEmbedChecked by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var useWatchPage by remember(effectiveStreamUrl) {
-        mutableStateOf(true)
+        mutableStateOf(false) // false = clean IFrame API; true = clean mobile m.youtube.com watch mode
     }
     var ytSpeed by remember(effectiveStreamUrl) { mutableFloatStateOf(1.0f) }
     var ytDoubleTapSide by remember { mutableStateOf<String?>(null) }
@@ -1729,19 +2361,32 @@ private fun PlayerScreen(
         } else ""
         """
             (function() {
-                var adCss = '.video-ads, .ytp-ad-module, .ytp-ad-overlay-container, .ytp-ad-player-overlay, ' +
+                var adCss = '.ytp-ad-overlay-container, .ytp-ad-player-overlay, .ytp-ad-player-overlay-instream-info, ' +
                     '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-text, .ytp-ad-preview-container, ' +
-                    '.ad-showing, .ad-container, .ytp-ad-button, .ytm-promoted-sparkles-web-renderer, ' +
-                    'ytm-companion-ad-renderer, .ytp-suggested-action, ytd-promoted-video-renderer, ' +
-                    'ytd-display-ad-renderer, .ytp-ad-action-interstitial, ytd-action-companion-ad-renderer, ' +
-                    '.ytp-ad-image-overlay, .ytp-paid-content-overlay, .ytp-ad-progress, .ytp-ad-progress-list, ' +
-                    '.ytm-skip-ad-button, [id*="ad-text"], .ytp-ad-message-container, .ytp-ad-duration-remaining { ' +
+                    '.ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer, .ytp-suggested-action, ' +
+                    'ytd-promoted-video-renderer, ytd-display-ad-renderer, .ytp-ad-action-interstitial, ' +
+                    'ytd-action-companion-ad-renderer, .ytp-ad-image-overlay, .ytp-paid-content-overlay, ' +
+                    '.ytp-ad-progress, .ytp-ad-progress-list, .ytm-skip-ad-button, .ytp-ad-message-container { ' +
                     'display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; width: 0 !important; height: 0 !important; } ';
 
+                var ytChromeCss = '.ytp-chrome-top, .ytp-chrome-bottom, .ytp-gradient-top, .ytp-gradient-bottom, ' +
+                    '.ytp-large-play-button, .ytp-cued-thumbnail-overlay, .ytp-pause-overlay, .ytp-ce-element, ' +
+                    '.ytp-endscreen-content, .ytp-watermark, .ytp-show-cards-title, .ytp-unmute, .ytm-unmute, ' +
+                    '[class*="unmute" i], .ytp-volume-area, .ytp-mute-button, ytm-mobile-topbar-renderer, ' +
+                    'ytm-pivot-bar-renderer, ytm-item-section-renderer, ytm-comment-section-renderer, ' +
+                    '.watch-below-the-player, ytm-reel-shelf-renderer, #related, #comments, #secondary, ' +
+                    '#masthead-container, ytm-engagement-panel-section-list-renderer, ' +
+                    'ytm-single-column-watch-next-results-renderer, ytm-upsell-dialog-renderer, ' +
+                    '.fullscreen-icon, .player-controls-top, .player-controls-middle, .player-controls-bottom, ' +
+                    '.player-controls-content, .ytm-player-controls-background { ' +
+                    'display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; width: 0 !important; height: 0 !important; } ';
+
                 var css = 'html, body { overflow: hidden !important; background: #000 !important; margin: 0 !important; padding: 0 !important; width: 100vw !important; height: 100vh !important; direction: ltr !important; } ' +
-                    '.ytp-unmute, .ytm-unmute, [class*="unmute" i], .ytp-volume-area, .ytp-mute-button, ytm-mobile-topbar-renderer, ytm-pivot-bar-renderer, ytm-item-section-renderer, ytm-comment-section-renderer, .watch-below-the-player, ytm-reel-shelf-renderer, #related, #comments, .ytm-cinema, ytm-engagement-panel-section-list-renderer, ytm-single-column-watch-next-results-renderer, .fullscreen-icon, .player-controls-bottom { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; width: 0 !important; height: 0 !important; } ' +
-                    '.player-container, #player-container-id, .html5-video-player, #player { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 999999 !important; background: #000 !important; margin: auto !important; } ' +
-                    'video { position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; margin: auto !important; width: 100vw !important; height: 100vh !important; object-fit: contain !important; } ' + adCss + '$hideSubsCss';
+                    '.player-container, #player-container-id, #movie_player, .html5-video-player, .html5-video-container, #player { ' +
+                    'position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 999999 !important; background: #000 !important; margin: 0 !important; padding: 0 !important; } ' +
+                    'video.html5-main-video, video { position: fixed !important; inset: 0 !important; margin: auto !important; width: 100vw !important; height: 100vh !important; max-width: 100vw !important; max-height: 100vh !important; object-fit: contain !important; background: #000 !important; } ' +
+                    ytChromeCss + adCss + '$hideSubsCss';
+
                 var style = document.getElementById('zag-yt-cinema-css');
                 if (!style) {
                     style = document.createElement('style');
@@ -1750,13 +2395,30 @@ private fun PlayerScreen(
                 }
                 style.textContent = css;
 
-                // ── Fast Player Getter & Seek Function ──
                 window.__zagGetPlayer = function() {
                     var p = document.getElementById('movie_player');
                     if (p && typeof p.seekTo === 'function') return p;
                     var f = document.querySelector('.html5-video-player');
                     if (f && typeof f.seekTo === 'function') return f;
                     return null;
+                };
+
+                window.__zagPlay = function() {
+                    var p = window.__zagGetPlayer();
+                    var v = document.querySelector('video');
+                    try {
+                        if (p && typeof p.unMute === 'function') p.unMute();
+                        if (v) { v.muted = false; v.volume = 1.0; }
+                        if (p && typeof p.playVideo === 'function') { p.playVideo(); return; }
+                    } catch(e) {}
+                    if (v) { try { v.play(); } catch(e2) {} }
+                };
+
+                window.__zagPause = function() {
+                    var p = window.__zagGetPlayer();
+                    try { if (p && typeof p.pauseVideo === 'function') p.pauseVideo(); } catch(e) {}
+                    var v = document.querySelector('video');
+                    if (v && !v.paused) { try { v.pause(); } catch(e2) {} }
                 };
 
                 window.__zagSeekTo = function(sec) {
@@ -1770,82 +2432,100 @@ private fun PlayerScreen(
                     } catch(e) {}
                     var v = document.querySelector('video');
                     if (v) {
-                        try {
-                            v.currentTime = sec;
-                            v.play();
-                        } catch(e2) {}
+                        try { v.currentTime = sec; v.play(); } catch(e2) {}
                     }
                 };
 
-                // ── Aggressive Ad Killer & Auto-Skipper ──
+                window.__zagSetSpeed = function(rate) {
+                    var p = window.__zagGetPlayer();
+                    if (p && typeof p.setPlaybackRate === 'function') { try { p.setPlaybackRate(rate); } catch(e) {} }
+                    var v = document.querySelector('video');
+                    if (v) { try { v.playbackRate = rate; } catch(e2) {} }
+                };
+
+                window.__zagSetQuality = function(q) {
+                    var p = window.__zagGetPlayer();
+                    if (!p) return;
+                    try {
+                        if (typeof p.setPlaybackQualityRange === 'function') p.setPlaybackQualityRange(q, q);
+                        if (typeof p.setPlaybackQuality === 'function') p.setPlaybackQuality(q);
+                    } catch(e) {}
+                };
+
+                function reportYtQualities() {
+                    try {
+                        var p = window.__zagGetPlayer();
+                        if (p && window.MadarBridge && window.MadarBridge.onQualityLevels && typeof p.getAvailableQualityLevels === 'function') {
+                            var levels = p.getAvailableQualityLevels() || [];
+                            var cur = (typeof p.getPlaybackQuality === 'function') ? p.getPlaybackQuality() : '';
+                            if (levels.length) window.MadarBridge.onQualityLevels(JSON.stringify(levels), cur || '');
+                        }
+                    } catch(e) {}
+                }
+
+                // ── Safe Active-Only Ad Skipper (NEVER match static .video-ads shell) ──
                 function purgeYouTubeAds() {
                     var skipButtons = document.querySelectorAll(
-                        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .videoAdUiSkipButton, button.ytp-ad-skip-button-text, .ytp-ad-overlay-close-button, .ytm-skip-ad-button, [id^="skip-button"]'
+                        '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .videoAdUiSkipButton, button.ytp-ad-skip-button-text, .ytp-ad-overlay-close-button, .ytm-skip-ad-button'
                     );
                     for (var i = 0; i < skipButtons.length; i++) {
                         try { skipButtons[i].click(); } catch(e) {}
                     }
 
-                    var p = window.__zagGetPlayer();
-                    var isAd = false;
-                    if (p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting'))) {
-                        isAd = true;
-                    }
-                    if (document.querySelector('.ad-showing, .ad-container, .ytp-ad-player-overlay, .video-ads')) {
-                        isAd = true;
-                    }
-
+                    var p = window.__zagGetPlayer() || document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+                    var hasAdClass = !!(p && (p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting')));
+                    var hasAdUi = !!document.querySelector('.ytp-ad-player-overlay-instream-info, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-duration-remaining');
                     var v = document.querySelector('video');
-                    if (isAd && v) {
+                    if (hasAdClass && hasAdUi && v && isFinite(v.duration) && v.duration > 0 && v.duration < 180) {
                         try {
                             v.muted = true;
-                            if (isFinite(v.duration) && v.duration > 0) {
-                                v.currentTime = v.duration;
-                            }
-                            v.playbackRate = 16.0;
+                            v.currentTime = v.duration;
                         } catch(e) {}
-                    } else if (v && v.playbackRate > 2.0) {
+                    } else if (v && !hasAdClass && v.playbackRate > 2.5) {
                         v.playbackRate = 1.0;
                         v.muted = false;
-                    }
-
-                    var adEls = document.querySelectorAll(
-                        '.ad-showing, .ad-container, .video-ads, .ytp-ad-module, .ytp-ad-overlay-container, ' +
-                        '.ytp-ad-player-overlay, ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer, ' +
-                        '.ytp-ad-progress, .ytp-ad-progress-list, .ytp-ad-image-overlay, ytd-display-ad-renderer, ' +
-                        'ytd-promoted-video-renderer, .ytp-ad-action-interstitial, ytd-action-companion-ad-renderer, ' +
-                        '.ytp-ad-text, .ytp-ad-preview-container'
-                    );
-                    for (var j = 0; j < adEls.length; j++) {
-                        try {
-                            adEls[j].style.display = 'none';
-                            adEls[j].style.visibility = 'hidden';
-                            adEls[j].style.opacity = '0';
-                        } catch(e) {}
                     }
                 }
 
                 purgeYouTubeAds();
                 if (!window.__zagAdKillerRunning) {
                     window.__zagAdKillerRunning = true;
-                    setInterval(purgeYouTubeAds, 120);
-                    try {
-                        var obs = new MutationObserver(purgeYouTubeAds);
-                        obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
-                    } catch(e) {}
+                    setInterval(purgeYouTubeAds, 200);
+                    setInterval(function() {
+                        reportYtQualities();
+                        var v2 = document.querySelector('video');
+                        if (v2 && window.MadarBridge) {
+                            var p2 = window.__zagGetPlayer() || document.getElementById('movie_player');
+                            var inAd = !!(p2 && (p2.classList.contains('ad-showing') || p2.classList.contains('ad-interrupting')));
+                            if (!inAd) {
+                                window.MadarBridge.onTimeUpdate(v2.currentTime || 0, v2.duration || 0);
+                                if (v2.readyState >= 2 && !v2.paused && !v2.ended && v2.currentTime > 0.15) {
+                                    window.MadarBridge.onStateChange('playing');
+                                }
+                            }
+                        }
+                    }, 350);
                 }
+
+                // Dismiss consent / sign-in / app upsell prompts cleanly if any appear on m.youtube.com
+                try {
+                    var dismissBtns = document.querySelectorAll('ytm-upsell-dialog-renderer button, .upsell-dialog-dismiss-button, tp-yt-paper-dialog button[aria-label*="No" i], tp-yt-paper-dialog button[aria-label*="Dismiss" i]');
+                    for (var d = 0; d < dismissBtns.length; d++) { try { dismissBtns[d].click(); } catch(e) {} }
+                } catch(e) {}
 
                 var v = document.querySelector('video');
                 if (v) {
                     v.muted = false;
                     v.volume = 1.0;
-                    if (v.paused) {
+                    if (v.paused && !window.__zagPausedForAd) {
                         try {
                             var pl = v.play();
                             if (pl !== undefined) {
                                 pl.catch(function() {
-                                    v.muted = false;
-                                    v.play();
+                                    v.muted = true;
+                                    v.play().then(function() {
+                                        setTimeout(function() { v.muted = false; }, 120);
+                                    }).catch(function(){});
                                 });
                             }
                         } catch(e) {}
@@ -1863,7 +2543,7 @@ private fun PlayerScreen(
                             if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
                         });
                         v.addEventListener('canplay', function() {
-                            if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
+                            if (window.MadarBridge && !v.paused) window.MadarBridge.onStateChange('playing');
                         });
                         v.addEventListener('seeked', function() {
                             if (window.MadarBridge) window.MadarBridge.onStateChange('playing');
@@ -1897,22 +2577,60 @@ private fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(isYouTube, effectiveStreamUrl, ytIsPlaying, useWatchPage) {
+    // Pre-flight check: decide IFrame vs mobile Watch in <1.8s with zero wasted 7s Error 150 wait!
+    LaunchedEffect(isYouTube, effectiveStreamUrl, webViewRef, exoRetryKey) {
         if (!isYouTube) return@LaunchedEffect
-        kotlinx.coroutines.delay(4000)
-        if (!ytIsPlaying && !useWatchPage) {
+        val ytId = extractYouTubeId(effectiveStreamUrl)
+        val wv = webViewRef ?: return@LaunchedEffect
+        if (ytId.isBlank()) {
+            playbackError = "رابط فيديو YouTube غير صالح."
+            isBuffering = false
+            return@LaunchedEffect
+        }
+        val embeddable = withContext(Dispatchers.IO) { isYouTubeVideoEmbeddable(ytId) }
+        useWatchPage = !embeddable
+        ytEmbedChecked = true
+        if (embeddable) {
+            val html = buildYouTubeIFrameHtml(ytId, subtitlesEnabled, pausedForAd = isAdOverlayActive)
+            wv.loadDataWithBaseURL(YOUTUBE_EMBED_ORIGIN, html, "text/html", "UTF-8", null)
+        } else {
+            wv.settings.userAgentString = MOBILE_CHROME_UA
+            wv.evaluateJavascript("window.__zagPausedForAd = ${isAdOverlayActive};", null)
+            wv.loadUrl("https://m.youtube.com/watch?v=$ytId&app=m")
+        }
+    }
+
+    // Pause YouTube video cleanly while PreRoll Ad is showing; resume immediately on ad skip!
+    LaunchedEffect(isYouTube, isAdOverlayActive, webViewRef, ytEmbedChecked) {
+        if (!isYouTube) return@LaunchedEffect
+        val wv = webViewRef ?: return@LaunchedEffect
+        if (isAdOverlayActive) {
+            wv.evaluateJavascript("window.__zagPausedForAd = true; if (window.__zagPause) window.__zagPause();", null)
+        } else if (ytEmbedChecked) {
+            wv.evaluateJavascript("window.__zagPausedForAd = false; if (window.__zagPlay) window.__zagPlay();", null)
+        }
+    }
+
+    // Fallback: if IFrame fails to start after 7s AFTER PreRoll ad closes, switch cleanly to m.youtube.com watch
+    LaunchedEffect(isYouTube, effectiveStreamUrl, ytIsPlaying, useWatchPage, ytEmbedChecked, isAdOverlayActive) {
+        if (!isYouTube || !ytEmbedChecked || useWatchPage || isAdOverlayActive) return@LaunchedEffect
+        kotlinx.coroutines.delay(7000)
+        if (!ytIsPlaying) {
+            Log.w("MadarPlayer", "YT IFrame not playing after 7s -> switching to mobile watch mode")
             useWatchPage = true
             val ytId = extractYouTubeId(effectiveStreamUrl)
             if (ytId.isNotBlank()) {
-                webViewRef?.loadUrl("https://www.youtube.com/watch?v=$ytId")
+                webViewRef?.settings?.userAgentString = MOBILE_CHROME_UA
+                webViewRef?.loadUrl("https://m.youtube.com/watch?v=$ytId&app=m")
             }
         }
     }
 
-    LaunchedEffect(isYouTube, effectiveStreamUrl, webViewRef, useWatchPage) {
-        if (!isYouTube || !useWatchPage) return@LaunchedEffect
-        for (i in 1..12) {
-            kotlinx.coroutines.delay(350)
+    // Watch-page cinema CSS + ad cleanup loop
+    LaunchedEffect(isYouTube, effectiveStreamUrl, webViewRef, useWatchPage, ytEmbedChecked) {
+        if (!isYouTube || !ytEmbedChecked || !useWatchPage) return@LaunchedEffect
+        for (i in 1..20) {
+            kotlinx.coroutines.delay(400)
             webViewRef?.evaluateJavascript(cleanCinemaJs, null)
         }
     }
@@ -2061,6 +2779,7 @@ private fun PlayerScreen(
     var pauseAdDismissed by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var resumeAfterAd by remember(effectiveStreamUrl) { mutableStateOf(true) }
     var wasAdOverlayActive by remember(effectiveStreamUrl) { mutableStateOf(isAdOverlayActive) }
+    var liveRetryAttempted by remember(effectiveStreamUrl) { mutableStateOf(false) }
     val streamStartedMs = remember(effectiveStreamUrl) { System.currentTimeMillis() }
 
     var showControls by remember { mutableStateOf(true) }
@@ -2098,17 +2817,17 @@ private fun PlayerScreen(
             .apply {
                 put("User-Agent", cleanUa)
                 if (cleanRef.isNotBlank()) put("Referer", cleanRef)
-                // Preserve the provider's explicit origin; some live streams reject a
-                // request when Origin is guessed from a different Referer host.
-                val origin = sourceOrigin?.takeIf(String::isNotBlank)
-                    ?: originForHeader(cleanRef).takeIf(String::isNotBlank)
-                if (origin != null) put("Origin", origin)
+                // Preserve explicit Origin, or derive from clean ASCII Referer; NEVER emit
+                // a synthesized Origin with zero-width token chars that live CDNs reject.
+                val inferredOrigin = originForHeader(cleanRef).takeIf { it.isNotBlank() && isAsciiHeaderValue(it) }
+                val origin = sourceOrigin?.takeIf { it.isNotBlank() && isAsciiHeaderValue(it) } ?: inferredOrigin
+                if (origin != null && isAsciiHeaderValue(cleanRef)) {
+                    put("Origin", origin)
+                } else if (sourceOrigin != null && isAsciiHeaderValue(sourceOrigin)) {
+                    put("Origin", sourceOrigin)
+                }
             }
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(cleanUa)
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(12000)
-            .setReadTimeoutMs(20000)
+        val httpDataSourceFactory = Utf8OkHttpDataSource.Factory(userAgent = cleanUa)
             .setDefaultRequestProperties(headers)
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
 
@@ -2178,9 +2897,16 @@ private fun PlayerScreen(
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
+                        Log.w("MadarPlayer", "ExoPlayer error host=${safeHost(streamUrl)} code=${error.errorCodeName} msg=${error.cause?.message}")
+                        if (isLive && !liveRetryAttempted) {
+                            liveRetryAttempted = true
+                            exoRetryKey++
+                            return
+                        }
                         if (backupSources.isNotEmpty()) {
                             val directIdx = backupSources.indexOfFirst { isDirectStreamUrl(it.url) }
                             val next = backupSources.removeAt(if (directIdx >= 0) directIdx else 0)
+                            liveRetryAttempted = false
                             onSwitchStream(
                                 next.url,
                                 next.userAgent.ifBlank { cleanUa },
@@ -2215,7 +2941,9 @@ private fun PlayerScreen(
                     }
                 })
                 setMediaSource(mediaSource)
-                prepare()
+                if (!isLive || !isAdOverlayActive) {
+                    prepare()
+                }
                 playWhenReady = !isAdOverlayActive
             }
     }
@@ -2226,6 +2954,10 @@ private fun PlayerScreen(
             resumeAfterAd = p.playWhenReady || !hasRenderedFirstFrame
             p.playWhenReady = false
         } else if (!isAdOverlayActive && wasAdOverlayActive) {
+            if (isLive) {
+                p.seekToDefaultPosition()
+                p.prepare()
+            }
             if (resumeAfterAd) {
                 p.playWhenReady = true
             }
@@ -2364,6 +3096,8 @@ private fun PlayerScreen(
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                         setBackgroundColor(android.graphics.Color.BLACK)
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                         if (isYouTube) {
                             addJavascriptInterface(
                                 object {
@@ -2376,11 +3110,33 @@ private fun PlayerScreen(
                                             if (duration > 0f) {
                                                 ytDurationSec = duration
                                             }
-                                            if (currentTime > 0.3f && !hasRenderedFirstFrame) {
+                                            if (currentTime > 0.25f && !hasRenderedFirstFrame) {
                                                 hasRenderedFirstFrame = true
                                                 ytIsPlaying = true
                                                 ytIsBuffering = false
+                                                ytEnded = false
                                                 isBuffering = false
+                                            }
+                                        }
+                                    }
+
+                                    @JavascriptInterface
+                                    fun onQualityLevels(levelsJson: String, currentQuality: String) {
+                                        pageProbeHandler.post {
+                                            val parsed = runCatching {
+                                                val arr = JSONArray(levelsJson)
+                                                buildList {
+                                                    for (i in 0 until arr.length()) {
+                                                        val q = arr.optString(i).trim()
+                                                        if (q.isNotBlank() && q != "auto" && q != "tiny") add(q)
+                                                    }
+                                                }
+                                            }.getOrDefault(emptyList())
+                                            if (parsed.isNotEmpty()) {
+                                                ytAvailableQualities = parsed
+                                            }
+                                            if (currentQuality.isNotBlank()) {
+                                                ytSelectedQuality = currentQuality
                                             }
                                         }
                                     }
@@ -2392,6 +3148,7 @@ private fun PlayerScreen(
                                                 "playing" -> {
                                                     ytIsPlaying = true
                                                     ytIsBuffering = false
+                                                    ytEnded = false
                                                     isBuffering = false
                                                     hasRenderedFirstFrame = true
                                                 }
@@ -2404,6 +3161,7 @@ private fun PlayerScreen(
                                                 "ended" -> {
                                                     ytIsPlaying = false
                                                     ytIsBuffering = false
+                                                    ytEnded = true
                                                     showControls = true
                                                 }
                                             }
@@ -2413,14 +3171,18 @@ private fun PlayerScreen(
                                     @JavascriptInterface
                                     fun onPlayerError(errorCode: Int) {
                                         pageProbeHandler.post {
-                                            Log.w("MadarPlayer", "YouTube IFrame Error: $errorCode -> Auto-switching to cinema mobile watch stream")
+                                            Log.w("MadarPlayer", "YouTube IFrame Error: $errorCode -> switching to mobile watch stream")
                                             ytIsBuffering = true
                                             if (!useWatchPage) {
                                                 useWatchPage = true
                                                 val ytId = extractYouTubeId(effectiveStreamUrl)
                                                 if (ytId.isNotBlank()) {
-                                                    webViewRef?.loadUrl("https://www.youtube.com/watch?v=$ytId")
+                                                    webViewRef?.settings?.userAgentString = MOBILE_CHROME_UA
+                                                    webViewRef?.loadUrl("https://m.youtube.com/watch?v=$ytId&app=m")
                                                 }
+                                            } else if (errorCode != 0) {
+                                                playbackError = "تعذر تشغيل فيديو يوتيوب (رمز $errorCode). تأكد من الإنترنت أو افتحه بالمتصفح."
+                                                isBuffering = false
                                             }
                                         }
                                     }
@@ -2448,7 +3210,7 @@ private fun PlayerScreen(
                             setSupportMultipleWindows(false)
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             userAgentString = if (isYouTube) {
-                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                                MOBILE_CHROME_UA
                             } else {
                                 cleanUa
                             }
@@ -2642,11 +3404,11 @@ private fun PlayerScreen(
                                         "(function(){ try { window.open=function(){return null;}; window.alert=function(){}; window.confirm=function(){return false;}; } catch(e){} })();",
                                         null
                                     )
-                                    // ── Black Screen Watchdog 1: 5.5s when backups exist, else 8s ──
-                                    val watchdog1Ms = if (backupSources.isNotEmpty()) 5_500L else 8_000L
+                                    // ── Black Screen Watchdog 1: 7.5s when backups exist, else 10s (ignore while PreRoll Ad covers screen) ──
+                                    val watchdog1Ms = if (backupSources.isNotEmpty()) 7_500L else 10_000L
                                     pageProbeHandler.postDelayed({
                                         if (pageStartedAt.get() != startedAt || pageFailureScheduled.get() ||
-                                            pagePlayableObserved.get() || !webViewActive.get()
+                                            pagePlayableObserved.get() || !webViewActive.get() || isAdOverlayActive
                                         ) return@postDelayed
                                         Log.w("MadarPlayer", "WebView black screen watchdog ${watchdog1Ms}ms. Backups left: ${backupSources.size}")
                                         handleMainFrameFailure(
@@ -2654,10 +3416,10 @@ private fun PlayerScreen(
                                         )
                                     }, watchdog1Ms)
 
-                                    // ── Black Screen Watchdog 2: 14 seconds (maximum fallback threshold) ──
+                                    // ── Black Screen Watchdog 2: 18 seconds (maximum fallback threshold) ──
                                     pageProbeHandler.postDelayed({
                                         if (pageStartedAt.get() != startedAt || pageFailureScheduled.get() ||
-                                            !webViewActive.get()
+                                            !webViewActive.get() || isAdOverlayActive
                                         ) return@postDelayed
                                         if (!pagePlayableObserved.get()) {
                                             Log.w("MadarPlayer", "WebView black screen watchdog 14s. Backups left: ${backupSources.size}")
@@ -2667,6 +3429,7 @@ private fun PlayerScreen(
                                         }
                                     }, 14_000L)
                                 } else if (useWatchPage) {
+                                    view?.evaluateJavascript("window.__zagPausedForAd = ${isAdOverlayActive};", null)
                                     view?.evaluateJavascript(cleanCinemaJs, null)
                                 }
                             }
@@ -2769,75 +3532,7 @@ private fun PlayerScreen(
                         }
                         setLayerType(View.LAYER_TYPE_HARDWARE, null)
                         if (isYouTube) {
-                            val ytId = extractYouTubeId(effectiveStreamUrl)
-                            if (ytId.isNotBlank()) {
-                                if (useWatchPage) {
-                                    loadUrl("https://www.youtube.com/watch?v=$ytId")
-                                } else {
-                                    val html = """
-                                        <!DOCTYPE html>
-                                        <html>
-                                        <head>
-                                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                                        <meta name="referrer" content="strict-origin-when-cross-origin">
-                                        <style>
-                                          * { margin:0; padding:0; box-sizing:border-box; background:#000; }
-                                          html, body { width:100%; height:100%; overflow:hidden; background:#000; }
-                                          #player { position:absolute; top:0; left:0; width:100%; height:100%; border:none; }
-                                        </style>
-                                        </head>
-                                        <body>
-                                        <iframe id="player"
-                                          src="https://www.youtube.com/embed/$ytId?autoplay=1&playsinline=1&controls=0&rel=0&modestbranding=1&iv_load_policy=3&fs=0&enablejsapi=1&origin=https://www.youtube.com"
-                                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                          referrerpolicy="strict-origin-when-cross-origin"
-                                          allowfullscreen>
-                                        </iframe>
-                                        <script>
-                                          var tag = document.createElement('script');
-                                          tag.src = "https://www.youtube.com/iframe_api";
-                                          var firstScriptTag = document.getElementsByTagName('script')[0];
-                                          firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-
-                                          var player;
-                                          function onYouTubeIframeAPIReady() {
-                                            player = new YT.Player('player', {
-                                              events: {
-                                                'onReady': function(e) {
-                                                  try { e.target.playVideo(); } catch(x) {}
-                                                },
-                                                'onStateChange': function(e) {
-                                                  if (window.MadarBridge) {
-                                                    if (e.data === 1) window.MadarBridge.onStateChange('playing');
-                                                    else if (e.data === 2) window.MadarBridge.onStateChange('paused');
-                                                    else if (e.data === 3) window.MadarBridge.onStateChange('buffering');
-                                                    else if (e.data === 0) window.MadarBridge.onStateChange('ended');
-                                                  }
-                                                },
-                                                'onError': function(e) {
-                                                  if (window.MadarBridge) window.MadarBridge.onPlayerError(e.data);
-                                                }
-                                              }
-                                            });
-                                          }
-
-                                          setInterval(function() {
-                                            if (player && typeof player.getCurrentTime === 'function') {
-                                              var cur = player.getCurrentTime() || 0;
-                                              var dur = player.getDuration() || 0;
-                                              if (window.MadarBridge) window.MadarBridge.onTimeUpdate(cur, dur);
-                                            }
-                                          }, 400);
-                                        </script>
-                                        </body>
-                                        </html>
-                                    """.trimIndent()
-                                    loadDataWithBaseURL("https://www.youtube.com", html, "text/html", "UTF-8", null)
-                                }
-                            } else {
-                                playbackError = "رابط فيديو YouTube غير صالح."
-                                isBuffering = false
-                            }
+                            // Single authoritative load is driven by LaunchedEffect after oEmbed check
                         } else if (cleanRef.isNotBlank()) {
                             loadUrl(effectiveStreamUrl, mapOf("Referer" to cleanRef))
                         } else {
@@ -2939,22 +3634,6 @@ private fun PlayerScreen(
                         )
                     }
                 }
-            )
-        }
-
-        // ── Single Pre-Roll Ad (Only on Watch Opening) ──
-        AnimatedVisibility(
-            visible = showPreRollAd,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(300)),
-            modifier = Modifier.zIndex(100f)
-        ) {
-            PreRollAdOverlay(
-                adHtml = PlayerAdManager.adHtmlSnippet,
-                adUrl = PlayerAdManager.adUrl,
-                skipDelaySeconds = PlayerAdManager.skipDelaySeconds,
-                onSkipAd = { showPreRollAd = false },
-                modifier = Modifier.fillMaxSize()
             )
         }
 
@@ -3089,7 +3768,7 @@ private fun PlayerScreen(
         // Media3 controller. Tapping the video only changes overlays; it never
         // pauses or recreates the active player.
         AnimatedVisibility(
-            visible = showControls && !showPreRollAd,
+            visible = showControls && !isAdOverlayActive,
             enter = fadeIn(animationSpec = tween(180)),
             exit = fadeOut(animationSpec = tween(180)),
             modifier = Modifier
@@ -3120,8 +3799,18 @@ private fun PlayerScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
 
                 // ── Smart Bandwidth / Quality button ────────────────────────
+                val ytQualityChip = when (ytSelectedQuality) {
+                    "highres", "hd2160" -> "4K"
+                    "hd1440" -> "1440p"
+                    "hd1080" -> "1080p HD"
+                    "hd720" -> "720p HD"
+                    "large" -> "480p"
+                    "medium" -> "360p"
+                    "small" -> "240p"
+                    else -> "HD"
+                }
                 val bandwidthLabel = when {
-                    isYouTube -> "🎬 ملخص · HD"
+                    isYouTube -> "🎬 يوتيوب · $ytQualityChip"
                     useWebViewFallback -> "جودة · المصدر"
                     selectedQuality == "أقصى توفير" || selectedQuality == "توفير البيانات" -> "⚡ أقصى توفير"
                     selectedQuality == "جودة متوازنة" || selectedQuality == "متوسط" -> "⚖️ متوازن (متوسط)"
@@ -3254,6 +3943,14 @@ private fun PlayerScreen(
                 qualityLabels = qualityLabels,
                 isWebView = useWebViewFallback,
                 isYouTube = isYouTube,
+                ytAvailableQualities = ytAvailableQualities,
+                ytSelectedQuality = ytSelectedQuality,
+                onSelectYtQuality = { ytQ ->
+                    ytSelectedQuality = ytQ
+                    webViewRef?.evaluateJavascript("if (window.__zagSetQuality) window.__zagSetQuality('$ytQ');", null)
+                    showBandwidthSheet = false
+                    lastInteractionTime = System.currentTimeMillis()
+                },
                 streamUrl = effectiveStreamUrl,
                 currentBitrateKbps = currentBitrateKbps,
                 currentTrackInfo = currentTrackInfo,
@@ -3282,10 +3979,60 @@ private fun PlayerScreen(
             )
         }
 
+        // ── YouTube Clean Replay Overlay (covers YouTube end-cards cleanly) ──
+        if (isYouTube && ytEnded && playbackError == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xD90E0A12)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    Text(
+                        text = title,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Button(
+                            onClick = {
+                                ytEnded = false
+                                ytIsPlaying = true
+                                ytCurrentSec = 0f
+                                webViewRef?.evaluateJavascript(
+                                    "if (window.__zagSeekTo) window.__zagSeekTo(0); if (window.__zagPlay) window.__zagPlay();",
+                                    null
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD4AF37)),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text("🔄 إعادة المشاهدة", color = Color.Black, fontWeight = FontWeight.ExtraBold)
+                        }
+                        Button(
+                            onClick = { onClose() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF272C3D)),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text("◀ رجوع", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
         // ── YouTube Native Center Controls ──────────────────────────────────
-        if (isYouTube) {
+        if (isYouTube && !ytEnded) {
             AnimatedVisibility(
-                visible = showControls && !showPreRollAd,
+                visible = showControls && !isAdOverlayActive,
                 enter = fadeIn(animationSpec = tween(180)) + scaleIn(animationSpec = tween(180)),
                 exit = fadeOut(animationSpec = tween(180)) + scaleOut(animationSpec = tween(180)),
                 modifier = Modifier.align(Alignment.Center)
@@ -3390,7 +4137,7 @@ private fun PlayerScreen(
         // ── YouTube Native Bottom Controls (Seekbar + Speed + Rotate) ──────
         if (isYouTube) {
             AnimatedVisibility(
-                visible = showControls && !showPreRollAd,
+                visible = showControls && !isAdOverlayActive,
                 enter = fadeIn(animationSpec = tween(180)) + slideInVertically(initialOffsetY = { it }),
                 exit = fadeOut(animationSpec = tween(180)) + slideOutVertically(targetOffsetY = { it }),
                 modifier = Modifier.align(Alignment.BottomCenter)
@@ -3604,7 +4351,7 @@ private fun PlayerScreen(
         // ── Zakzouka TV Watermark (Bottom-Start corner) ──
         // Unobtrusive, semi-transparent, branded, never covers score or channel logo
         AnimatedVisibility(
-            visible = showControls && !isYouTube && !showPreRollAd,
+            visible = showControls && !isYouTube && !isAdOverlayActive,
             enter = fadeIn(animationSpec = tween(180)),
             exit = fadeOut(animationSpec = tween(180)),
             modifier = Modifier.align(Alignment.BottomStart),
@@ -3691,6 +4438,9 @@ private fun BandwidthControlSheet(
     qualityLabels: List<String>,
     isWebView: Boolean,
     isYouTube: Boolean = false,
+    ytAvailableQualities: List<String> = emptyList(),
+    ytSelectedQuality: String = "auto",
+    onSelectYtQuality: (String) -> Unit = {},
     streamUrl: String = "",
     currentBitrateKbps: Int,
     currentTrackInfo: String,
@@ -3892,21 +4642,65 @@ private fun BandwidthControlSheet(
                         contentAlignment = Alignment.Center
                     ) {
                         if (isYouTube) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("🎬 ملخص يوتيوب فائق الدقة (HD)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.height(6.dp))
+                            val qualityChoices = if (ytAvailableQualities.isNotEmpty()) {
+                                listOf("auto") + ytAvailableQualities.distinct()
+                            } else {
+                                listOf("auto", "hd1080", "hd720", "large", "medium", "small")
+                            }
+                            fun ytLabelFor(code: String): String = when (code) {
+                                "auto" -> "⚙ تلقائي (حسب سرعة النت)"
+                                "highres", "hd2160" -> "✦ 4K (2160p)"
+                                "hd1440" -> "✦ 2K (1440p)"
+                                "hd1080" -> "✦ Full HD (1080p)"
+                                "hd720" -> "🎬 HD (720p)"
+                                "large" -> "⚖️ جودة متوسطة (480p)"
+                                "medium" -> "⚡ توفير بيانات (360p)"
+                                "small" -> "⚡ توفير أقصى (240p)"
+                                else -> code
+                            }
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Text(
-                                    "اختيارات الجودة والإعلانات يحددها YouTube ومصدر المقطع. افتح المقطع في تطبيق YouTube الرسمي للتحكم بالجودة المتاحة.",
-                                    color = PlayerMuted,
-                                    fontSize = 12.sp,
-                                    textAlign = TextAlign.Center,
-                                    lineHeight = 18.sp
+                                    "🎬 اختر جودة فيديو يوتيوب داخل المشغل",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
-                                Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.height(4.dp))
+                                qualityChoices.forEach { qCode ->
+                                    val isSel = qCode == ytSelectedQuality || (qCode == "auto" && ytSelectedQuality.isBlank())
+                                    Surface(
+                                        onClick = { onSelectYtQuality(qCode) },
+                                        color = if (isSel) PlayerBrick else PlayerSheetSurf,
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, if (isSel) PlayerGold else Color(0x33FFFFFF)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = ytLabelFor(qCode),
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                            if (isSel) {
+                                                Text("✓", color = PlayerGold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(6.dp))
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(PlayerBrick)
+                                        .background(Color(0xFF2D2230))
                                         .clickable {
                                             val ytId = extractYouTubeId(streamUrl)
                                             val url = if (ytId.isNotBlank()) "https://www.youtube.com/watch?v=$ytId" else streamUrl
@@ -3920,7 +4714,7 @@ private fun BandwidthControlSheet(
                                         .padding(horizontal = 14.dp, vertical = 8.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("فتح في تطبيق YouTube ↗", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("فتح في تطبيق YouTube ↗", color = PlayerMuted, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         } else {

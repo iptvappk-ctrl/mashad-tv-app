@@ -23,33 +23,42 @@ export async function GET() {
     });
   }
 
-  try {
-    const res = await fetch("https://zaqzouka-dashboard-api.vercel.app/api/status", {
-      headers: { Accept: "application/json" },
-      next: { revalidate: 15 },
-      signal: AbortSignal.timeout(4000),
-    });
+  const upstreams = [
+    "https://dashboard-api-indol-eight.vercel.app/api/status",
+    "https://zaafilm.com/api/status",
+  ];
 
-    if (res.ok) {
-      const data = await res.json();
-      _memoryCache = { data, ts: now };
-      return NextResponse.json(data, {
-        headers: {
-          "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
-          "X-Cache-Status": "ORIGIN_FRESH",
-        },
+  for (const upstreamUrl of upstreams) {
+    try {
+      const res = await fetch(upstreamUrl, {
+        headers: { Accept: "application/json" },
+        next: { revalidate: 15 },
+        signal: AbortSignal.timeout(4000),
       });
+
+      if (res.ok) {
+        const data = await res.json();
+        _memoryCache = { data, ts: now };
+        return NextResponse.json(data, {
+          headers: {
+            "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
+            "X-Cache-Status": "ORIGIN_FRESH",
+          },
+        });
+      }
+    } catch {
+      // Try next upstream endpoint
     }
-  } catch {
-    // If upstream timed out or had network error, return stale cache
-    if (_memoryCache) {
-      return NextResponse.json(_memoryCache.data, {
-        headers: {
-          "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
-          "X-Cache-Status": "STALE_FALLBACK",
-        },
-      });
-    }
+  }
+
+  // If upstream timed out or had network error, return stale cache
+  if (_memoryCache) {
+    return NextResponse.json(_memoryCache.data, {
+      headers: {
+        "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
+        "X-Cache-Status": "STALE_FALLBACK",
+      },
+    });
   }
 
   // Safe fallback if completely unreachable

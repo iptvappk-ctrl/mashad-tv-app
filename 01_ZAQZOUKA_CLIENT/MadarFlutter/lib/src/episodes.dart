@@ -497,8 +497,6 @@ class _EpisodePageState extends State<EpisodePage> {
       if (resolvedReferer.isNotEmpty) 'resolvedReferer': resolvedReferer,
       'playableVerified': true,
     };
-    final adStatus = ZaqzoukaQuotaGuard.instance.currentStatus;
-    
     await _launchPlayer(
       context,
       playableUrl,
@@ -688,6 +686,21 @@ int? _seasonNumberFrom(String value) {
   final numeric = RegExp(
     r'(?:الموسم|موسم|season|(?<![a-z])s)[\s._#=/:-]*(\d{1,2})(?!\d)',
   ).firstMatch(text);
+  if (text.contains('/akdrama-')) {
+    final akwamSeason = RegExp(
+      r'/akdrama-[^/\s]*?-e(\d{1,2})-s\d+(?:/|[?#]|$)',
+    ).firstMatch(text);
+    final akwamNum = int.tryParse(akwamSeason?.group(1) ?? '');
+    if (akwamNum != null && akwamNum > 0) return akwamNum;
+    if (RegExp(r'/akdrama-[^/\s]*?-s\d+(?:/|[?#]|$)').hasMatch(text)) {
+      return null;
+    }
+  }
+  final cimaSeason = RegExp(
+    r'https?://(?:[^/\s]*\.)?(?:c4u|cima4u|arablionz)\.[^/\s]+/[^/?#\s]*?-m(\d{1,2})-n\d+(?:/|[?#\s]|$)',
+  ).firstMatch(text);
+  final cimaSeasonNum = int.tryParse(cimaSeason?.group(1) ?? '');
+  if (cimaSeasonNum != null && cimaSeasonNum > 0) return cimaSeasonNum;
   final number = int.tryParse(numeric?.group(1) ?? '');
   return number != null && number > 0 ? number : null;
 }
@@ -700,10 +713,25 @@ int? _episodeNumberFrom(String value) {
     }
   }
   final match = RegExp(
-    r'(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)[\s._#=/:-]*(\d{1,4})(?!\d)',
+    r'(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)(?:[\s._#=/:-]+|[\s._:-]*رقم[\s._:-]*)*(\d{1,4})(?!\d)',
   ).firstMatch(text);
   final number = int.tryParse(match?.group(1) ?? '');
-  return number != null && number > 0 ? number : null;
+  if (number != null && number > 0) return number;
+  final trailing = RegExp(
+    r'(?<!\d)(\d{1,4})[\s._:-]*(?:حلقة|حلقات|episode|ep)(?![a-z0-9])',
+  ).firstMatch(text);
+  final trailingNum = int.tryParse(trailing?.group(1) ?? '');
+  if (trailingNum != null && trailingNum > 0) return trailingNum;
+  final akwamEp = RegExp(
+    r'/akdrama-[^/\s]*?(?:-e\d{1,2})?-s(\d{1,4})(?:/|[?#\s]|$)',
+  ).firstMatch(text);
+  final akwamNum = int.tryParse(akwamEp?.group(1) ?? '');
+  if (akwamNum != null && akwamNum > 0) return akwamNum;
+  final cimaEp = RegExp(
+    r'https?://(?:[^/\s]*\.)?(?:c4u|cima4u|arablionz)\.[^/\s]+/[^/?#\s]*?(?:-m\d{1,2})?-n(\d{1,4})(?:/|[?#\s]|$)',
+  ).firstMatch(text);
+  final cimaNum = int.tryParse(cimaEp?.group(1) ?? '');
+  return cimaNum != null && cimaNum > 0 ? cimaNum : null;
 }
 
 // ── Smart Play Button للحلقات (يختار أول سيرفر شغال) ────────────────────────

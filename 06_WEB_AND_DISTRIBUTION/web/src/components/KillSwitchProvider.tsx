@@ -12,8 +12,8 @@ interface SystemState {
 
 const STATUS_ENDPOINTS = [
   "https://dashboard-api-indol-eight.vercel.app/api/status",
-  "https://dashboard-api-amber-chi.vercel.app/api/system_control",
   "https://zaafilm.com/api/status",
+  "https://dashboard-api-amber-chi.vercel.app/api/system_control",
   "https://madartv-default-rtdb.firebaseio.com/system_control.json",
 ];
 

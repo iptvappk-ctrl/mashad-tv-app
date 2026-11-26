@@ -183,15 +183,15 @@ class InAppUpdateManager(private val activity: MainActivity) {
     private fun respondForRelease(release: UpdateRelease, result: MethodChannel.Result) {
         val installed = installedVersionCode()
         val installedPlayerCode = getInstalledPlayerVersionCode()
-        val playerRel = null
-        val playerNeedsUpdate = false
+        val playerRel = release.playerRelease
+        val playerNeedsUpdate = playerRel != null && installedPlayerCode > 0L && playerRel.versionCode > installedPlayerCode
         val appNeedsUpdate = release.versionCode > installed
 
         latestRelease = release
 
-        if (!appNeedsUpdate) {
+        if (!appNeedsUpdate && !playerNeedsUpdate) {
             latestRelease = null
-            Log.i(TAG, "No newer public update (app installed=$installed); clearing stale cache")
+            Log.i(TAG, "No newer public update (app installed=$installed, player=$installedPlayerCode); clearing stale cache")
             activity.getSharedPreferences(UPDATE_PREFS, android.content.Context.MODE_PRIVATE).edit()
                 .remove(CACHED_RELEASE_JSON)
                 .remove(CACHED_RELEASE_ETAG)
@@ -218,15 +218,15 @@ class InAppUpdateManager(private val activity: MainActivity) {
             "versionName" to release.versionName,
             "releaseNotes" to release.releaseNotes,
             "appDownloaded" to (getDownloadedAppApk() != null),
-            "playerUpdateAvailable" to false,
+            "playerUpdateAvailable" to playerNeedsUpdate,
             "playerInstalled" to (installedPlayerCode > 0L),
             "playerCurrentCode" to installedPlayerCode,
-            "playerVersionCode" to 0L,
-            "playerVersionName" to "",
-            "playerReleaseNotes" to "",
-            "playerApkUrl" to "",
-            "playerSha256" to "",
-            "playerDownloaded" to false,
+            "playerVersionCode" to (playerRel?.versionCode ?: 0L),
+            "playerVersionName" to (playerRel?.versionName ?: ""),
+            "playerReleaseNotes" to (playerRel?.releaseNotes ?: ""),
+            "playerApkUrl" to (playerRel?.apkUrl ?: ""),
+            "playerSha256" to (playerRel?.sha256 ?: ""),
+            "playerDownloaded" to (getDownloadedPlayerApk() != null),
         ))
     }
 
@@ -242,14 +242,18 @@ class InAppUpdateManager(private val activity: MainActivity) {
         return null
     }
 
-    fun getDownloadedPlayerApk(): File? {
+    fun getDownloadedPlayerApk(minVersionCode: Long = MIN_PLAYER_VERSION_CODE, expectedSha256: String = ""): File? {
         val updateDirectory = File(activity.cacheDir, "updates")
         val apkFile = File(updateDirectory, "zaqzouka-player-update.apk")
         if (apkFile.exists() && apkFile.length() > 0) {
             val archived = activity.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
-            if (archived?.packageName == "com.madar.player" || archived?.packageName == "com.mader.player") {
+            val isValidPkg = archived?.packageName == "com.madar.player" || archived?.packageName == "com.mader.player"
+            val archivedCode = if (archived != null) packageVersionCode(archived) else 0L
+            val hashOk = expectedSha256.isBlank() || sha256(apkFile).equals(expectedSha256, ignoreCase = true)
+            if (isValidPkg && archivedCode >= minVersionCode && hashOk) {
                 return apkFile
             }
+            apkFile.delete()
         }
         return null
     }
@@ -268,25 +272,23 @@ class InAppUpdateManager(private val activity: MainActivity) {
     fun downloadAndInstallPlayer(apkUrl: String?, sha256Expected: String?, result: MethodChannel.Result) {
         val targetUrl = apkUrl?.takeIf { it.isNotBlank() }
             ?: latestRelease?.playerRelease?.apkUrl
-            ?: "https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.76/zag-player.apk"
+            ?: DEFAULT_PLAYER_APK_URL
         val expectedHash = sha256Expected?.takeIf { it.isNotBlank() }
             ?: latestRelease?.playerRelease?.sha256
             ?: ""
+        val minRequiredCode = (latestRelease?.playerRelease?.versionCode ?: MIN_PLAYER_VERSION_CODE)
+            .coerceAtLeast(MIN_PLAYER_VERSION_CODE)
 
         val updateDirectory = File(activity.cacheDir, "updates")
         val apkFile = File(updateDirectory, "zaqzouka-player-update.apk")
         val partFile = File(updateDirectory, "zaqzouka-player-update.apk.part")
 
-        // 1. If already fully downloaded and valid: directly install!
-        if (apkFile.exists() && apkFile.length() > 0) {
-            val archived = activity.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
-            if (archived?.packageName == "com.madar.player" || archived?.packageName == "com.mader.player") {
-                openInstaller(apkFile)
-                respond(result, mapOf("status" to "install_started"))
-                return
-            } else {
-                apkFile.delete()
-            }
+        // 1. Only reuse cached APK if it matches minimum required version and expected SHA-256
+        val cachedValid = getDownloadedPlayerApk(minVersionCode = minRequiredCode, expectedSha256 = expectedHash)
+        if (cachedValid != null) {
+            openInstaller(cachedValid)
+            respond(result, mapOf("status" to "install_started"))
+            return
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
@@ -378,9 +380,17 @@ class InAppUpdateManager(private val activity: MainActivity) {
                         }
 
                         val archived = activity.packageManager.getPackageArchiveInfo(partFile.absolutePath, 0)
-                        if (archived?.packageName != "com.madar.player" && archived?.packageName != "com.mader.player") {
+                        val isPlayerPkg = archived?.packageName == "com.madar.player" || archived?.packageName == "com.mader.player"
+                        val archivedCode = if (archived != null) packageVersionCode(archived) else 0L
+                        if (!isPlayerPkg || archivedCode < minRequiredCode) {
                             partFile.delete()
-                            throw IOException("Downloaded package is not com.madar.player")
+                            throw IOException("Downloaded player package is invalid or outdated (code=$archivedCode)")
+                        }
+                        if (expectedHash.matches(Regex("[a-fA-F0-9]{64}")) &&
+                            !sha256(partFile).equals(expectedHash, ignoreCase = true)
+                        ) {
+                            partFile.delete()
+                            throw IOException("Downloaded player APK checksum mismatch")
                         }
 
                         apkFile.delete()
@@ -748,12 +758,31 @@ class InAppUpdateManager(private val activity: MainActivity) {
                     throw IOException("Required Firebase update metadata is missing or untrusted")
                 }
 
-                val playerRelease = null
+                val appNotes = json.optString("releaseNotes").take(MAX_RELEASE_NOTES_CHARS)
+                val playerJson = json.optJSONObject("player")
+                val playerRelease = if (playerJson != null) {
+                    val pCode = playerJson.optLong("versionCode", 0L)
+                    val pName = playerJson.optString("versionName")
+                    val pUrl = playerJson.optString("apkUrl")
+                    val pSha = playerJson.optString("sha256")
+                    val pUri = Uri.parse(pUrl)
+                    val pTrusted = pUri.scheme == "https" && pUri.host == "github.com" &&
+                        pUri.path.orEmpty().startsWith("/iptvappk-ctrl/madartv-updates/releases/download/")
+                    if (pCode > 0L && pName.isNotBlank() && pSha.matches(Regex("[a-fA-F0-9]{64}")) && pTrusted) {
+                        PlayerRelease(
+                            versionCode = pCode,
+                            versionName = pName,
+                            releaseNotes = playerJson.optString("releaseNotes").take(MAX_RELEASE_NOTES_CHARS),
+                            apkUrl = pUrl,
+                            sha256 = pSha,
+                        )
+                    } else null
+                } else null
 
                 return UpdateRelease(
                     versionCode = versionCode,
                     versionName = versionName,
-                    releaseNotes = json.optString("releaseNotes").take(MAX_RELEASE_NOTES_CHARS),
+                    releaseNotes = appNotes,
                     apkUrl = apkUrl,
                     sha256 = checksum,
                     playerRelease = playerRelease,
@@ -788,7 +817,35 @@ class InAppUpdateManager(private val activity: MainActivity) {
                     throw IOException("Required update metadata is missing or untrusted")
                 }
 
-                val playerRelease = null
+                val playerAssetRegex = Regex("^zag-player-([0-9]+\\.[0-9]+\\.[0-9]+)\\.apk$")
+                var parsedPlayer: PlayerRelease? = null
+                val ghAssets = json.optJSONArray("assets")
+                if (ghAssets != null) {
+                    for (i in 0 until ghAssets.length()) {
+                        val a = ghAssets.optJSONObject(i) ?: continue
+                        val m = playerAssetRegex.matchEntire(a.optString("name")) ?: continue
+                        if (a.optString("state") != "uploaded") continue
+                        val pUrl = a.optString("browser_download_url")
+                        val pSha = a.optString("digest").removePrefix("sha256:")
+                        val pUri = Uri.parse(pUrl)
+                        if (pUri.scheme == "https" && pUri.host == "github.com" &&
+                            pUri.path.orEmpty().startsWith("/iptvappk-ctrl/madartv-updates/releases/download/") &&
+                            pSha.matches(Regex("[a-fA-F0-9]{64}"))
+                        ) {
+                            val verParts = m.groupValues[1].split(".")
+                            val patchCode = verParts.getOrNull(2)?.toLongOrNull() ?: MIN_PLAYER_VERSION_CODE
+                            parsedPlayer = PlayerRelease(
+                                versionCode = patchCode,
+                                versionName = m.groupValues[1],
+                                releaseNotes = releaseNotes,
+                                apkUrl = pUrl,
+                                sha256 = pSha,
+                            )
+                            break
+                        }
+                    }
+                }
+                val playerRelease = parsedPlayer
 
                 return UpdateRelease(
                     versionCode = versionCode,
@@ -833,6 +890,9 @@ class InAppUpdateManager(private val activity: MainActivity) {
         private const val UPDATE_CHECK_MIN_INTERVAL_MS = 30L * 60L * 1000L
         private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
         private const val PROGRESS_INTERVAL_BYTES = 256L * 1024L
+        private const val MIN_PLAYER_VERSION_CODE = 37L
+        private const val DEFAULT_PLAYER_APK_URL =
+            "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk"
         private val RELEASE_TAG = Regex("^v([0-9]+\\.[0-9]+\\.[0-9]+)-([0-9]+)$")
     }
 }

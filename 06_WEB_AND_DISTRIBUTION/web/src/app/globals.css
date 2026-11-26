@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =====================================================
+   ZAQZOUKA WEB — Global Styles (Dark Theme)
+   Theme: #090A0E base | Amber accents | Exactly matches
+   the Flutter mobile app color palette.
+   ===================================================== */
+
+:root {
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  background: #090A0E;
+  color-scheme: dark;
+  scrollbar-gutter: stable;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  background: #090A0E;
+  color: #e2e8f0;
+  font-family: Tahoma, Arial, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button, input { font: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+img { color: transparent; }
+::selection { background: rgba(245, 195, 107, .25); color: #f5c36b; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #12131D; }
+::-webkit-scrollbar-thumb { background: #2a2b3d; border: 2px solid #12131D; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #f5a623; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ---- Site Shell ---- */
+.site-shell {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: clip;
+  min-height: 100vh;
+  background: #090A0E;
+  color: #e2e8f0;
+}
+
+.site-shell main {
+  width: 100%;
+  min-width: 0;
+  max-width: 1440px;
+  padding-top: clamp(1rem, 2.4vw, 2rem);
+}
+
+/* ---- Skeleton Shimmer ---- */
+.skeleton-shimmer {
+  background: linear-gradient(105deg, #12131D 25%, #1E2034 48%, #12131D 70%);
+  background-size: 220% 100%;
+  animation: shimmer 1.25s ease-in-out infinite;
+}
+
+@keyframes shimmer { to { background-position: -220% 0; } }
+
+/* ---- Glass Card ---- */
+.glass-card {
+  background: rgba(18, 19, 29, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 7px 22px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(14px);
+}
+
+/* ---- Player Modal (always dark) ---- */
+.player-modal {
+  background-color: #090A0E !important;
+}
+
+/* ---- Mobile padding ---- */
+@media (max-width: 639px) {
+  .site-shell main { width: 100%; max-width: 100vw; min-width: 0; padding-inline: 12px; }
+  .site-shell main > *,
+  .site-shell main section,
+  .site-shell main .grid { min-width: 0; max-width: 100%; }
+  .site-shell nav[aria-label="التنقل للموبايل"] { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

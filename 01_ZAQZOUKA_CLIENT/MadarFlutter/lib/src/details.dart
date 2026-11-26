@@ -570,21 +570,24 @@ class _DetailPageState extends State<DetailPage> {
       return episodes.last;
     }
     final currentUrl = _normalizedMediaUrl(widget.item.pageUrl);
-    return episodes
-            .where(
-              (episode) =>
-                  _normalizedMediaUrl(_text(episode['pageUrl'])) == currentUrl,
-            )
-            .firstOrNull ??
-        {
-          'title': widget.item.title,
-          'number':
-              _episodeNumberFrom(
-                '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
-              ) ??
-              0,
-          'pageUrl': widget.item.pageUrl,
-        };
+    final exact = episodes
+        .where(
+          (episode) =>
+              _normalizedMediaUrl(_text(episode['pageUrl'])) == currentUrl,
+        )
+        .firstOrNull;
+    if (exact != null) return exact;
+    final inferredNumber = _episodeNumberFrom(
+      '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
+    );
+    if (inferredNumber != null && inferredNumber > 0) {
+      return {
+        'title': widget.item.title,
+        'number': inferredNumber,
+        'pageUrl': widget.item.pageUrl,
+      };
+    }
+    return episodes.isNotEmpty ? episodes.last : null;
   }
 
   int? _latestEpisodeNumberForSeason(Map<String, dynamic>? season) {
@@ -600,8 +603,13 @@ class _DetailPageState extends State<DetailPage> {
     return _episodeNumberFrom(label);
   }
 
+  bool get _isSeriesEffective =>
+      widget.item.isSeries ||
+      _seasons.any((season) => _maps(season['episodes']).isNotEmpty);
+
   @override
   Widget build(BuildContext context) {
+    final isSeriesEffective = _isSeriesEffective;
     final overview = _text(_detail?['overview']).ifEmpty(widget.item.overview);
     final cast = (_detail?['cast'] is List
         ? (_detail!['cast'] as List)
@@ -639,6 +647,7 @@ class _DetailPageState extends State<DetailPage> {
           children: [
             _DetailHeader(
               item: widget.item,
+              isSeries: isSeriesEffective,
               episodeCount: _seasonsLoading ? 0 : totalEpisodeCount,
               seasonCount: _seasonsLoading ? 0 : _seasons.length,
             ),
@@ -694,7 +703,7 @@ class _DetailPageState extends State<DetailPage> {
                 ),
               ),
             ],
-            if (widget.item.isSeries) ...[
+            if (isSeriesEffective) ...[
               if (_isEpisodeCard) ...[
                 if (downloadEpisode != null) ...[
                   const SizedBox(height: 12),
@@ -721,7 +730,7 @@ class _DetailPageState extends State<DetailPage> {
                 loading: _serversLoading,
               ),
             ],
-            if (widget.item.isSeries &&
+            if (isSeriesEffective &&
                 !_isEpisodeCard &&
                 downloadEpisode != null) ...[
               const SizedBox(height: 12),
@@ -730,7 +739,7 @@ class _DetailPageState extends State<DetailPage> {
             if (_parts.isNotEmpty) ...[
               const SizedBox(height: 13),
               _SectionCard(
-                title: widget.item.isSeries
+                title: isSeriesEffective
                     ? 'الأجزاء والمواسم الأخرى'
                     : 'أجزاء وأعمال مرتبطة',
                 icon: '🎬',
@@ -1516,7 +1525,7 @@ class _DetailPageState extends State<DetailPage> {
   );
 
   Future<void> _playItem() async {
-    if (widget.item.isSeries) {
+    if (_isSeriesEffective) {
       final season = _seasons.isEmpty
           ? null
           : _seasons[_seasonIndex.clamp(0, _seasons.length - 1)];
@@ -1656,8 +1665,6 @@ class _DetailPageState extends State<DetailPage> {
     );
 
     if (!mounted) return;
-    final adStatus = ZaqzoukaQuotaGuard.instance.currentStatus;
-    
     await _launchPlayer(
       context,
       playableUrl,
@@ -1671,14 +1678,18 @@ class _DetailPageState extends State<DetailPage> {
 class _DetailHeader extends StatelessWidget {
   const _DetailHeader({
     required this.item,
+    this.isSeries = false,
     this.episodeCount = 0,
     this.seasonCount = 0,
   });
   final MediaItem item;
+  final bool isSeries;
   final int episodeCount;
   final int seasonCount;
   @override
-  Widget build(BuildContext context) => Row(
+  Widget build(BuildContext context) {
+    final effectiveSeries = isSeries || item.isSeries;
+    return Row(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       ClipRRect(
@@ -1719,7 +1730,7 @@ class _DetailHeader extends StatelessWidget {
                   style: const TextStyle(color: _muted, fontSize: 12),
                 ),
               ],
-              if (item.isSeries && episodeCount > 0) ...[
+              if (effectiveSeries && episodeCount > 0) ...[
                 const SizedBox(height: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
@@ -1744,7 +1755,7 @@ class _DetailHeader extends StatelessWidget {
                 [
                   if (item.year.isNotEmpty) item.year,
                   if (item.quality.isNotEmpty) item.quality,
-                  item.isSeries
+                  effectiveSeries
                       ? (episodeCount > 0 ? 'مسلسل ($episodeCount حلقة)' : 'مسلسل')
                       : 'فيلم',
                   item.visibleProvider,
@@ -1791,6 +1802,7 @@ class _DetailHeader extends StatelessWidget {
       ),
     ],
   );
+  }
 }
 
 class _SectionCard extends StatelessWidget {

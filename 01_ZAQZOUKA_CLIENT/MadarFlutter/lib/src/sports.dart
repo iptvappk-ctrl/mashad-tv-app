@@ -1025,7 +1025,7 @@ class _SportsPageState extends State<SportsPage> {
       );
       if (!mounted) return;
       if (streams.isEmpty) {
-        _message(context, 'لا توجد روابط بث متاحة الآن.');
+        _message(context, 'لا توجد روابط بث متاحة لهذه القناة الآن. اسحب للتحديث أو جرّب قناة أخرى.');
         return;
       }
 
@@ -1758,6 +1758,8 @@ class _FinishedBadge extends StatelessWidget {
   );
 }
 
+bool _promptedOutdatedPlayer = false;
+
 Future<void> _launchPlayer(
   BuildContext context,
   String url,
@@ -1781,6 +1783,74 @@ Future<void> _launchPlayer(
     _message(context, 'رابط التشغيل غير صالح.');
     return;
   }
+
+  if (!_promptedOutdatedPlayer) {
+    final pStatus = await NativeBridge.checkPlayerStatus();
+    final pInstalled = pStatus?['installed'] == true;
+    final pCode = (pStatus?['versionCode'] as num?)?.toInt() ?? 0;
+    if (pInstalled && pCode > 0 && pCode < 37 && context.mounted) {
+      _promptedOutdatedPlayer = true;
+      final shouldUpdate = await showModalBottomSheet<bool>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
+          decoration: const BoxDecoration(
+            color: Color(0xFF1F1B24),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.system_update_rounded, color: Color(0xFFE5A958), size: 46),
+              const SizedBox(height: 10),
+              const Text(
+                'يتوفر تحديث مهم لمشغل زاغ (v1.1.37)',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 16.5, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'لتحسين الأداء وسرعة التحميل وجودة التشغيل واليوتيوب، ننصح بتحديث المشغل الآن.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.45),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFB94E3C),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.download_rounded),
+                  label: const Text('تحديث مشغل زاغ الآن ⚡', style: TextStyle(fontWeight: FontWeight.bold)),
+                  onPressed: () => Navigator.pop(ctx, true),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('تشغيل الآن والتحديث لاحقاً', style: TextStyle(color: Colors.white60)),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (shouldUpdate == true) {
+        if (context.mounted) _message(context, 'جاري فحص وتنزيل مشغل زاغ (v1.1.37)…');
+        final upd = appUpdateNotifier.value;
+        await NativeBridge.installPlayer(
+          apkUrl: upd.playerApkUrl,
+          sha256: upd.playerSha256,
+        );
+        return;
+      }
+      if (!context.mounted) return;
+    }
+  }
   final category = isLive
       ? 'بث مباشر'
       : (title.contains('الحلقة') || title.contains('الموسم'))
@@ -1794,9 +1864,6 @@ Future<void> _launchPlayer(
     category: category,
     event: 'start',
   );
-
-  final status = ZaqzoukaQuotaGuard.instance.currentStatus;
-  
 
   final opened = await NativeBridge.openPlayer(
     url: url,
@@ -1858,7 +1925,7 @@ Future<void> _showPlayerNotFoundDialog(
           ),
           const SizedBox(height: 10),
           const Text(
-            'لتشغيل الأفلام والمسلسلات بدون إعلانات وبأعلى دقة، يرجى تثبيت مشغل زاغ الرسمي (خفيف وسريع 4MB فقط).',
+            'لتشغيل الأفلام والمسلسلات والمباريات بأعلى دقة وسرعة، يرجى تثبيت مشغل زاغ الرسمي (خفيف وسريع 5MB فقط).',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white70, fontSize: 13.5, height: 1.5),
           ),

@@ -134,7 +134,7 @@ export default async function handler(req, res) {
           enabled: b.enabled !== false,
           latestVersionCode: Number(b.latestVersionCode || b.versionCode) || 0,
           latestVersionName: String(b.latestVersionName || b.versionName || ''),
-          apkUrl: String(b.apkUrl || b.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zaqzouka-1.0.83-90.apk'),
+          apkUrl: String(b.apkUrl || b.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk'),
           releaseNotes: String(b.releaseNotes || b.notes || ''),
           forced: !!b.forced,
           updatedAt: now,

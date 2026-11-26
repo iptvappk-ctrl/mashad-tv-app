@@ -12,7 +12,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ReleaseNotes,
 
-    [string]$Repository = "iptvappk-ctrl/mashad-tv-app",
+    [string]$Repository = "iptvappk-ctrl/madartv-updates",
 
     [string]$RepositoryPath = (Join-Path $env:LOCALAPPDATA "MadarTV\public-updates")
 )

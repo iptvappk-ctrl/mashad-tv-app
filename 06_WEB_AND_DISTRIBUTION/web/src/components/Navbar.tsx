@@ -262,8 +262,8 @@ export default function Navbar({
             <div className="space-y-3 mb-6">
               {/* App 1: Zaqzouka Client App */}
               <a
-                href="https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zaqzouka-1.0.83-90.apk"
-                download="zaqzouka-1.0.83-90.apk"
+                href="https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk"
+                download="zaqzouka-1.0.85-92.apk"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-amber-500/25 bg-[#141525] p-3.5 sm:p-4 transition hover:border-amber-400 hover:bg-[#181A2D]"
@@ -275,7 +275,7 @@ export default function Navbar({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-extrabold text-white text-sm">تطبيق زقزوقة TV الرئيسي</span>
-                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">v1.0.83</span>
+                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold text-amber-300">v1.0.85</span>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-0.5">التطبيق الرئيسي للمسلسلات، الأفلام، والرياضة المباشرة</p>
                   </div>
@@ -288,8 +288,8 @@ export default function Navbar({
 
               {/* App 2: ZAG Player */}
               <a
-                href="https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zag-player-1.1.35.apk"
-                download="zag-player-1.1.35.apk"
+                href="https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk"
+                download="zag-player-1.1.37.apk"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group flex items-center justify-between gap-3 sm:gap-4 rounded-2xl border border-white/10 bg-[#141525] p-3.5 sm:p-4 transition hover:border-amber-400 hover:bg-[#181A2D]"
@@ -301,7 +301,7 @@ export default function Navbar({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-extrabold text-white text-sm">مشغل ZAG Player الأصلي</span>
-                      <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-slate-300">v1.1.35</span>
+                      <span className="rounded bg-white/10 px-1.5 py-0.5 text-[9px] font-bold text-slate-300">v1.1.37</span>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-0.5">مشغل فيديو فائق الخفة والسرعة يدعم كافة صيغ HLS و MP4 والترجمة</p>
                   </div>

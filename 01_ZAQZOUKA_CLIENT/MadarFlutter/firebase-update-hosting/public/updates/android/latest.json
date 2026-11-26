@@ -1,17 +1,17 @@
-﻿{
+{
     "packageName": "com.madar.madar_flutter",
-    "versionCode": 90,
-    "versionName": "1.0.83",
-    "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zaqzouka-1.0.83-90.apk",
-    "sha256": "c9de5c95155c3bd2083dedc4b0d7b42e20795e6827e5464ef50751b904fb75ca",
+    "versionCode": 92,
+    "versionName": "1.0.85",
+    "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk",
+    "sha256": "264938cce97f21f38cababf6ea64b214f0fcad135e3d7f51f796c7710770af83",
     "mandatory": true,
-    "releaseNotes": "زقزوقة TV v1.0.83: تحسين نظام التحديث التلقائي، تقليل استهلاك الكوتا، إصلاح شاشة الصيانة وتحسينات الأداء.",
+    "releaseNotes": "زقزوقة TV v1.0.85: تصحيح تصنيف المسلسلات والأفلام بالبحث، ضمان جلب حلقات AraDrama والمصادر، تحديث إجباري.",
     "player": {
         "packageName": "com.madar.player",
-        "versionCode": 35,
-        "versionName": "1.1.35",
-        "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.83-90/zag-player-1.1.35.apk",
-        "sha256": "16f9ca35062bbf481b5fa5a87ba9ccfaa6d519258b4ef775247a0b464f39ac32",
-        "releaseNotes": "ZAG Player 1.1.35: تحديث شامل مع تقليل الكوتا وإصلاح الشاشة السوداء."
+        "versionCode": 37,
+        "versionName": "1.1.37",
+        "apkUrl": "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk",
+        "sha256": "d616cc5bbbcbe4716d1caf42b60e74bbbc4cc75962af09c66e3c225345b3cd10",
+        "releaseNotes": "ZAG Player 1.1.37: إصلاح منطق الإعلانات والعداد التنازلي."
     }
 }

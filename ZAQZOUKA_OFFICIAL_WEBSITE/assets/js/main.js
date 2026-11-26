@@ -198,9 +198,9 @@
       playerOnly: 'مشغل زاغ فقط',
       mobileBtnBundle: 'تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل) ⚡',
       heroBtnApp: 'تحميل تطبيق زقزوقة TV',
-      heroBtnAppSub: 'v1.0.74 · حزمة APK مباشرة (53.4 MB)',
+      heroBtnAppSub: 'v1.0.85 · حزمة APK مباشرة (53.6 MB)',
       heroBtnPlayer: 'تحميل مشغل زاغ ZAG Player',
-      heroBtnPlayerSub: 'v1.1.28 · المحرك الأساسي (4.6 MB)',
+      heroBtnPlayerSub: 'v1.1.37 · المحرك الأساسي (4.8 MB)',
       trustVerified: 'مفحوص ونظيف 100%',
       trustSmartTv: 'يدعم الهواتف وشاشات Smart TV',
       trustNoBuffer: 'تقنية مانع التقطيع',
@@ -288,9 +288,9 @@
       playerOnly: 'ZAG Player Only',
       mobileBtnBundle: 'Download Full Ecosystem (App + Player) ⚡',
       heroBtnApp: 'Download Zaqzouka TV App',
-      heroBtnAppSub: 'v1.0.74 · Direct APK (53.4 MB)',
+      heroBtnAppSub: 'v1.0.85 · Direct APK (53.6 MB)',
       heroBtnPlayer: 'Download ZAG Player Engine',
-      heroBtnPlayerSub: 'v1.1.28 · Core Engine (4.6 MB)',
+      heroBtnPlayerSub: 'v1.1.37 · Core Engine (4.8 MB)',
       trustVerified: '100% Verified & Clean',
       trustSmartTv: 'Smart TV & Android Box Ready',
       trustNoBuffer: 'Anti-Buffering Engine',
@@ -393,7 +393,7 @@
     if (!_0xm || !_0xwrap) return;
 
     function _0xrender(_0xfname) {
-      const _0xfurl = _0xfname.includes('zag-player') ? 'https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/zag-player.apk' : 'https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/zaqzouka-app.apk';
+      const _0xfurl = _0xfname.includes('zag-player') ? 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk' : 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk';
       const _0xapi = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(_0xfurl) + '&color=181216&bgcolor=FFFFFF';
       _0xwrap.innerHTML = '<img src="' + _0xapi + '" alt="QR Code" width="180" height="180" style="display:block; border-radius: 8px;">';
     }
@@ -416,7 +416,7 @@
   }
   // ── Download Hub Smart Telemetry & Conversion Tracker ──
   (function _initDownloadTelemetry() {
-    const API_ENDPOINT = 'https://dashboard-api-amber-chi.vercel.app/api/telemetry';
+    const API_ENDPOINT = 'https://dashboard-api-indol-eight.vercel.app/api/telemetry';
 
     // 1. Detect Referrer
     const ref = _0xdoc.referrer || '';
@@ -511,16 +511,16 @@
       }
 
       // 1. Download App APK
-      triggerDownload('https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/zaqzouka-app.apk', 'zaqzouka-app.apk');
+      triggerDownload('https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk', 'zaqzouka-1.0.85-92.apk');
 
       // 2. Download Player APK with 600ms delay to ensure browsers allow both downloads
       setTimeout(() => {
-        triggerDownload('https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.77/zag-player.apk', 'zag-player.apk');
+        triggerDownload('https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk', 'zag-player-1.1.37.apk');
       }, 600);
 
       // 3. Track telemetry for bundle
       try {
-        fetch('https://dashboard-api-amber-chi.vercel.app/api/telemetry?route=landing/download', {
+        fetch('https://dashboard-api-indol-eight.vercel.app/api/telemetry?route=landing/download', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -542,3 +542,4 @@
     if (navBtn) navBtn.addEventListener('click', handleBundleClick);
   })();
 })(window, document);
+

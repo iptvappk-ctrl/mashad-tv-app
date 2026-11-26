@@ -58,6 +58,8 @@ __pycache__/
 *.css
 !ZAQZOUKA_OFFICIAL_WEBSITE/**
 !06_WEB_AND_DISTRIBUTION/download-landing-page/**
+!06_WEB_AND_DISTRIBUTION/web/**/*.css
+!06_WEB_AND_DISTRIBUTION/zaqzouka-vercel-hub/**/*.html
 scratch/
 scratch-ui.xml
 build_output.txt
@@ -72,6 +74,7 @@ constants.txt
 !DOCUMENTATION/**/*.png
 !ZAQZOUKA_OFFICIAL_WEBSITE/**/*.png
 !06_WEB_AND_DISTRIBUTION/download-landing-page/**/*.png
+!06_WEB_AND_DISTRIBUTION/web/public/**/*.png
 
 # Temporary scanner & system dumps
 4DefaultTempSaveScan/

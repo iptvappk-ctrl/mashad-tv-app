@@ -198,9 +198,9 @@
       playerOnly: 'مشغل زاغ فقط',
       mobileBtnBundle: 'تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل) ⚡',
       heroBtnApp: 'تحميل تطبيق زقزوقة TV',
-      heroBtnAppSub: 'v1.0.83 · حزمة APK مباشرة (50.4 MB)',
+      heroBtnAppSub: 'v1.0.85 · حزمة APK مباشرة (53.6 MB)',
       heroBtnPlayer: 'تحميل مشغل زاغ ZAG Player',
-      heroBtnPlayerSub: 'v1.1.35 · المحرك الأساسي (4.7 MB)',
+      heroBtnPlayerSub: 'v1.1.37 · المحرك الأساسي (4.8 MB)',
       trustVerified: 'مفحوص ونظيف 100%',
       trustSmartTv: 'يدعم الهواتف وشاشات Smart TV',
       trustNoBuffer: 'تقنية مانع التقطيع',
@@ -288,9 +288,9 @@
       playerOnly: 'ZAG Player Only',
       mobileBtnBundle: 'Download Full Ecosystem (App + Player) ⚡',
       heroBtnApp: 'Download Zaqzouka TV App',
-      heroBtnAppSub: 'v1.0.83 · Direct APK (50.4 MB)',
+      heroBtnAppSub: 'v1.0.85 · Direct APK (53.6 MB)',
       heroBtnPlayer: 'Download ZAG Player Engine',
-      heroBtnPlayerSub: 'v1.1.35 · Core Engine (4.7 MB)',
+      heroBtnPlayerSub: 'v1.1.37 · Core Engine (4.8 MB)',
       trustVerified: '100% Verified & Clean',
       trustSmartTv: 'Smart TV & Android Box Ready',
       trustNoBuffer: 'Anti-Buffering Engine',
@@ -416,7 +416,7 @@
   }
   // ── Download Hub Smart Telemetry & Conversion Tracker ──
   (function _initDownloadTelemetry() {
-    const API_ENDPOINT = 'https://dashboard-api-amber-chi.vercel.app/api/telemetry';
+    const API_ENDPOINT = 'https://dashboard-api-indol-eight.vercel.app/api/telemetry';
 
     // 1. Detect Referrer
     const ref = _0xdoc.referrer || '';
@@ -537,7 +537,7 @@
 
       // 3. Track telemetry for bundle
       try {
-        fetch('https://dashboard-api-amber-chi.vercel.app/api/telemetry?route=landing/download', {
+        fetch('https://dashboard-api-indol-eight.vercel.app/api/telemetry?route=landing/download', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

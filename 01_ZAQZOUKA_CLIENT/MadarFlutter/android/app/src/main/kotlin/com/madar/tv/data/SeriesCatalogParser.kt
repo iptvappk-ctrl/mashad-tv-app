@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 internal object SeriesCatalogParser {
     private val episodePaginationPool = Executors.newFixedThreadPool(8)
     private val episodeNumberPattern = Regex(
-        """(?i)(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)[\s._#=/:-]*([0-9]{1,4})(?![0-9])""",
+        """(?i)(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)(?:[\s._#=/:-]+|[\s._:-]*رقم[\s._:-]*)*([0-9]{1,4})(?![0-9])""",
     )
     private val trailingEpisodeNumberPattern = Regex(
         """(?i)(?<![0-9])([0-9]{1,4})[\s._:-]*(?:حلقة|حلقات|episode|ep)(?![a-z0-9])""",
@@ -25,6 +25,18 @@ internal object SeriesCatalogParser {
     )
     private val compactSeasonEpisodePattern = Regex(
         """(?i)(?:^|[^a-z])s[\s._#=/:-]*([0-9]{1,2})[\s._#=/:-]*e(?:p(?:isode)?|ps)?[\s._#=/:-]*[0-9]{1,4}(?![0-9])""",
+    )
+    private val akwamEpisodeUrlPattern = Regex(
+        """(?i)/akdrama-[^/]*?(?:-e[0-9]{1,2})?-s([0-9]{1,4})(?:/|[?#].*)?$""",
+    )
+    private val akwamSeasonUrlPattern = Regex(
+        """(?i)/akdrama-[^/]*?-e([0-9]{1,2})-s([0-9]{1,4})(?:/|[?#].*)?$""",
+    )
+    private val cimaEpisodeUrlPattern = Regex(
+        """(?i)^https?://(?:[^/]*\.)?(?:c4u|cima4u|arablionz)\.[^/]+/[^/?#]*?(?:-m[0-9]{1,2})?-n([0-9]{1,4})(?:/|[?#].*)?$""",
+    )
+    private val cimaSeasonUrlPattern = Regex(
+        """(?i)^https?://(?:[^/]*\.)?(?:c4u|cima4u|arablionz)\.[^/]+/[^/?#]*?-m([0-9]{1,2})-n([0-9]{1,4})(?:/|[?#].*)?$""",
     )
     private val standaloneSeasonTokenPattern = Regex(
         """(?i)(?:^|[/\-_])s([0-9]{1,2})(?:[/\-_]|(?:[?#].*)?)$""",
@@ -53,7 +65,7 @@ internal object SeriesCatalogParser {
     private val episodeMarkerPattern = Regex("""(?i)(الحلقة|حلقة|episode|(?<![a-z])eps?(?:[\s._#=/:-]|[0-9]|$))""")
     private val partMarkerPattern = Regex("""(?i)(الجزء|جزء|(?<![a-z])part(?:[\s._#=/:-]|[0-9]|$))""")
     private val unrelatedContentContainerPattern = Regex(
-        """(?i)(^|[\s_-])(related|recommend(?:ed|ation)?|suggest(?:ed|ions?)?|similar|sidebar|widget|popular|trending|also-watch|more-like|ads?|advert|banner|social|post-grid|movie-grid|series-grid|related-posts|you-may-like|search[\s_-]*(?:type[\s_-]*drop|res(?:ults?)?(?:[\s_-]*container)?|suggest(?:ions?)?|autocomplete|results?|live)|(?:top|most)[\s_-]*search|autocomplete|typeahead|instant-search|ajax-search|قد[\s_-]*يعجبك|مقترح(?:ات)?|مشابه(?:ة)?|ذات[\s_-]*صلة|اعلانات)([\s_-]|$)""",
+        """(?i)(^|[\s_-])(related|recommend(?:ed|ation)?|suggest(?:ed|ions?)?|similar|sidebar|widget|popular|trending|also-watch|more-like|otherser|navslide|breadcrumbnav|drawer|tt-more|ads?|advert|banner|social|post-grid|movie-grid|series-grid|related-posts|you-may-like|search[\s_-]*(?:type[\s_-]*drop|res(?:ults?)?(?:[\s_-]*container)?|suggest(?:ions?)?|autocomplete|results?|live)|(?:top|most)[\s_-]*search|autocomplete|typeahead|instant-search|ajax-search|قد[\s_-]*يعجبك|مقترح(?:ات)?|مشابه(?:ة)?|ذات[\s_-]*صلة|اعلانات)([\s_-]|$)""",
     )
 
     fun normalizeDigits(value: String): String = buildString(value.length) {
@@ -123,6 +135,12 @@ internal object SeriesCatalogParser {
         val compact = compactArabicEpisodePattern.find(titleText)?.groupValues?.getOrNull(1)?.toIntOrNull()
         if (compact != null && compact > 0) return compact
 
+        val akwamEp = akwamEpisodeUrlPattern.find(urlText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        if (akwamEp != null && akwamEp > 0) return akwamEp
+
+        val cimaEp = cimaEpisodeUrlPattern.find(urlText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        if (cimaEp != null && cimaEp > 0) return cimaEp
+
         if (allowNumericTitle) {
             return normalizeDigits(titleText).trim().toIntOrNull()?.takeIf { it in 1..9999 }
         }
@@ -143,6 +161,18 @@ internal object SeriesCatalogParser {
             compactSeasonEpisodePattern.find(value)?.groupValues?.getOrNull(1)
                 ?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
         }
+        // Akwam /akdrama-... URLs encode Season as -e<S> and Episode as -s<E>
+        // (e.g. crash-e2-s4 = Season 2 Ep 4, love-in-disguise-s11 = Season 1 Ep 11).
+        if (normalizedUrl.contains("/akdrama-", ignoreCase = true)) {
+            akwamSeasonUrlPattern.find(normalizedUrl)?.groupValues?.getOrNull(1)
+                ?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+            if (akwamEpisodeUrlPattern.containsMatchIn(normalizedUrl)) {
+                return null
+            }
+        }
+        // Cima4U & ArabLionz encode Season as -m<S>-n<E> (e.g. tsadm-crash-m2-n4).
+        cimaSeasonUrlPattern.find(normalizedUrl)?.groupValues?.getOrNull(1)
+            ?.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
         // Accept a stand-alone S2 path/title token, but never treat an arbitrary "s5"
         // fragment inside a longer slug as a season label.
         val detectedEp = episodeNumber(title, url)
@@ -172,26 +202,38 @@ internal object SeriesCatalogParser {
         seasonNumber(title, url)?.let { return it }
 
         val seasonAttributes = listOf("data-season-number", "data-season", "data-season_num")
-        val seasonContainerMarker = Regex("""(?i)(season|الموسم|موسم)""")
-        val episodeContainerMarker = Regex("""(?i)(episode|episodes|eplist|eps-list|episodios)""")
+        val seasonContainerMarker = Regex("""(?i)(season|tab-pane|tabcontent|pds-season|الموسم|موسم)""")
+        val episodeContainerMarker = Regex("""(?i)(episode|episodes|eplist|eps-list|episodios|epslist|allepcont|pds-episodes)""")
+        val doc = element.ownerDocument()
         var node: Element? = element
         var depth = 0
-        while (node != null && depth < 5) {
-            val marker = "${node.id()} ${node.className()}"
+        while (node != null && depth < 6) {
+            val nodeId = node.id().trim()
+            val marker = "$nodeId ${node.className()}"
             val isSeasonContainer = seasonContainerMarker.containsMatchIn(marker) &&
-                !Regex("""(?i)(seasons|مواسم|season[-_ ]?(?:tabs|list)|season-tabs)""")
+                !Regex("""(?i)(seasons|مواسم|season[-_ ]?(?:tabs|list)|season-tabs|pds-seasons|allseasonss)""")
                     .containsMatchIn(marker)
             val isEpisodeList = node.tagName() !in setOf("a", "li", "button") &&
                 episodeContainerMarker.containsMatchIn(marker)
-            // A season number found on an arbitrary ancestor (for example a
-            // recommendation wrapper or a page-wide season selector) is not
-            // enough to assign every episode beneath it. Only trust an
-            // explicitly season-scoped container.
             for (attribute in seasonAttributes) {
                 val value = node.attr(attribute).trim()
                 if (value.isNotBlank()) {
-                    value.toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+                    value.toIntOrNull()?.takeIf { it in 1..60 }?.let { return it }
                     seasonNumber(value, "")?.let { return it }
+                }
+            }
+
+            // Tab-pane / PHPMelody / Prestige containers (<div id="Season0">, #season-2, #pds-season-2):
+            // resolve via the matching tab button or link label first (fixes 0-based IDs like #Season0 -> "الموسم 1"
+            // and DB-ID containers like #br-season-744 whose heading contains the real season number).
+            if (nodeId.isNotBlank() && doc != null && (isSeasonContainer || isEpisodeList)) {
+                val escapedId = nodeId.replace("\"", "")
+                val tabControl = doc.select(
+                    "a[href='#$escapedId'], [data-bs-target='#$escapedId'], [data-target='#$escapedId'], " +
+                        "[aria-controls='$escapedId'], button[onclick*=\"'$escapedId'\"], button[onclick*='\"$escapedId\"']",
+                ).firstOrNull()
+                if (tabControl != null) {
+                    seasonNumber(tabControl.text().take(100), "")?.let { return it }
                 }
             }
 
@@ -204,13 +246,13 @@ internal object SeriesCatalogParser {
 
             if (isSeasonContainer) {
                 node.children()
-                    .filter { it.tagName() in setOf("h1", "h2", "h3", "h4", "h5") }
-                    .take(3)
+                    .filter { it.tagName() in setOf("h1", "h2", "h3", "h4", "h5") || it.hasClass("br-series-season-title") || it.hasClass("tt-season-title") }
+                    .take(4)
                     .firstNotNullOfOrNull { seasonNumber(it.text().take(100), "") }
                     ?.let { return it }
             }
 
-            if (isSeasonContainer) seasonNumber(marker, "")?.let { return it }
+            if (isSeasonContainer) seasonNumber(marker, "")?.takeIf { it in 1..60 }?.let { return it }
 
             if (isEpisodeList || isSeasonContainer) {
                 var sibling = node.previousElementSibling()
@@ -389,6 +431,124 @@ internal object SeriesCatalogParser {
         }.distinctBy(::normalizedUrl).take(60)
     }
 
+    val episodeLinkSelectors = listOf(
+        ".episodes__list a", "ul.episodes__list a", "section.episodes__section a[href]",
+        ".SeasonsBoxUL a[href]", ".seasons-on-serie a[href]",
+        ".pwr-season-panel a[href]", ".epslist a[href]", "a.episode-card",
+        "div.season-list .tab-pane a[href]", "div.episodes.tab-content a[href]",
+        ".pds-episodes a[href]", "article.pds-episode a[href]", "section.pds-season a[href]",
+        "div.Tab .tabcontent a[href]", "div[id^='Season'].tabcontent a[href]",
+        "section.allepcont a[href]", ".allepcont a[href]",
+        "a.epss[href]", "div.items a.epss[href]",
+        "article.postEp a[href]", ".postEp .block-post a[href]",
+        "a.sh-episode-tile", ".Small--Box a", ".episode a", ".episodes a",
+        ".episodes-list a", ".EpisodesList a", ".EpisodesList li a", ".eplister li a",
+        ".eps-list li a", ".eps a", "a.ep", "a.episode__item", ".episode__item a", "a.ep-item",
+        ".Episodes--List a", ".EpisodeBlock a", ".episodios li a", ".eplist a",
+        ".br-episode-grid a[href]", ".br-series-detail-grid a[href]", ".br-series-season a[href]",
+        "a[href*='/akdrama-']",
+        ".sh-single-episode-grid a[href]", "#episodes a[href]",
+        ".fhd-original-episodes-grid a[href]", ".tt-episode-grid a[href]", ".tt-season a[href]",
+        ".ListNumberEpisodesMobile a[href]", "a.ItemEpisodeMobile[href]", "#AreaNewly .ItemNewly a[href]",
+        "ul.block_Ep a[href]", "#Epis a[href]",
+        "div.block-post a[href*='/clarus/']", "a[href*='/clarus/']",
+        "a[href*='%d8%a7%d9%84%d8%ad%d9%84%d9%82%d8%a9-']", "a[href*='%D8%A7%D9%84%D8%AD%D9%84%D9%82%D8%A9']",
+        "a[href*='%d8%ad%d9%84%d9%82%d8%a9']", "a[href*='%D8%AD%D9%84%D9%82%D8%A9']",
+        "a[href*='الحلقة']", "a[href*='حلقة']",
+        "a[href*='episode']", "a[href*='ep-']", "a[href*='-eps']", ".postDiv a[href*='serie']",
+        ".episodes-list [data-url], .episodes-list [data-href]",
+        ".EpisodesList [data-url], .EpisodesList [data-href]",
+        ".eplister [data-url], .eplister [data-href]",
+        "[data-episode][data-url], [data-episode][data-href], [data-episode-link]",
+    )
+
+    private val episodeListMarkers = listOf(
+        "episode", "episodes", "eplist", "eps-list", "episodeslist", "epslist", "eps",
+        "episodes__list", "episodes__section", "allepcont", "pds-episodes", "pds-episode",
+        "pds-season", "season-list", "tab-content", "tab-pane", "tabcontent", "postep", "block-post",
+        "episodios", "pwr-season-panel", "br-episode-grid", "br-series-detail-grid",
+        "br-series-season", "sh-single-episode-grid", "fhd-original-episodes-grid",
+        "tt-episode-grid", "tt-season", "block_ep", "epis",
+        "listnumberepisodesmobile", "areanewly", "itemnewly",
+    )
+
+    fun isEpisodeListElement(element: Element): Boolean =
+        element.parents().any { ancestor ->
+            val marker = "${ancestor.className()} ${ancestor.id()}".lowercase()
+            episodeListMarkers.any(marker::contains)
+        } || element.classNames().any { className ->
+            className.contains("episode", ignoreCase = true) ||
+                className.contains("ep-item", ignoreCase = true) ||
+                className == "epss"
+        }
+
+    /** Unwrap shot90.com?url=<BASE64> wrappers used by Esheeq / Turkish sources. */
+    fun unwrapRedirectUrl(rawUrl: String): String {
+        val clean = rawUrl.trim()
+        if (!clean.contains("shot90.com", ignoreCase = true)) return clean
+        val parsed = runCatching { java.net.URI(clean) }.getOrNull() ?: return clean
+        val encoded = parsed.rawQuery.orEmpty()
+            .split('&')
+            .firstOrNull { it.startsWith("url=", ignoreCase = true) }
+            ?.substringAfter('=')
+            ?.let { runCatching { URLDecoder.decode(it, "UTF-8") }.getOrDefault(it) }
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return clean
+        if (encoded.startsWith("http://", true) || encoded.startsWith("https://", true)) return encoded
+        return runCatching {
+            val padded = encoded + "=".repeat((4 - encoded.length % 4) % 4)
+            String(java.util.Base64.getDecoder().decode(padded), Charsets.UTF_8).trim()
+        }.getOrNull()?.takeIf { it.startsWith("http://", true) || it.startsWith("https://", true) } ?: clean
+    }
+
+    /** True only when a /category/... URL identifies one specific series' episode archive. */
+    fun isSpecificSeriesArchiveUrl(url: String): Boolean {
+        val decoded = decodeUrl(url).trim()
+        val uri = runCatching { java.net.URI(decoded) }.getOrNull() ?: return false
+        val path = uri.path.orEmpty().lowercase().trimEnd('/')
+        if (path.isBlank()) return false
+        if (path.contains("/category/episodes")) {
+            val segments = path.substringAfter("/category/episodes")
+                .trim('/')
+                .split('/')
+                .filter(String::isNotBlank)
+            val genericSegments = setOf(
+                "new", "completed", "korean-ep", "chinese-ep", "japanese-ep",
+                "thai-ep", "taiwan-ep", "filipino-ep", "asian-ep", "anime-ep", "other",
+            )
+            return segments.isNotEmpty() && segments.last() !in genericSegments
+        }
+        return path.contains("/category/مسلسل-") || path.contains("/category/انمي-")
+    }
+
+    /** Locate explicit "مشاهدة حلقات المسلسل" / series-archive buttons (e.g. AraDrama, Lodynet, PHPMelody). */
+    fun findSeriesEpisodeArchiveUrls(document: Document, currentPageUrl: String): List<Pair<String, String>> {
+        val ctaLabelPattern = Regex("""(?:مشاهدة\s+حلقات|حلقات\s+المسلسل|جميع\s+الحلقات|كل\s+الحلقات|مشاهدة\s+الحلقات)""")
+        val found = linkedMapOf<String, Pair<String, String>>()
+        for (el in document.select("a[href]")) {
+            if (isInsideUnrelatedContentContainer(el)) continue
+            if (el.parents().any { it.tagName() in setOf("header", "nav", "footer", "aside") }) continue
+            val href = el.attr("abs:href").ifBlank { el.attr("href") }.trim()
+            if (!href.startsWith("http", ignoreCase = true) ||
+                normalizedUrl(href) == normalizedUrl(currentPageUrl)
+            ) continue
+            val txt = el.text().trim().replace(Regex("\\s+"), " ")
+            val isSpecificArchive = isSpecificSeriesArchiveUrl(href)
+            val isExplicitAllEpsTag = ctaLabelPattern.containsMatchIn(txt) &&
+                href.contains("tag.php?t=", ignoreCase = true)
+            if (!isSpecificArchive && !isExplicitAllEpsTag) continue
+            if (isExplicitAllEpsTag ||
+                ctaLabelPattern.containsMatchIn(txt) ||
+                href.contains("/category/episodes/", ignoreCase = true) ||
+                decodeUrl(href).lowercase().contains("/category/مسلسل-")
+            ) {
+                found.putIfAbsent(normalizedUrl(href), href to txt)
+            }
+        }
+        return found.values.toList()
+    }
+
     /** Parse one provider episode-list page for on-demand, incremental loading. */
     fun parseEpisodeEntries(
         document: Document,
@@ -396,18 +556,16 @@ internal object SeriesCatalogParser {
         defaultSeasonNumber: Int,
         isAllowedContentUrl: (String) -> Boolean,
     ): List<Triple<String, String, Int?>> {
-        val selectors = listOf(
-            ".pwr-season-panel a[href]", ".epslist a[href]", "a.episode-card",
-            ".episodes-list a", ".EpisodesList li a", ".eplister li a",
-            ".eps-list li a", ".eps a", "a.episode__item", ".episode__item a", "a.ep-item",
-            "div.block-post a[href*='/clarus/']", "a[href*='/clarus/']",
-            "a[href*='الحلقة']", "a[href*='episode']", "a[href*='ep-']",
-            ".postDiv a[href*='serie']",
-            ".episodes-list [data-url], .episodes-list [data-href]",
-            ".EpisodesList [data-url], .EpisodesList [data-href]",
-            ".eplister [data-url], .eplister [data-href]",
-            "[data-episode][data-url], [data-episode][data-href], [data-episode-link]",
-        ).joinToString(", ")
+        val isTagArchive = currentPageUrl.contains("tag.php?t=", ignoreCase = true)
+        val archiveExtra = if (isSpecificSeriesArchiveUrl(currentPageUrl) ||
+            isSpecificSeriesArchiveUrl(document.location()) ||
+            isTagArchive
+        ) {
+            listOf("article a[href]", ".pm-video-thumb a[href]", "a.ellipsis[href]")
+        } else {
+            emptyList()
+        }
+        val selectors = (episodeLinkSelectors + archiveExtra).joinToString(", ")
         val collected = linkedMapOf<String, Triple<String, String, Int?>>()
         for (element in document.select(selectors)) {
             if (isInsideUnrelatedContentContainer(element)) continue
@@ -416,22 +574,15 @@ internal object SeriesCatalogParser {
                     element.absUrl(attribute).ifBlank { element.attr(attribute).trim() }
                         .takeIf(String::isNotBlank)
                 } ?: continue
-            val url = runCatching {
+            val resolvedUrl = runCatching {
                 val current = java.net.URI(currentPageUrl)
-                val candidate = current.resolve(rawUrl)
-                candidate.toString()
+                current.resolve(rawUrl).toString()
             }.getOrDefault("")
+            val url = unwrapRedirectUrl(resolvedUrl)
             if (url.isBlank() || !isAllowedContentUrl(url)) continue
 
             val title = element.text().trim().ifBlank { element.attr("title").trim() }
-            val isEpisodeListEntry = element.parents().any { ancestor ->
-                val marker = "${ancestor.className()} ${ancestor.id()}".lowercase()
-                listOf("episode", "episodes", "eplist", "eps-list", "episodeslist", "epslist", "eps", "episodios", "pwr-season-panel")
-                    .any(marker::contains)
-            } || element.classNames().any { className ->
-                className.contains("episode", ignoreCase = true) || className.contains("ep-item", ignoreCase = true)
-            }
-            val number = episodeNumber(title, url, allowNumericTitle = isEpisodeListEntry) ?: continue
+            val number = episodeNumber(title, url, allowNumericTitle = isEpisodeListElement(element)) ?: continue
             val season = seasonNumber(title, url)
                 ?: seasonNumberFromElement(element, title, url)
                 ?: defaultSeasonNumber.takeIf { it > 0 }
@@ -567,7 +718,7 @@ internal object SeriesCatalogParser {
     /** Excludes recommendation/sidebar cards that happen to contain season or episode links. */
     fun isInsideUnrelatedContentContainer(element: Element): Boolean =
         (listOf(element) + element.parents()).take(7).any { node ->
-            if (node.tagName() in setOf("aside", "footer")) return@any true
+            if (node.tagName() in setOf("aside", "footer", "header")) return@any true
             val markers = listOf(node.id(), node.className(), node.attr("role"), node.attr("aria-label"))
                 .joinToString(" ")
             unrelatedContentContainerPattern.containsMatchIn(markers)
@@ -609,7 +760,7 @@ internal object SeriesCatalogParser {
             .distinct()
             .sorted()
             .toList()
-        if (numbers.size < 3) return true
+        if (numbers.size < 3 || numbers.first() > 1) return true
         return numbers.zipWithNext().any { (previous, next) -> next - previous > 1 }
     }
 

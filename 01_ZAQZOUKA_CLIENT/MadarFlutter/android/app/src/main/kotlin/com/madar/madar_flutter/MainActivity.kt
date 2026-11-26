@@ -146,8 +146,8 @@ class MainActivity : FlutterActivity() {
                         }.getOrNull()
                         val code = if (pkgInfo != null) {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pkgInfo.longVersionCode else @Suppress("DEPRECATION") pkgInfo.versionCode.toLong()
-                        } else 90L
-                        val name = pkgInfo?.versionName ?: "1.0.83"
+                        } else 92L
+                        val name = pkgInfo?.versionName ?: "1.0.85"
                         result.success(
                             mapOf(
                                 "versionCode" to code,
@@ -499,7 +499,7 @@ class MainActivity : FlutterActivity() {
     }
     private fun openPlayerStore(result: MethodChannel.Result) {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/iptvappk-ctrl/mashad-tv-app/releases/download/v1.0.76/zag-player.apk")).apply {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk")).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
             result.success(true)
@@ -524,7 +524,7 @@ class MainActivity : FlutterActivity() {
                     setBackgroundColor(Color.parseColor("#0E0B0E"))
                 }
 
-                // ── Top Bar with [✕ عودة للتطبيق] button ──
+                // ── Top Bar with [✕ إغلاق] button ──
                 val topBar = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     layoutParams = LinearLayout.LayoutParams(
@@ -565,9 +565,9 @@ class MainActivity : FlutterActivity() {
                     layoutParams = LinearLayout.LayoutParams(0, 0, 1.0f)
                 }
 
-                // ── [✕ عودة للتطبيق] Button ──
+                // ── [✕ إغلاق] Button ──
                 val closeBtn = TextView(this).apply {
-                    text = "✕  عودة للتطبيق"
+                    text = "✕  إغلاق"
                     setTextColor(Color.WHITE)
                     textSize = 14f
                     setTypeface(null, android.graphics.Typeface.BOLD)

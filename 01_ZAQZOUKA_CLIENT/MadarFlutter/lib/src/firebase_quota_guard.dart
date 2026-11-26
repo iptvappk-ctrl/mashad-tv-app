@@ -149,15 +149,28 @@ class SystemStatus {
       (appUpdate?['forced'] != true) &&
       latestUpdateVersionCode > ZaqzoukaQuotaGuard.installedVersionCode;
 
-  bool get isBannerAdEnabled {
-    if (status != 'active') return false;
+  String get _effectiveAdSource {
+    final ownerSrc = ownerAdConfig?['active_source']?.toString().toLowerCase().trim() ?? '';
+    if (ownerSrc.isNotEmpty) return ownerSrc;
+    return 'owner';
+  }
+
+  Map<String, dynamic>? get _effectiveAdConfig {
+    if (status != 'active') return null;
+    if (_effectiveAdSource == 'disabled') return null;
     if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      if (ownerAdConfig!['banner_enabled'] == false) return false;
-    } else if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == false) {
-      return false;
-    } else if (adConfig != null && adConfig!['banner_enabled'] == false) {
-      return false;
+      return ownerAdConfig;
     }
+    if (_effectiveAdSource == 'partner') {
+      return adConfig;
+    }
+    return ownerAdConfig ?? adConfig;
+  }
+
+  bool get isBannerAdEnabled {
+    final cfg = _effectiveAdConfig;
+    if (cfg == null) return false;
+    if (cfg['enabled'] == false || cfg['banner_enabled'] == false) return false;
     return bannerHtml.trim().isNotEmpty || bannerUrl.trim().isNotEmpty;
   }
 
@@ -168,9 +181,12 @@ class SystemStatus {
   }
 
   String get smartDirectAdUrl {
-    if (ownerAdConfig != null && ownerAdConfig!['enabled'] == false) {
+    final cfg = _effectiveAdConfig;
+    if (cfg == null || cfg['enabled'] == false || cfg['video_enabled'] == false) {
       return '';
     }
+    final selectedUrl = _sanitizeAdField(cfg['ad_url']?.toString());
+    if (selectedUrl.isNotEmpty) return selectedUrl;
     final ownerUrl = _sanitizeAdField(ownerAdConfig?['ad_url']?.toString());
     if (ownerUrl.isNotEmpty) return ownerUrl;
     final partnerUrl = _sanitizeAdField(adConfig?['ad_url']?.toString());
@@ -179,10 +195,12 @@ class SystemStatus {
   }
 
   String get bannerHtml {
-    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      return _sanitizeAdField(ownerAdConfig!['banner_html']?.toString());
+    final cfg = _effectiveAdConfig;
+    if (cfg != null) {
+      final html = _sanitizeAdField(cfg['banner_html']?.toString());
+      if (html.isNotEmpty) return html;
     }
-    if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
+    if (_effectiveAdSource != 'partner' && ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
       final html = _sanitizeAdField(ownerAdConfig!['banner_html']?.toString());
       if (html.isNotEmpty) return html;
     }
@@ -190,10 +208,12 @@ class SystemStatus {
   }
 
   String get bannerUrl {
-    if (ownerAdConfig != null && ownerAdConfig!['override_partner'] == true) {
-      return _sanitizeAdField(ownerAdConfig!['banner_url']?.toString());
+    final cfg = _effectiveAdConfig;
+    if (cfg != null) {
+      final url = _sanitizeAdField(cfg['banner_url']?.toString());
+      if (url.isNotEmpty) return url;
     }
-    if (ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
+    if (_effectiveAdSource != 'partner' && ownerAdConfig != null && ownerAdConfig!['banner_enabled'] == true) {
       final url = _sanitizeAdField(ownerAdConfig!['banner_url']?.toString());
       if (url.isNotEmpty) return url;
     }
@@ -440,6 +460,12 @@ class ZaqzoukaQuotaGuard {
         'message': s.message,
         'updatedAt': s.updatedAt,
         'wipeTimestamp': s.wipeTimestamp,
+        'components': s.components,
+        if (s.broadcastNotification != null)
+          'broadcast_notification': s.broadcastNotification,
+        if (s.ownerAdConfig != null) 'owner_ad_config': s.ownerAdConfig,
+        if (s.adConfig != null) 'ad_config': s.adConfig,
+        if (s.appUpdate != null) 'app_update': s.appUpdate,
         '_source': 'local_cache',
       });
       await prefs.setString(_Cfg.spKeyStatus, json);

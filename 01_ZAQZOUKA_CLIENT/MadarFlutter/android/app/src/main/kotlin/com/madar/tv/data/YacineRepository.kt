@@ -406,6 +406,12 @@ object YacineRepository {
         val ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         val ref = "https://yacinelive.com/"
 
+        // Only return public beIN XTRA FAST streams when the requested channel itself is XTRA / generic FAST;
+        // NEVER hijack numbered match channels (beIN SPORTS 1..9) into XTRA reruns!
+        if (!n.contains("xtra") && n != "bein sports" && !n.contains("news")) {
+            return emptyList()
+        }
+
         val workingStreams: List<Triple<String, String, String>> = when {
             ch in listOf(2, 4, 6, 8) || n.contains("xtra") -> listOf(
                 Triple("$name · سيرفر مباشر 1", "https://dc1644a9jazgj.cloudfront.net/beIN_Sports_Xtra_Espanol.m3u8", ref),
@@ -436,6 +442,26 @@ object YacineRepository {
         }
     }
 
+    private suspend fun getMatchingCategoryChannelStreams(channelName: String): List<YacineStream> {
+        val targetNorm = normalizeChannelName(channelName)
+        val targetNum = extractChannelNumber(channelName)
+        if (targetNorm.isBlank()) return emptyList()
+        val extraStreams = mutableListOf<YacineStream>()
+        for (catId in listOf("4", "5", "6")) {
+            val catChannels = runCatching { getChannels(catId, forceRefresh = false) }.getOrDefault(emptyList())
+            val match = catChannels.firstOrNull { ch ->
+                val n = normalizeChannelName(ch.name)
+                n == targetNorm || (targetNum > 0 && ch.name.contains("bein", ignoreCase = true) && extractChannelNumber(ch.name) == targetNum)
+            } ?: continue
+            val live = runCatching {
+                val decrypted = decryptResponse("channel/${match.id}")
+                if (decrypted.isNotBlank()) parseStreamPayload(decrypted) else emptyList()
+            }.getOrDefault(emptyList())
+            extraStreams += live
+        }
+        return extraStreams.distinctBy { it.url }
+    }
+
     suspend fun getMatchStreams(
         eventId: String,
         channelHint: String,
@@ -444,30 +470,32 @@ object YacineRepository {
         val id = eventId.trim()
         val hint = channelHint.trim()
 
+        val ev = cachedEvents.firstOrNull { it.id == id } ?: REAL_YACINE_EVENTS.firstOrNull { it.id == id }
         val channelToUse = when {
             hint.isNotBlank() -> hint
-            else -> {
-                val ev = cachedEvents.firstOrNull { it.id == id } ?: REAL_YACINE_EVENTS.firstOrNull { it.id == id }
-                ev?.channel?.ifBlank { "beIN SPORTS 1" } ?: "beIN SPORTS 1"
-            }
+            else -> ev?.channel?.ifBlank { "beIN SPORTS 1" } ?: "beIN SPORTS 1"
         }
         val staticBackup = getStreamsForChannelName(channelToUse)
 
-        // 1. Try live event streams first if eventId is a valid numeric ID
+        val collected = mutableListOf<YacineStream>()
+        // 1. Live event streams first (dedicated match event ID)
         if (id.isNotEmpty() && id.all { it.isDigit() }) {
-            val eventStreams = getEventStreams(id)
-            if (eventStreams.isNotEmpty()) {
-                return@withContext (eventStreams + staticBackup).distinctBy { it.url }
-            }
+            collected += getEventStreams(id)
         }
 
-        // 2. Try live channel streams
-        val chStreams = getChannelStreams(channelToUse)
-        if (chStreams.isNotEmpty()) {
-            return@withContext (chStreams + staticBackup).distinctBy { it.url }
+        // 2. Exact matching channel streams (primary + 720p/360p category mirrors of the SAME channel)
+        if (collected.isEmpty()) {
+            collected += getChannelStreams(channelToUse)
+        }
+        if (collected.size < 2) {
+            collected += getMatchingCategoryChannelStreams(channelToUse)
         }
 
-        // 3. Last fallback: offline static streams
+        if (collected.isNotEmpty()) {
+            return@withContext (collected + staticBackup).distinctBy { it.url }
+        }
+
+        // 3. Only if explicitly XTRA / generic FAST channel
         staticBackup
     }
 
@@ -477,7 +505,7 @@ object YacineRepository {
         val chNum = extractChannelNumber(clean)
 
         val targetId = when {
-            clean.all { it.isDigit() } && clean.length in 3..6 -> clean
+            clean.isNotEmpty() && clean.all { it.isDigit() } && clean.length in 1..6 -> clean
             n.contains("xtra 1") || n.contains("xtra1") -> "1421"
             n.contains("xtra 2") || n.contains("xtra2") -> "1422"
             n.contains("xtra 3") || n.contains("xtra3") || n.contains("xtra") -> "1423"
@@ -486,7 +514,8 @@ object YacineRepository {
             n.contains("france 3") -> "1435"
             chNum in 1..9 -> (1423 + chNum).toString()
             else -> {
-                val matched = BEIN_FALLBACK_CHANNELS.firstOrNull { ch ->
+                val allKnown = cachedChannels.values.flatMap { it.second } + BEIN_FALLBACK_CHANNELS
+                val matched = allKnown.firstOrNull { ch ->
                     val n1 = normalizeChannelName(ch.name)
                     val n2 = normalizeChannelName(clean)
                     n1 == n2 || n1.contains(n2) || n2.contains(n1)
@@ -505,7 +534,7 @@ object YacineRepository {
             return@withContext liveStreams
         }
 
-        // Fallback to static CDN streams for the channel
+        // Fallback to static CDN streams ONLY when channel itself is an XTRA channel
         val matchedChannel = BEIN_FALLBACK_CHANNELS.firstOrNull { it.id == targetId }
         val chName = matchedChannel?.name ?: clean
         getStreamsForChannelName(chName)

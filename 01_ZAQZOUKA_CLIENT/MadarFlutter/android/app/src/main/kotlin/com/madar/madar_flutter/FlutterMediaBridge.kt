@@ -103,7 +103,7 @@ class FlutterMediaBridge(context: Context) {
         "media.seasons.cached", "media.seasons.fetch" -> {
             val item = call.argument<Map<String, Any?>>("item")?.toItem()
                 ?: throw IllegalArgumentException("المسلسل غير صالح")
-            val seriesItem = item.asParentSeries()
+            val seriesItem = if (item.isExplicitSeriesOrEpisode()) item.asParentSeries() else item
             val force = call.argument<Boolean>("force") ?: false
             val bundle = if (method.endsWith("cached")) {
                 loadCachedSeasons(seriesItem)
@@ -403,12 +403,29 @@ class FlutterMediaBridge(context: Context) {
         if (item.isArabseedSource()) ArabseedRepository.fetchDetail(item)
         else MultiProviderRepository.fetchDetail(item)
 
-    private fun loadCachedSeasons(item: ArabseedItem): ArabseedSeasonBundle? =
-        MultiProviderRepository.loadCachedMergedSeasonBundle(item.pageUrl)
+    private fun loadCachedSeasons(item: ArabseedItem): ArabseedSeasonBundle? {
+        val raw = MultiProviderRepository.loadCachedMergedSeasonBundle(item.pageUrl)
             ?: if (item.isArabseedSource()) ArabseedRepository.loadCachedSeasonBundle(item.pageUrl)
             else MultiProviderRepository.loadCachedSeasonBundle(item.pageUrl)
+        if (!item.isExplicitSeriesOrEpisode()) {
+            val partsOnly = raw?.relatedParts.orEmpty()
+            return if (partsOnly.isEmpty()) null else ArabseedSeasonBundle(emptyList(), partsOnly)
+        }
+        return raw
+    }
 
     private fun fetchSeasons(item: ArabseedItem, forceRefresh: Boolean): ArabseedSeasonBundle {
+        // Explicit movies only scrape related parts on their own page and must never
+        // invoke cross-provider series aggregation (which could attach a similarly-named show).
+        if (!item.isExplicitSeriesOrEpisode()) {
+            val movieSinglePage = if (item.isArabseedSource()) {
+                ArabseedRepository.fetchSeasonsAndEpisodes(item, forceRefresh = forceRefresh)
+            } else {
+                MultiProviderRepository.fetchSeasonsAndEpisodes(item, forceRefresh = forceRefresh)
+            }
+            return ArabseedSeasonBundle(seasons = emptyList(), relatedParts = movieSinglePage.relatedParts)
+        }
+
         val seriesItem = item.asParentSeries().copy(type = com.madar.tv.data.ArabseedType.SERIES)
         val cached = MultiProviderRepository.loadCachedMergedSeasonBundle(seriesItem.pageUrl)
             ?: if (seriesItem.isArabseedSource()) ArabseedRepository.loadCachedSeasonBundle(seriesItem.pageUrl)
@@ -543,12 +560,23 @@ private fun Map<String, Any?>.toItem(): ArabseedItem = ArabseedItem(
         ?.mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }.orEmpty(),
 )
 
+/** True only for series cards, parent-linked cards, or individual episode items. */
+private fun ArabseedItem.isExplicitSeriesOrEpisode(): Boolean =
+    type == ArabseedType.SERIES ||
+        !parentSeriesPageUrl.isNullOrBlank() ||
+        SeriesCatalogParser.isEpisode(title, pageUrl)
+
 /** Episode cards carry the canonical series URL. Season discovery must use that page. */
 private fun ArabseedItem.asParentSeries(): ArabseedItem {
     val parentUrl = parentSeriesPageUrl?.takeIf(String::isNotBlank)
     val parentTitle = parentSeriesTitle?.takeIf(String::isNotBlank) ?: title
-    // Always ensure type=SERIES so season aggregation runs regardless of card type
-    if (parentUrl == null) return copy(type = com.madar.tv.data.ArabseedType.SERIES)
+    if (parentUrl == null) {
+        return if (isExplicitSeriesOrEpisode()) {
+            copy(type = com.madar.tv.data.ArabseedType.SERIES)
+        } else {
+            this
+        }
+    }
     return copy(
         title = parentTitle,
         arabicTitle = parentTitle,

@@ -223,14 +223,21 @@ class _AppFeedNativeAdCardState extends State<AppFeedNativeAdCard> {
     } catch (_) {}
   }
 
+  String _resolveBannerUrl(String directUrl, String html) {
+    if (directUrl.trim().isNotEmpty) return directUrl.trim();
+    final hrefMatch = RegExp(r'''href=["\']([^"\']+)["\']''', caseSensitive: false).firstMatch(html);
+    if (hrefMatch != null) return hrefMatch.group(1) ?? '';
+    final urlMatch = RegExp(r'''https?://[^\s<>"\']+''').firstMatch(html);
+    return urlMatch?.group(0) ?? '';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_dismissed) return const SizedBox.shrink();
     final status = ZaqzoukaQuotaGuard.instance.currentStatus;
-    // Banner code will be plugged in here once provided; keep hidden until then.
     if (!status.isBannerAdEnabled) return const SizedBox.shrink();
 
-    final targetUrl = status.bannerUrl.trim();
+    final targetUrl = _resolveBannerUrl(status.bannerUrl, status.bannerHtml);
     if (targetUrl.isEmpty) return const SizedBox.shrink();
 
     return Container(
