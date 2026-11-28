@@ -66,6 +66,7 @@ data class ArabseedSeason(
     val title: String,
     val episodes: List<ArabseedEpisode>,
     val pageUrl: String = "",
+    val hasMorePages: Boolean? = null,
 )
 
 data class ArabseedSeasonBundle(

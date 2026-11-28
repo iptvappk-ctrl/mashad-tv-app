@@ -5,6 +5,7 @@ class MasterApiClient {
   static const List<String> _endpoints = [
     'https://zaafilm.com/api/system_control',
     'https://dashboard-api-indol-eight.vercel.app/api/system_control',
+    'https://dashboard-api-amber-chi.vercel.app/api/system_control',
     'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
   ];
   static const String _adminSecret = 'Zq!7#mK9xPd@3wR5nT';

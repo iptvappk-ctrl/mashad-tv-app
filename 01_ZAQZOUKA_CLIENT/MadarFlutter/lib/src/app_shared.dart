@@ -357,7 +357,7 @@ class NativeBridge {
   static Future<Map<String, dynamic>?> installPlayer({String? apkUrl, String? sha256}) async {
     try {
       return await _native.invokeMapMethod<String, dynamic>('player.install', {
-        'apkUrl': apkUrl ?? 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk',
+        'apkUrl': apkUrl ?? 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zag-player-1.1.37.apk',
         if (sha256 != null) 'sha256': sha256,
       });
     } catch (_) {

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * (c) 2026 Zaqzouka Network Architecture - All Rights Reserved.
  * Protected under International Copyright & Digital Rights Protection Treaties.
  * Unauthorized copying, reverse engineering, tampering, or distribution is strictly prohibited.
@@ -6,52 +6,46 @@
 (function(_0xroot, _0xdoc) {
   'use strict';
 
+  const APP_APK_URL = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zaqzouka-1.0.86-93.apk';
+  const PLAYER_APK_URL = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zag-player-1.1.37.apk';
+  const TELEMETRY_API = 'https://dashboard-api-indol-eight.vercel.app/api/telemetry';
+
   // ── Anti-DevTools & Anti-Inspection Shield ──
   (function _0xshield() {
     try {
-      // Disable Context Menu (Right Click)
       _0xdoc.addEventListener('contextmenu', function(e) {
         e.preventDefault();
         return false;
       }, false);
 
-      // Disable DevTools Key Combinations
       _0xdoc.addEventListener('keydown', function(e) {
-        // F12
         if (e.keyCode === 123) {
           e.preventDefault();
           return false;
         }
-        // Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C
         if (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74 || e.keyCode === 67)) {
           e.preventDefault();
           return false;
         }
-        // Ctrl+U (View Source), Ctrl+S (Save)
         if (e.ctrlKey && (e.keyCode === 85 || e.keyCode === 83)) {
           e.preventDefault();
           return false;
         }
       }, false);
 
-      // Console Warning Banner
-      const _0xcw = function() {
-        if (_0xroot.console) {
-          _0xroot.console.clear();
-          _0xroot.console.log(
-            '%c[!] نظام حماية زقزوقة المعتمد 2026\nهذه الصفحة مشفرة ومحمية بالكامل ضد الهندسة العكسية أو التلاعب.',
-            'color:#E5A958; font-size:16px; font-weight:bold; background:#141014; padding:12px; border:2px solid #B94E3C; border-radius:8px;'
-          );
-        }
-      };
-      _0xcw();
+      if (_0xroot.console) {
+        _0xroot.console.clear();
+        _0xroot.console.log(
+          '%c[!] نظام حماية زقزوقة المعتمد 2026\nهذه الصفحة محمية بالكامل ضد التلاعب أو النسخ.',
+          'color:#E5A958; font-size:15px; font-weight:600; background:#171116; padding:12px; border:1px solid #B94E3C; border-radius:8px;'
+        );
+      }
 
-      // Anti-Debugging Guard (Pauses execution if DevTools is force-opened)
       setInterval(function() {
         (function() {
           try {
             return !function() {}['constructor']('debugger')();
-          } catch(e) { return false; }
+          } catch (_) { return false; }
         })();
       }, 3000);
     } catch (_) {}
@@ -60,7 +54,10 @@
   // ── Encrypted Cloud Kill Switch & System Verifier ──
   (function _0xverifier() {
     const _0xkey = 126;
-    const _0xraw = [[22, 10, 10, 14, 13, 68, 81, 81, 26, 31, 13, 22, 28, 17, 31, 12, 26, 83, 31, 14, 23, 83, 23, 16, 26, 17, 18, 83, 27, 23, 25, 22, 10, 80, 8, 27, 12, 29, 27, 18, 80, 31, 14, 14, 81, 31, 14, 23, 81, 13, 7, 13, 10, 27, 19, 33, 29, 17, 16, 10, 12, 17, 18], [22, 10, 10, 14, 13, 68, 81, 81, 19, 31, 26, 31, 12, 10, 8, 83, 26, 27, 24, 31, 11, 18, 10, 83, 12, 10, 26, 28, 80, 24, 23, 12, 27, 28, 31, 13, 27, 23, 17, 80, 29, 17, 19, 81, 13, 7, 13, 10, 27, 19, 33, 29, 17, 16, 10, 12, 17, 18, 80, 20, 13, 17, 16]];
+    const _0xraw = [
+      [22, 10, 10, 14, 13, 68, 81, 81, 26, 31, 13, 22, 28, 17, 31, 12, 26, 83, 31, 14, 23, 83, 23, 16, 26, 17, 18, 83, 27, 23, 25, 22, 10, 80, 8, 27, 12, 29, 27, 18, 80, 31, 14, 14, 81, 31, 14, 23, 81, 13, 7, 13, 10, 27, 19, 33, 29, 17, 16, 10, 12, 17, 18],
+      [22, 10, 10, 14, 13, 68, 81, 81, 19, 31, 26, 31, 12, 10, 8, 83, 26, 27, 24, 31, 11, 18, 10, 83, 12, 10, 26, 28, 80, 24, 23, 12, 27, 28, 31, 13, 27, 23, 17, 80, 29, 17, 19, 81, 13, 7, 13, 10, 27, 19, 33, 29, 17, 16, 10, 12, 17, 18, 80, 20, 13, 17, 16]
+    ];
     const _0xurls = _0xraw.map(arr => arr.map(c => String.fromCharCode(c ^ _0xkey)).join(''));
 
     function _0xshowMaint(_0xmsg) {
@@ -70,25 +67,23 @@
 
       const _0xov = _0xdoc.createElement('div');
       _0xov.id = 'zq-maintenance-overlay';
-      _0xov.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:#0E0B0E;z-index:9999999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Cairo,system-ui,sans-serif;direction:rtl;padding:20px;box-sizing:border-box;';
+      _0xov.style.cssText = 'position:fixed;inset:0;background:#0E0B0E;z-index:9999999;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Cairo,system-ui,sans-serif;direction:rtl;padding:24px;box-sizing:border-box;';
       _0xov.innerHTML = `
-        <div style="text-align:center;max-width:520px;background:#141014;border:1px solid rgba(185,78,60,0.3);border-radius:24px;padding:48px 32px;box-shadow:0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(185,78,60,0.15);">
-          <div style="width:84px;height:84px;border-radius:50%;background:rgba(185,78,60,0.12);border:2px solid #B94E3C;display:flex;align-items:center;justify-content:center;margin:0 auto 24px;">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#E5A958" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <div style="text-align:center;max-width:520px;background:#171116;border:1px solid rgba(185,78,60,0.42);border-radius:24px;padding:48px 32px;box-shadow:0 24px 64px rgba(0,0,0,0.85);">
+          <div style="width:72px;height:72px;border-radius:9999px;background:rgba(185,78,60,0.14);border:1px solid #B94E3C;display:flex;align-items:center;justify-content:center;margin:0 auto 24px;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#E5A958" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
               <polyline points="2 17 12 22 22 17"></polyline>
               <polyline points="2 12 12 17 22 12"></polyline>
             </svg>
           </div>
-          <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:rgba(185,78,60,0.15);border:1px solid rgba(185,78,60,0.4);border-radius:100px;margin-bottom:20px;">
-            <span style="width:8px;height:8px;border-radius:50%;background:#B94E3C;"></span>
-            <span style="color:#E5A958;font-size:13px;font-weight:700;">توقف مؤقت للصيانة</span>
+          <div style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;background:rgba(185,78,60,0.14);border:1px solid rgba(185,78,60,0.42);border-radius:9999px;margin-bottom:16px;">
+            <span style="width:8px;height:8px;border-radius:9999px;background:#B94E3C;"></span>
+            <span style="color:#E5A958;font-size:12px;font-weight:600;">توقف مؤقت للصيانة</span>
           </div>
-          <h1 style="color:#FFFFFF;font-size:24px;font-weight:800;margin:0 0 14px;letter-spacing:-0.5px;">الخدمة متوقفة مؤقتاً</h1>
-          <p style="color:#9E9A9E;font-size:15px;line-height:1.7;margin:0 0 28px;">${_0xmsg || 'نعمل حالياً على تحديثات شاملة وتطوير خوادم البث لضمان أفضل تجربة مشاهدة. سنعود للعمل قريباً جداً.'}</p>
-          <div style="color:#6E6A6E;font-size:12px;border-top:1px solid rgba(255,255,255,0.06);padding-top:20px;">
-            منظومة زقزوقة TV - الإدارة العليا
-          </div>
+          <h1 style="color:#FFFBF5;font-size:24px;font-weight:600;margin:0 0 12px;">الخدمة متوقفة مؤقتاً</h1>
+          <p style="color:#D4C8CE;font-size:15px;line-height:1.7;margin:0 0 24px;">${_0xmsg || 'نعمل حالياً على تحديثات شاملة وتطوير خوادم البث لضمان أفضل تجربة مشاهدة. سنعود للعمل قريباً جداً.'}</p>
+          <div style="color:#9D8E96;font-size:12px;">منظومة زقزوقة TV</div>
         </div>
       `;
       if (_0xdoc.body) {
@@ -124,307 +119,689 @@
     }
 
     _0xchk();
-    setInterval(_0xchk, 180000);
+    setInterval(_0xchk, 120000);
   })();
 
-  // ── Interactive UI Components ──
+  // ── 5 Portrait Interactive Motion Scenes (Modeled on zaq-motion.mp4) ──
+  const MOTION_SCENES = {
+    ar: [
+      {
+        fig: 'FIG.01 · HOME',
+        code: 'ZAQZOUKA · 01 / 05',
+        label: 'الرئيسية',
+        headline: 'واجهة <span class="accent-terracotta">دافئة</span> ومتعة فورية.',
+        subtitle: 'اكتشف مكتبة الأفلام والمسلسلات والملخصات وبثوث الكورة بتصفح سريع في ألوان زقزوقة المريحة للعين دون اشتراكات أو نوافذ مزعجة.',
+        floatTag: 'أفلام ومسلسلات 2026',
+        nextLabel: 'المشهد التالي · الأفلام'
+      },
+      {
+        fig: 'FIG.02 · MOVIES',
+        code: 'ZAQZOUKA · 02 / 05',
+        label: 'الأفلام',
+        headline: 'أحدث <span class="accent-gold">الأفلام</span> في جيبك.',
+        subtitle: 'أفلام عربية وأجنبية مترجمة بأحدث الإصدارات مع جلب ذكي لأكثر من مصدر وجودات متعددة تناسب سرعة اتصالك.',
+        floatTag: 'إصدارات السينما المترجمة',
+        nextLabel: 'المشهد التالي · المسلسلات'
+      },
+      {
+        fig: 'FIG.03 · SERIES',
+        code: 'ZAQZOUKA · 03 / 05',
+        label: 'المسلسلات',
+        headline: 'مواسم <span class="accent-terracotta">مكتملة</span> بلا حلقات ناقصة.',
+        subtitle: 'تصفح الدراما العربية والتركية والآسيوية مع جمع كافة حلقات الموسم مرتبة ومتابعة آخر حلقة توقفت عندها.',
+        floatTag: 'عربي · تركي · آسيوي',
+        nextLabel: 'المشهد التالي · الملخصات'
+      },
+      {
+        fig: 'FIG.04 · RECAPS',
+        code: 'ZAQZOUKA · 04 / 05',
+        label: 'ملخصات',
+        headline: 'ملخصات <span class="accent-gold">السينما</span> بضغطة واحدة.',
+        subtitle: 'مكتبة تضم مئات ملخصات الأفلام والمسلسلات من أشهر قنوات الملخصات العربية جاهزة للتشغيل الفوري عبر مشغل زاغ.',
+        floatTag: 'أكثر من 670 ملخص جاهز',
+        nextLabel: 'المشهد التالي · بثوث الكورة'
+      },
+      {
+        fig: 'FIG.05 · SPORTS',
+        code: 'ZAQZOUKA · 05 / 05',
+        label: 'بثوث الكورة',
+        headline: 'المباريات الحية <span class="accent-terracotta">بدون تقطيع</span>.',
+        subtitle: 'جدول المباريات اليومي وحالة البث المباشر وقنوات الرياضة العربية مع تعليق مباشر وملخصات الأهداف.',
+        floatTag: 'جدول المباريات والبث الحي',
+        nextLabel: 'العودة · الرئيسية'
+      }
+    ],
+    en: [
+      {
+        fig: 'FIG.01 · HOME',
+        code: 'ZAQZOUKA · 01 / 05',
+        label: 'Home',
+        headline: 'Warm interface, <span class="accent-terracotta">instant</span> cinema.',
+        subtitle: 'Explore Arabic and global films, series seasons, recaps, and live football matches in our calm Paper Sand interface with zero subscriptions.',
+        floatTag: '2026 Cinema & Series',
+        nextLabel: 'Next Scene · Movies'
+      },
+      {
+        fig: 'FIG.02 · MOVIES',
+        code: 'ZAQZOUKA · 02 / 05',
+        label: 'Movies',
+        headline: 'Latest <span class="accent-gold">films</span> ready to stream.',
+        subtitle: 'Browse freshly released Arabic and subtitled global features with multi source mirrors and flexible quality playback.',
+        floatTag: 'Clean 2026 Film Vault',
+        nextLabel: 'Next Scene · Series'
+      },
+      {
+        fig: 'FIG.03 · SERIES',
+        code: 'ZAQZOUKA · 03 / 05',
+        label: 'Series',
+        headline: 'Complete <span class="accent-terracotta">seasons</span> sorted cleanly.',
+        subtitle: 'Arabic, Turkish, and Asian drama seasons aggregated accurately in order so no episode goes missing.',
+        floatTag: 'Arabic · Turkish · Asian',
+        nextLabel: 'Next Scene · Recaps'
+      },
+      {
+        fig: 'FIG.04 · RECAPS',
+        code: 'ZAQZOUKA · 04 / 05',
+        label: 'Recaps',
+        headline: 'Story <span class="accent-gold">recaps</span> in seconds.',
+        subtitle: 'Curated hundreds of fast cinema recap channels indexed with instant search and direct ZAG Player playback.',
+        floatTag: '670+ Curated Recaps',
+        nextLabel: 'Next Scene · Football'
+      },
+      {
+        fig: 'FIG.05 · SPORTS',
+        code: 'ZAQZOUKA · 05 / 05',
+        label: 'Live Sports',
+        headline: 'Live football <span class="accent-terracotta">one tap</span> away.',
+        subtitle: 'Daily match fixtures, live channel status, Arabic commentary info, and crisp stable playback.',
+        floatTag: 'Daily Live Matches Hub',
+        nextLabel: 'Back to Home'
+      }
+    ]
+  };
+
+  // ── Complete Bilingual Dictionary ──
+  const I18N = {
+    ar: {
+      skipLink: 'تخطي إلى المحتوى الرئيسي',
+      navCta: 'تحميل التطبيق',
+      heroPrimaryCta: 'تحميل زقزوقة TV ومشغل زاغ',
+      heroBadge: 'عرض تفاعلي حي · واجهة زقزوقة 2026',
+      wordmarkText: 'زقزوقة',
+      sc1Label: 'الرئيسية',
+      sc1Headline: 'واجهة <span class="accent-terracotta">دافئة</span> ومتعة فورية.',
+      sc1Sub: 'اكتشف مكتبة الأفلام والمسلسلات والملخصات وبثوث الكورة بتصفح سريع في ألوان زقزوقة المريحة للعين دون اشتراكات أو نوافذ مزعجة.',
+      sc1Tag: 'أفلام ومسلسلات 2026',
+      dlStartTitle: 'بدأ تحضير التطبيق والمشغل على جهازك',
+      dlStartSub: 'ثبّت تطبيق زقزوقة TV أولاً ثم مشغل زاغ عند اكتمال التنزيل.',
+      separateLabel: 'تحميل مباشر:',
+      appOnly: 'تطبيق زقزوقة TV فقط',
+      playerOnly: 'مشغل زاغ فقط',
+      faqKicker: 'إجابات شاملة',
+      faqTitle: 'الأسئلة الشائعة',
+      q1: 'لماذا أحتاج لتثبيت تطبيق زقزوقة TV ومشغل زاغ بلاير معاً؟',
+      a1: 'تطبيق زقزوقة TV مخصص لتنظيم الأفلام والمسلسلات والملخصات وبثوث الكورة، بينما يعمل مشغل زاغ كمحرك مادي منفصل لفك التشفير، مما يضمن تشغيلاً سريعاً بدون بطء الهاتف.',
+      q2: 'هل يعمل التطبيق على شاشات Smart TV و TV Box؟',
+      a2: 'نعم، يعمل كلا التطبيقين على شاشات Android TV وأجهزة Fire TV Stick وصناديق TV Box مع دعم التنقل بالريموت كنترول وتشغيل الجودات حتى 4K.',
+      q3: 'ماذا أفعل عند ظهور رسالة السماح بالتثبيت من مصدر غير معروف؟',
+      a3: 'هذه خطوة أمان روتينية في أندرويد عند تحميل APK من المتصفح مباشرة. اختر الإعدادات وفعل السماح من هذا المصدر وسيكتمل التثبيت فوراً.',
+      q4: 'كيف أنقل الملفات بسرعة إلى التلفزيون الذكي؟',
+      a4: 'يمكنك فتح zaafilm.com مباشرة من متصفح التلفزيون أو تطبيق Downloader، أو مسح رمز QR وإرسال الملفات عبر تطبيق Send Files to TV.',
+      q5: 'هل يوجد أي اشتراك شهري أو تسجيل حساب؟',
+      a5: 'لا، المنظومة مجانية بالكامل ولا تطلب إنشاء حساب أو إدخال بريد إلكتروني أو بطاقة دفع، فقط ثبت التطبيقين وابدأ المشاهدة.',
+      q6: 'هل قسم بثوث الكورة يغطي المباريات المباشرة اليومية؟',
+      a6: 'نعم، يعرض قسم بثوث الكورة جدول المباريات اليومي وحالة البث الحي والقنوات الرياضية مع ملخصات الأهداف والمواجهات.',
+      q7: 'كيف أحصل على التحديثات المستقبلية بدون فقدان المفضلة؟',
+      a7: 'يفحص زقزوقة TV توفر الإصدارات الأحدث تلقائياً، وعند صدور تحديث يعرض لك نافذة تحديث مباشر من داخل التطبيق مع بقاء مفضلتك كاملة.',
+      footerCopy: 'جميع الحقوق محفوظة 2026 منظومة زقزوقة TV ومشغل زاغ بلاير.',
+      legalPrivacy: 'سياسة الخصوصية',
+      legalTerms: 'شروط الاستخدام'
+    },
+    en: {
+      skipLink: 'Skip to main content',
+      navCta: 'Download',
+      heroPrimaryCta: 'Download Zaqzouka TV & ZAG Player',
+      heroBadge: 'Interactive Showcase · Zaqzouka 2026 UI',
+      wordmarkText: 'Zaqzouka',
+      sc1Label: 'Home',
+      sc1Headline: 'Warm interface, <span class="accent-terracotta">instant</span> cinema.',
+      sc1Sub: 'Explore Arabic and global films, series seasons, recaps, and live football matches in our calm Paper Sand interface with zero subscriptions.',
+      sc1Tag: '2026 Cinema & Series',
+      dlStartTitle: 'Preparing Zaqzouka TV & ZAG Player downloads',
+      dlStartSub: 'Install Zaqzouka TV first, then install ZAG Player once downloads finish.',
+      separateLabel: 'Direct APK:',
+      appOnly: 'Zaqzouka TV Only',
+      playerOnly: 'ZAG Player Only',
+      faqKicker: 'Clear Answers',
+      faqTitle: 'Frequently Asked Questions',
+      q1: 'Why install Zaqzouka TV together with ZAG Player?',
+      a1: 'Zaqzouka TV focuses on catalog browsing across movies, series, recaps, and football while ZAG Player operates as a lightweight hardware decoder for smooth streams without lag.',
+      q2: 'Does the suite run on Smart TVs and TV Boxes?',
+      a2: 'Yes. Both apps work on Android TV, Fire TV Stick, and TV Boxes with full remote navigation up to 4K.',
+      q3: 'What if Android prompts to allow unknown sources?',
+      a3: 'That is standard Android security for APKs outside Play Store. Open Settings on the prompt and allow this browser to continue installation.',
+      q4: 'How do I send APK files quickly to a TV?',
+      a4: 'Open zaafilm.com directly in your TV browser or Downloader app, or scan the QR dialog and transfer via Send Files to TV.',
+      q5: 'Is an account or monthly subscription required?',
+      a5: 'No. Both packages are completely free with zero signup, email entry, or subscriptions.',
+      q6: 'Does the Football hub cover daily matches live?',
+      a6: 'Yes. The Football tab lists daily matches, live channel links, commentary info, and goal recaps.',
+      q7: 'How do future updates arrive without losing favorites?',
+      a7: 'Zaqzouka TV checks for updates automatically and installs cleanly while preserving all saved favorites.',
+      footerCopy: 'All rights reserved 2026 Zaqzouka TV Ecosystem & ZAG Player.',
+      legalPrivacy: 'Privacy Policy',
+      legalTerms: 'Terms of Use'
+    }
+  };
+
+  const LEGAL_CONTENT = {
+    ar: {
+      privacyTitle: 'سياسة الخصوصية',
+      privacyBody: '<p>نحترم خصوصيتك بالكامل في موقع ZaaFilm ومنظومة زقزوقة TV. لا يتطلب استخدام التطبيق أو تحميله إنشاء حساب أو جمع أي بيانات شخصية.</p><p>نستخدم مؤشرات تقنية مجهولة الهوية فقط لقياس استقرار روابط التحميل دون تتبع هويتك.</p>',
+      termsTitle: 'شروط الاستخدام',
+      termsBody: '<p>حزم زقزوقة TV ومشغل زاغ بلاير متوفرة للاستخدام الشخصي غير التجاري عبر الروابط الرسمية على zaafilm.com.</p><p>يُمنع إعادة تعديل ملفات الـ APK أو توزيعها بنسخ معدلة عبر مصادر غير رسمية.</p>'
+    },
+    en: {
+      privacyTitle: 'Privacy Policy',
+      privacyBody: '<p>ZaaFilm and Zaqzouka TV respect your privacy completely. Neither downloading nor opening the suite collects personal registration data.</p><p>Only anonymous mirror reliability telemetry is recorded without user identity tracking.</p>',
+      termsTitle: 'Terms of Use',
+      termsBody: '<p>Zaqzouka TV and ZAG Player builds are licensed free for personal non commercial viewing strictly via zaafilm.com.</p><p>Repackaging or altering official APK binaries is prohibited.</p>'
+    }
+  };
+
+  let currentLang = 'ar';
+  let activeSceneIdx = 0;
+  let isAutoplayOn = true;
+  let renderSceneFn = null;
+
+  const prefersReducedMotion = () =>
+    _0xroot.matchMedia && _0xroot.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
   _0xdoc.addEventListener('DOMContentLoaded', function() {
-    _0xfaq();
-    _0xscroll();
-    _0xlang();
-    _0xqr();
+    initDustCanvas();
+    initMotionTheater();
+    initNavigationAndDrawer();
+    initScrollRevealsAndParallax();
+    initFaqAccordion();
+    initLanguageSwitcher();
+    initBundleDownloader();
+    initModals();
+    initTelemetry();
   });
 
-  // FAQ
-  function _0xfaq() {
-    const _0xitems = _0xdoc.querySelectorAll('.faq-item');
-    _0xitems.forEach(_0xitem => {
-      const _0xq = _0xitem.querySelector('.faq-question');
-      const _0xa = _0xitem.querySelector('.faq-answer');
-      if (!_0xq || !_0xa) return;
+  // ── 1. Kinetic Portrait Phone Choreography Engine ──
+  function initMotionTheater() {
+    const stageFrame = _0xdoc.getElementById('motion-stage-frame');
+    const phoneRig = _0xdoc.getElementById('phone-rig');
+    const floorShadow = _0xdoc.getElementById('phone-floor-shadow');
+    const glintEl = _0xdoc.getElementById('screen-glint');
+    const slides = _0xdoc.querySelectorAll('.phone-screen-slide');
+    const codeBadge = _0xdoc.getElementById('scene-code-badge');
+    const activeLabel = _0xdoc.getElementById('scene-active-label');
+    const copyStage = _0xdoc.getElementById('scene-copy-stage');
+    const headlineEl = _0xdoc.getElementById('scene-headline');
+    const subtitleEl = _0xdoc.getElementById('scene-subtitle');
+    const floatTag = _0xdoc.getElementById('phone-float-tag');
+    const floatTagText = _0xdoc.getElementById('float-tag-text');
+    const wordmarkEl = _0xdoc.querySelector('.zaq-wordmark');
 
-      _0xq.addEventListener('click', () => {
-        const _0xopen = _0xitem.classList.contains('active');
-        _0xitems.forEach(_0xi => {
-          _0xi.classList.remove('active');
-          const _0xans = _0xi.querySelector('.faq-answer');
-          if (_0xans) _0xans.style.maxHeight = null;
+    if (!phoneRig || !slides.length) return;
+
+    let timer = null;
+    const INTERVAL_MS = 2800;
+    const total = slides.length;
+
+    function applyScene(idx, animate) {
+      const prevIdx = activeSceneIdx;
+      activeSceneIdx = ((idx % total) + total) % total;
+      const scenes = MOTION_SCENES[currentLang] || MOTION_SCENES.ar;
+      const scene = scenes[activeSceneIdx];
+
+      if (stageFrame) stageFrame.setAttribute('data-active-scene', String(activeSceneIdx));
+      if (floorShadow) floorShadow.setAttribute('data-scene', String(activeSceneIdx));
+
+      // Expressive Left/Right Swing Choreography + Glass Specular Glint
+      if (animate && !prefersReducedMotion()) {
+        phoneRig.classList.add('is-gliding');
+        setTimeout(() => {
+          phoneRig.setAttribute('data-scene', String(activeSceneIdx));
+          phoneRig.classList.remove('is-gliding');
+        }, 120);
+
+        if (glintEl) {
+          glintEl.classList.remove('is-flashing');
+          void glintEl.offsetWidth;
+          glintEl.classList.add('is-flashing');
+        }
+
+        if (wordmarkEl) {
+          wordmarkEl.classList.add('is-pulsing');
+          setTimeout(() => wordmarkEl.classList.remove('is-pulsing'), 480);
+        }
+      } else {
+        phoneRig.setAttribute('data-scene', String(activeSceneIdx));
+      }
+
+      // Cross-slide upright 1080x2400 portrait iPhone screens
+      slides.forEach((img, i) => {
+        img.classList.remove('is-exiting');
+        if (i === prevIdx && prevIdx !== activeSceneIdx) {
+          img.classList.remove('is-active');
+          img.classList.add('is-exiting');
+          setTimeout(() => img.classList.remove('is-exiting'), 560);
+        } else if (i === activeSceneIdx) {
+          img.classList.add('is-active');
+        } else {
+          img.classList.remove('is-active');
+        }
+      });
+
+      if (codeBadge) codeBadge.textContent = scene.code;
+      if (activeLabel) activeLabel.textContent = scene.label;
+
+      if (floatTag && floatTagText) {
+        if (animate && !prefersReducedMotion()) {
+          floatTag.classList.add('is-pop');
+          setTimeout(() => {
+            floatTagText.textContent = scene.floatTag;
+            floatTag.classList.remove('is-pop');
+          }, 160);
+        } else {
+          floatTagText.textContent = scene.floatTag;
+        }
+      }
+
+      if (copyStage && headlineEl && subtitleEl) {
+        if (animate && !prefersReducedMotion()) {
+          copyStage.classList.add('is-switching');
+          setTimeout(() => {
+            headlineEl.innerHTML = scene.headline;
+            subtitleEl.textContent = scene.subtitle;
+            copyStage.classList.remove('is-switching');
+          }, 170);
+        } else {
+          headlineEl.innerHTML = scene.headline;
+          subtitleEl.textContent = scene.subtitle;
+        }
+      }
+    }
+
+    function scheduleNext() {
+      clearTimeout(timer);
+      if (!isAutoplayOn || prefersReducedMotion()) return;
+      timer = setTimeout(() => {
+        applyScene(activeSceneIdx + 1, true);
+        scheduleNext();
+      }, INTERVAL_MS);
+    }
+
+    // Tap or Enter/Space on iPhone rig advances immediately
+    phoneRig.addEventListener('click', () => {
+      applyScene(activeSceneIdx + 1, true);
+      scheduleNext();
+    });
+    phoneRig.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        applyScene(activeSceneIdx + 1, true);
+        scheduleNext();
+      }
+    });
+
+    // Expose scene refresh for language switcher
+    renderSceneFn = function() {
+      applyScene(activeSceneIdx, false);
+    };
+
+    if (prefersReducedMotion()) {
+      isAutoplayOn = false;
+    }
+
+    applyScene(0, false);
+    if (isAutoplayOn) scheduleNext();
+
+    _0xdoc.addEventListener('visibilitychange', () => {
+      if (_0xdoc.hidden) {
+        clearTimeout(timer);
+      } else if (isAutoplayOn) {
+        scheduleNext();
+      }
+    });
+  }
+
+  // ── 2. Ambient Cinema Gold & Paper Dust Canvas ──
+  function initDustCanvas() {
+    const canvas = _0xdoc.getElementById('cinema-dust-canvas');
+    if (!canvas || prefersReducedMotion()) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let width = 0;
+    let height = 0;
+    let rafId = null;
+    const motes = [];
+    const MOTE_COUNT = 32;
+
+    function resize() {
+      const dpr = Math.min(_0xroot.devicePixelRatio || 1, 1.5);
+      width = _0xroot.innerWidth;
+      height = _0xroot.innerHeight;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function seed() {
+      motes.length = 0;
+      for (let i = 0; i < MOTE_COUNT; i++) {
+        motes.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          r: 0.9 + Math.random() * 1.8,
+          vx: -0.18 - Math.random() * 0.25,
+          vy: -0.05 + Math.random() * 0.14,
+          a: 0.14 + Math.random() * 0.34,
+          gold: i % 2 === 0
         });
-        if (!_0xopen) {
-          _0xitem.classList.add('active');
-          _0xa.style.maxHeight = _0xa.scrollHeight + 'px';
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, width, height);
+      for (let i = 0; i < motes.length; i++) {
+        const m = motes[i];
+        m.x += m.vx;
+        m.y += m.vy;
+        if (m.x < -10) m.x = width + 10;
+        if (m.y < -10) m.y = height + 10;
+        if (m.y > height + 10) m.y = -10;
+
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
+        ctx.fillStyle = m.gold
+          ? `rgba(229, 169, 88, ${m.a})`
+          : `rgba(185, 78, 60, ${m.a * 0.85})`;
+        ctx.fill();
+      }
+      rafId = _0xroot.requestAnimationFrame(draw);
+    }
+
+    resize();
+    seed();
+    draw();
+
+    let resizeTimer = null;
+    _0xroot.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resize();
+        seed();
+      }, 160);
+    });
+
+    _0xdoc.addEventListener('visibilitychange', () => {
+      if (_0xdoc.hidden && rafId) {
+        _0xroot.cancelAnimationFrame(rafId);
+        rafId = null;
+      } else if (!_0xdoc.hidden && !rafId) {
+        draw();
+      }
+    });
+  }
+
+  // ── 3. Mobile Bottom Bar Visibility After Hero ──
+  function initNavigationAndDrawer() {
+    const mobileBar = _0xdoc.getElementById('mobile-bottom-bar');
+    const hero = _0xdoc.getElementById('hero');
+
+    if (hero && mobileBar && 'IntersectionObserver' in _0xroot) {
+      const barObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          const pastHero = !entry.isIntersecting && entry.boundingClientRect.top < 0;
+          if (pastHero) {
+            mobileBar.hidden = false;
+            _0xroot.requestAnimationFrame(() => mobileBar.classList.add('is-shown'));
+          } else {
+            mobileBar.classList.remove('is-shown');
+          }
+        });
+      }, { threshold: 0.08 });
+      barObserver.observe(hero);
+    }
+  }
+
+  // ── 4. Single rAF-Throttled Scroll Parallax & IntersectionObserver Reveals ──
+  function initScrollRevealsAndParallax() {
+    const revealEls = _0xdoc.querySelectorAll('.reveal-section');
+    if ('IntersectionObserver' in _0xroot && !prefersReducedMotion()) {
+      const obs = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-revealed');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+      revealEls.forEach(el => obs.observe(el));
+    } else {
+      revealEls.forEach(el => el.classList.add('is-revealed'));
+    }
+
+    const header = _0xdoc.getElementById('site-header');
+    const hero = _0xdoc.getElementById('hero');
+    const artImg = _0xdoc.getElementById('hero-art-img');
+    const reduced = prefersReducedMotion();
+    let ticking = false;
+
+    function updateFrame() {
+      ticking = false;
+      const y = _0xroot.scrollY || 0;
+      if (header) header.classList.toggle('scrolled', y > 40);
+
+      if (artImg && hero && !reduced) {
+        const heroH = hero.offsetHeight || 720;
+        if (y <= heroH + 120) {
+          const shift = Math.min(36, (y / heroH) * 36);
+          artImg.style.transform = `translate3d(0, ${-shift.toFixed(1)}px, 0) scaleX(-1) scale(1.05)`;
+        }
+      }
+    }
+
+    _0xroot.addEventListener('scroll', () => {
+      if (!ticking) {
+        ticking = true;
+        _0xroot.requestAnimationFrame(updateFrame);
+      }
+    }, { passive: true });
+
+    updateFrame();
+  }
+
+  // ── 5. FAQ Accordion ──
+  function initFaqAccordion() {
+    const items = _0xdoc.querySelectorAll('.faq-item');
+    if (!items.length) return;
+
+    items.forEach(item => {
+      const trigger = item.querySelector('.faq-trigger');
+      const panel = item.querySelector('.faq-panel');
+      if (!trigger || !panel) return;
+
+      trigger.addEventListener('click', () => {
+        const wasOpen = item.classList.contains('is-open');
+
+        items.forEach(other => {
+          const ot = other.querySelector('.faq-trigger');
+          const op = other.querySelector('.faq-panel');
+          other.classList.remove('is-open');
+          if (ot) ot.setAttribute('aria-expanded', 'false');
+          if (op) op.hidden = true;
+        });
+
+        if (!wasOpen) {
+          panel.hidden = false;
+          trigger.setAttribute('aria-expanded', 'true');
+          _0xroot.requestAnimationFrame(() => item.classList.add('is-open'));
         }
       });
     });
   }
 
-  // Scroll
-  function _0xscroll() {
-    const _0xhdr = _0xdoc.querySelector('.site-header');
-    const _0xmbar = _0xdoc.querySelector('.mobile-bottom-bar');
-    const _0xhero = _0xdoc.querySelector('.hero-section');
+  // ── 7. Bilingual Language Switcher ──
+  function initLanguageSwitcher() {
+    const btn = _0xdoc.getElementById('lang-switch-btn');
+    if (!btn) return;
 
-    _0xroot.addEventListener('scroll', () => {
-      const _0xpos = _0xroot.scrollY;
-      if (_0xhdr) {
-        if (_0xpos > 40) _0xhdr.classList.add('scrolled');
-        else _0xhdr.classList.remove('scrolled');
+    btn.addEventListener('click', () => {
+      currentLang = currentLang === 'ar' ? 'en' : 'ar';
+      const dict = I18N[currentLang];
+      const isAr = currentLang === 'ar';
+
+      _0xdoc.documentElement.lang = currentLang;
+      _0xdoc.documentElement.dir = isAr ? 'rtl' : 'ltr';
+      _0xdoc.body.setAttribute('dir', isAr ? 'rtl' : 'ltr');
+
+      const lbl = btn.querySelector('.lang-label');
+      if (lbl) lbl.textContent = isAr ? 'EN' : 'عربي';
+
+      _0xdoc.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key]) el.innerHTML = dict[key];
+      });
+
+      if (typeof renderSceneFn === 'function') {
+        renderSceneFn();
       }
-      if (_0xmbar && _0xhero) {
-        const _0xbottom = _0xhero.offsetTop + _0xhero.offsetHeight;
-        _0xmbar.style.display = (_0xpos > _0xbottom - 180) ? 'grid' : 'none';
+      if (typeof _0xroot.__rebuildTagline === 'function' && dict.taglineText) {
+        _0xroot.__rebuildTagline(dict.taglineText);
       }
     });
   }
 
-  // Language Switcher
-  const _0xdict = {
-    ar: {
-      brandTag: 'منظومة البث السينمائي المتكاملة',
-      navHome: 'الرئيسية',
-      navApps: 'التطبيقات',
-      navHowTo: 'طريقة التثبيت',
-      navFeatures: 'المميزات',
-      navFaq: 'الأسئلة الشائعة',
-      btnFastDownload: 'تحميل مباشر',
-      heroBadge: 'الإصدار المعتمد 2026 — آمن 100% وخالٍ من الإعلانات',
-      heroTitle: 'عالمك الترفيهي بدون حدود مع <span class="highlight-brick">تطبيق زقزوقة</span> ومحرك <span class="highlight-gold">زاغ بلاير</span>',
-      heroDesc: 'منظومة متكاملة لمشاهدة آلاف الأفلام والمسلسلات الحصرية والقنوات التلفزيونية والرياضية الحية بأعلى جودة وسيرفرات فائقة السرعة بدون أي تقطيع أو اشتراكات.',
-      heroBtnBundle: 'تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل)',
-      heroBtnBundleSub: 'نقرة واحدة لتحميل تطبيق زقزوقة + مشغل زاغ معاً (58 MB)',
-      bundleDownloading: 'جاري تنزيل التطبيق والمشغل معاً... بعد اكتمال التنزيل قم بتثبيت كلا الملفين ⚡',
-      separateDownload: 'أو تحميل منفصل:',
-      appOnly: 'تطبيق زقزوقة فقط',
-      playerOnly: 'مشغل زاغ فقط',
-      mobileBtnBundle: 'تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل) ⚡',
-      heroBtnApp: 'تحميل تطبيق زقزوقة TV',
-      heroBtnAppSub: 'v1.0.85 · حزمة APK مباشرة (53.6 MB)',
-      heroBtnPlayer: 'تحميل مشغل زاغ ZAG Player',
-      heroBtnPlayerSub: 'v1.1.37 · المحرك الأساسي (4.8 MB)',
-      trustVerified: 'مفحوص ونظيف 100%',
-      trustSmartTv: 'يدعم الهواتف وشاشات Smart TV',
-      trustNoBuffer: 'تقنية مانع التقطيع',
-      tabHome: 'الرئيسية',
-      tabSeries: 'المسلسلات والمواسم',
-      tabLive: 'البث المباشر',
-      appsTag: 'التحميل المباشر',
-      appsTitle: 'حمّل التطبيقين معاً لتجربة سينمائية كاملة',
-      appsDesc: 'تطبيق زقزوقة يمنحك مكتبة الأفلام والمسلسلات والبحث الذكي، ومشغل زاغ يتولى فك التشفير والتشغيل الفوري بدون أي استهلاك للموارد.',
-      app1Role: 'التطبيق الرئيسي',
-      app1Name: 'تطبيق زقزوقة TV الرسمي',
-      app1Desc: 'تصفح أكبر مكتبة مسلسلات وأفلام عربية وأجنبية بجودة فائقة وبثوث رياضية مباشرة مع إمكانية البحث والترجمة الفورية وتحديد قوائم المشاهدة المفضلة.',
-      app1Req: 'أندرويد 6.0 أو أحدث (هاتف أو TV)',
-      app1Pkg: 'com.madar.madar_flutter',
-      btnDownloadApp: 'تحميل تطبيق زقزوقة TV',
-      btnQrApp: 'رمز QR',
-      app2Role: 'محرك التشغيل وفك التشفير',
-      app2Name: 'مشغل زاغ بلاير ZAG Player',
-      app2Desc: 'المحرك البرمجي المسؤول عن تشغيل الفيديوهات وفك التشفير بأعلى كفاءة لضمان بث متواصل بدون تقطيع وبأقل استهلاك لذاكرة الجهاز والإنترنت.',
-      app2Req: 'أندرويد 5.0 أو أحدث (تلقائي التكامل)',
-      app2Pkg: 'com.madar.player',
-      btnDownloadPlayer: 'تحميل مشغل زاغ ZAG Player',
-      btnQrPlayer: 'رمز QR',
-      howTag: 'دليل الاستخدام',
-      howTitle: 'خطوات التشغيل في أقل من دقيقتين',
-      howDesc: 'اتبع هذه الخطوات البسيطة لتثبيت المنظومة بالكامل والبدء بالمشاهدة فوراً بدون تعقيد.',
-      step1Num: '01',
-      step1Title: 'تنزيل حزمتي APK',
-      step1Desc: 'اضغط على أزرار التحميل أعلاه لتنزيل تطبيقي (زقزوقة TV) و (زاغ بلاير) مباشرة إلى جهازك.',
-      step2Num: '02',
-      step2Title: 'السماح بالمصادر غير المعروفة',
-      step2Desc: 'عند فتح ملف الـ APK، اختر السماح بتثبيت التطبيقات من هذا المتصفح للمتابعة بكل أمان.',
-      step3Num: '03',
-      step3Title: 'تثبيت التطبيقين معاً',
-      step3Desc: 'قم بتثبيت التطبيق الرئيسي أولاً ثم مشغل زاغ بلاير ليكتمل اندماج محرك المشاهدة.',
-      step4Num: '04',
-      step4Title: 'فتح زقزوقة والاستمتاع',
-      step4Desc: 'شغّل تطبيق زقزوقة TV، وسيتولى التطبيق الاتصال تلقائياً بمشغل زاغ لبدء العرض فوراً.',
-      featTag: 'لماذا زقزوقة TV؟',
-      featTitle: 'أقوى المزايا المصممة لعشاق السينما',
-      f1Title: 'سيرفرات فائقة السرعة',
-      f1Desc: 'خوادم مجهزة بتقنيات CDN لضمان تشغيل الفيديو في أجزاء من الثانية دون أي انتظار.',
-      f2Title: 'بث 4K و Full HD',
-      f2Desc: 'صورة نقية وصوت محيطي نقي مع خيارات جودة متعددة تناسب كل سرعات الإنترنت.',
-      f3Title: 'دعم كامل لشاشات التلفزيون',
-      f3Desc: 'واجهة مصممة خصيصاً للتنقل السلس بالريموت كنترول على شاشات Android TV و TV Box.',
-      f4Title: 'تحديثات مستمرة وفورية',
-      f4Desc: 'إضافة الحلقات والأفلام الجديدة لحظة بلحظة فور عرضها عالمياً مع سيرفرات بديلة دائماً.',
-      f5Title: 'بدون إعلانات مزعجة',
-      f5Desc: 'تجربة مشاهدة صافية ومريحة خالية تماماً من النوافذ المنبثقة والإعلانات الإجبارية.',
-      f6Title: 'مجاني بالكامل',
-      f6Desc: 'بدون أي رسوم اشتراك، وبدون أي باقات مدفوعة، ومتاح لجميع أجهزتك بلا قيود.',
-      faqTag: 'الأسئلة الشائعة',
-      faqTitle: 'إجابات على أهم الاستفسارات',
-      q1: 'لماذا أحتاج لتثبيت تطبيقين (زقزوقة وزاغ)؟',
-      a1: 'تطبيق زقزوقة TV هو واجهة المكتبة والبحث واختيار الحلقات، بينما زاغ بلاير هو المحرك المادي المخصص لفك تشفير الفيديو دون استهلاك الذاكرة. فصلهما يمنحك سرعة استثنائية وخفة لا مثيل لها.',
-      q2: 'هل يعمل التطبيق على أجهزة التلفزيون و TV Box؟',
-      a2: 'نعم، التطبيقان متوافقان بنسبة 100% مع جميع شاشات التلفزيون الذكية التي تعمل بنظام Android TV وأجهزة Fire TV مع دعم كامل للريموت كنترول.',
-      q3: 'ماذا أفعل إذا ظهر تحذير أمني عند التثبيت؟',
-      a3: 'هذا إجراء روتيني طبيعي من أندرويد عند تثبيت تطبيقات من خارج متجر جوجل بلاي. التطبيقات آمنة ومفحوصة تماماً، فقط اضغط على الإعدادات ثم اسمح بالتثبيت.',
-      q4: 'كيف يمكنني تحديث التطبيق مستقبلاً؟',
-      a4: 'يحتوي تطبيق زقزوقة على نظام تحديث داخلي ذكي ينبهك فور صدور أي إصدار جديد، ويمكنك التحديث بنقرة واحدة دون أن تفقد أي من مفضلاتك.',
-      footerCopy: 'جميع الحقوق محفوظة © 2026 شبكة زقزوقة TV ومشغل زاغ الرسمي.',
-      qrTitle: 'امسح رمز QR للتحميل السريع',
-      qrDesc: 'امسح هذا الرمز بكاميرا هاتفك أو شاشتك الذكية لبدء التحميل المباشر فوراً:',
-      mobileBtnApp: 'تحميل تطبيق زقزوقة',
-      mobileBtnPlayer: 'مشغل زاغ بلاير'
-    },
-    en: {
-      brandTag: 'All-in-One Cinematic Streaming',
-      navHome: 'Home',
-      navApps: 'Apps',
-      navHowTo: 'How to Install',
-      navFeatures: 'Features',
-      navFaq: 'FAQ',
-      btnFastDownload: 'Direct Download',
-      heroBadge: 'Verified 2026 Edition — 100% Safe & Ad-Free',
-      heroTitle: 'Limitless Entertainment with <span class="highlight-brick">Zaqzouka TV</span> & <span class="highlight-gold">ZAG Player</span> Engine',
-      heroDesc: 'All-in-one ecosystem for thousands of exclusive movies, TV shows, and live sports in pristine 4K streaming with zero lag or subscriptions.',
-      heroBtnBundle: 'Download & Install Full Ecosystem (App + Player)',
-      heroBtnBundleSub: 'One-click download for Zaqzouka TV + ZAG Player together (58 MB)',
-      bundleDownloading: 'Downloading both apps simultaneously... Please install both files after download ⚡',
-      separateDownload: 'Or individual download:',
-      appOnly: 'Zaqzouka TV Only',
-      playerOnly: 'ZAG Player Only',
-      mobileBtnBundle: 'Download Full Ecosystem (App + Player) ⚡',
-      heroBtnApp: 'Download Zaqzouka TV App',
-      heroBtnAppSub: 'v1.0.85 · Direct APK (53.6 MB)',
-      heroBtnPlayer: 'Download ZAG Player Engine',
-      heroBtnPlayerSub: 'v1.1.37 · Core Engine (4.8 MB)',
-      trustVerified: '100% Verified & Clean',
-      trustSmartTv: 'Smart TV & Android Box Ready',
-      trustNoBuffer: 'Anti-Buffering Engine',
-      tabHome: 'Home',
-      tabSeries: 'Series & Seasons',
-      tabLive: 'Live Channels',
-      appsTag: 'Direct Downloads',
-      appsTitle: 'Download Both Apps for Complete Experience',
-      appsDesc: 'Zaqzouka TV handles catalog browsing and smart search, while ZAG Player manages instant hardware video decoding with zero bloat.',
-      app1Role: 'Primary Streaming App',
-      app1Name: 'Zaqzouka TV Official App',
-      app1Desc: 'Browse Arabic and global movies, latest series, and sports streams with instant subtitle selection and personalized watchlists.',
-      app1Req: 'Android 6.0+ (Phone & Smart TV)',
-      app1Pkg: 'com.madar.madar_flutter',
-      btnDownloadApp: 'Download Zaqzouka TV',
-      btnQrApp: 'QR Code',
-      app2Role: 'Hardware Decoder Engine',
-      app2Name: 'ZAG Player Engine',
-      app2Desc: 'Ultra-lightweight engine handling video decoding with maximum hardware acceleration for zero buffering and minimal memory usage.',
-      app2Req: 'Android 5.0+ (Auto-Integrated)',
-      app2Pkg: 'com.madar.player',
-      btnDownloadPlayer: 'Download ZAG Player',
-      btnQrPlayer: 'QR Code',
-      howTag: 'Quick Start Guide',
-      howTitle: 'Get Started in Under Two Minutes',
-      howDesc: 'Follow these simple steps to install the full suite and begin streaming immediately.',
-      step1Num: '01',
-      step1Title: 'Download Both APK Packages',
-      step1Desc: 'Tap the direct download buttons above to get both Zaqzouka TV and ZAG Player onto your device.',
-      step2Num: '02',
-      step2Title: 'Allow Unknown Sources',
-      step2Desc: 'When launching the APK file, toggle permission to install from this browser source to proceed safely.',
-      step3Num: '03',
-      step3Title: 'Install Both Applications',
-      step3Desc: 'Complete installation for Zaqzouka TV first, then install ZAG Player for seamless engine integration.',
-      step4Num: '04',
-      step4Title: 'Launch Zaqzouka & Enjoy',
-      step4Desc: 'Open Zaqzouka TV; it connects automatically to ZAG Player to begin instant playback.',
-      featTag: 'Why Zaqzouka TV?',
-      featTitle: 'Engineered for Pure Cinema Performance',
-      f1Title: 'Ultra-Fast Servers',
-      f1Desc: 'Smart CDN edge caching ensures instant video playback with zero wait time.',
-      f2Title: '4K & Full HD Streams',
-      f2Desc: 'Crystal clear picture and surround audio with auto and manual bitrate options.',
-      f3Title: 'Full Android TV Compatibility',
-      f3Desc: 'Intuitive 10-foot interface navigation designed specifically for TV remotes.',
-      f4Title: 'Instant Content Updates',
-      f4Desc: 'New series episodes and blockbuster releases synced immediately upon global debut.',
-      f5Title: '100% Ad-Free Experience',
-      f5Desc: 'No annoying popups or forced banners, keeping your viewing experience undisturbed.',
-      f6Title: 'Free Forever',
-      f6Desc: 'No monthly subscriptions, no hidden paywalls, and no device quantity restrictions.',
-      faqTag: 'FAQ',
-      faqTitle: 'Frequently Asked Questions',
-      q1: 'Why do I need to install two apps (Zaqzouka TV and ZAG Player)?',
-      a1: 'Zaqzouka TV manages content discovery, catalog browsing, and episodes navigation. ZAG Player handles low-level hardware decoding. Decoupling them keeps the app extremely fast and responsive without memory bloat.',
-      q2: 'Does it work on Android TV and Fire TV?',
-      a2: 'Yes, both applications are fully tested and compatible with Android TV, TV boxes, and smart TVs with full remote navigation.',
-      q3: 'What if Android warns about an unknown source?',
-      a3: 'This is standard Android security for apps installed outside Google Play. Simply tap Settings and toggle Allow from this source. All binaries are verified and clean.',
-      q4: 'How do updates work?',
-      a4: 'Zaqzouka TV includes an in-app update detector that notifies you whenever a new build is released and updates with a single tap without resetting your favorites.',
-      footerCopy: 'All rights reserved © 2026 Zaqzouka TV Network & ZAG Player Official.',
-      qrTitle: 'Scan QR Code for Fast Download',
-      qrDesc: 'Scan this code with your phone camera or TV to start direct download:',
-      mobileBtnApp: 'Download Zaqzouka TV',
-      mobileBtnPlayer: 'ZAG Player'
-    }
-  };
+  // ── 8. Unified Master Downloader ──
+  function initBundleDownloader() {
+    const progressCard = _0xdoc.getElementById('download-progress-card');
+    const skelRow = _0xdoc.getElementById('progress-skeleton');
+    const readyRow = _0xdoc.getElementById('progress-ready');
 
-  function _0xlang() {
-    const _0xbtn = _0xdoc.getElementById('lang-switch-btn');
-    if (!_0xbtn) return;
-    let _0xcurr = 'ar';
-    _0xbtn.addEventListener('click', () => {
-      _0xcurr = _0xcurr === 'ar' ? 'en' : 'ar';
-      _0xdoc.documentElement.lang = _0xcurr;
-      _0xdoc.documentElement.dir = _0xcurr === 'ar' ? 'rtl' : 'ltr';
-      _0xdoc.body.setAttribute('dir', _0xcurr === 'ar' ? 'rtl' : 'ltr');
-      const _0xlbl = _0xbtn.querySelector('.lang-label');
-      if (_0xlbl) _0xlbl.textContent = _0xcurr === 'ar' ? 'EN' : 'عربي';
-      const _0xd = _0xdict[_0xcurr];
-      _0xdoc.querySelectorAll('[data-i18n]').forEach(_0xel => {
-        const _0xk = _0xel.getAttribute('data-i18n');
-        if (_0xd[_0xk]) _0xel.innerHTML = _0xd[_0xk];
-      });
-      _0xdoc.querySelectorAll('.faq-item.active .faq-answer').forEach(_0xans => {
-        _0xans.style.maxHeight = _0xans.scrollHeight + 'px';
-      });
+    function triggerDownload(url, filename) {
+      const a = _0xdoc.createElement('a');
+      a.href = url;
+      a.setAttribute('download', filename);
+      a.style.display = 'none';
+      _0xdoc.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try { _0xdoc.body.removeChild(a); } catch (_) {}
+      }, 400);
+    }
+
+    function handleBundleClick(e) {
+      if (e) e.preventDefault();
+
+      if (progressCard) {
+        progressCard.hidden = false;
+        if (skelRow) skelRow.hidden = false;
+        if (readyRow) readyRow.hidden = true;
+        setTimeout(() => {
+          if (skelRow) skelRow.hidden = true;
+          if (readyRow) readyRow.hidden = false;
+        }, 420);
+      }
+
+      const sourceBtn = e && e.currentTarget ? e.currentTarget : null;
+      if (sourceBtn && sourceBtn.id !== 'heroBundleBtn') {
+        const labelSpan = sourceBtn.querySelector('[data-i18n]');
+        if (labelSpan) {
+          const prevKey = labelSpan.getAttribute('data-i18n');
+          labelSpan.textContent = currentLang === 'ar'
+            ? 'بدأ تنزيل التطبيق والمشغل...'
+            : 'Downloading App & Player...';
+          setTimeout(() => {
+            labelSpan.textContent = I18N[currentLang][prevKey] || labelSpan.textContent;
+          }, 3200);
+        }
+      }
+
+      triggerDownload(APP_APK_URL, 'zaqzouka-1.0.86-93.apk');
+      setTimeout(() => {
+        triggerDownload(PLAYER_APK_URL, 'zag-player-1.1.37.apk');
+      }, 600);
+
+      try {
+        fetch(`${TELEMETRY_API}?route=landing/download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target: 'bundle',
+            referrer: _0xdoc.referrer || 'direct',
+            href: 'downloads/bundle'
+          }),
+          keepalive: true
+        }).catch(() => {});
+      } catch (_) {}
+    }
+
+    ['heroBundleBtn', 'mobileBundleBtn', 'navDownloadBtn'].forEach(id => {
+      const btn = _0xdoc.getElementById(id);
+      if (btn) btn.addEventListener('click', handleBundleClick);
     });
   }
 
-  // QR Modal
-  function _0xqr() {
-    const _0xm = _0xdoc.getElementById('qr-modal');
-    const _0xcbtn = _0xdoc.querySelector('.modal-close-btn');
-    const _0xqrbtns = _0xdoc.querySelectorAll('.btn-card-qr');
-    const _0xtargetLbl = _0xdoc.getElementById('qr-target-filename');
-    const _0xwrap = _0xdoc.getElementById('qr-canvas-wrapper');
-    if (!_0xm || !_0xwrap) return;
+  // ── 9. Legal Modal (Privacy & Terms) ──
+  function initModals() {
+    const legalModal = _0xdoc.getElementById('legal-modal');
+    const legalCloseBtn = _0xdoc.getElementById('legal-close-btn');
+    const legalTitle = _0xdoc.getElementById('legal-modal-title');
+    const legalBody = _0xdoc.getElementById('legal-modal-body');
 
-    function _0xrender(_0xfname) {
-      const _0xfurl = _0xroot.location.origin + _0xroot.location.pathname.replace(/\/+$/, '') + '/downloads/' + _0xfname;
-      const _0xapi = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' + encodeURIComponent(_0xfurl) + '&color=181216&bgcolor=FFFFFF';
-      _0xwrap.innerHTML = '<img src="' + _0xapi + '" alt="QR Code" width="180" height="180" style="display:block; border-radius: 8px;">';
+    function openModal(modal) {
+      if (!modal) return;
+      modal.hidden = false;
+      _0xdoc.body.style.overflow = 'hidden';
+      _0xroot.requestAnimationFrame(() => modal.classList.add('is-open'));
     }
 
-    _0xqrbtns.forEach(_0xb => {
-      _0xb.addEventListener('click', () => {
-        const _0xt = _0xb.getAttribute('data-qr-target') || 'zaqzouka-app.apk';
-        if (_0xtargetLbl) _0xtargetLbl.textContent = _0xt;
-        _0xrender(_0xt);
-        _0xm.classList.add('open');
+    function closeModal(modal) {
+      if (!modal) return;
+      modal.classList.remove('is-open');
+      _0xdoc.body.style.overflow = '';
+      setTimeout(() => {
+        if (!modal.classList.contains('is-open')) modal.hidden = true;
+      }, 320);
+    }
+
+    if (legalModal && legalTitle && legalBody) {
+      _0xdoc.querySelectorAll('.legal-modal-trigger').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const kind = btn.getAttribute('data-legal') || 'privacy';
+          const copy = LEGAL_CONTENT[currentLang] || LEGAL_CONTENT.ar;
+          legalTitle.textContent = kind === 'terms' ? copy.termsTitle : copy.privacyTitle;
+          legalBody.innerHTML = kind === 'terms' ? copy.termsBody : copy.privacyBody;
+          openModal(legalModal);
+        });
       });
-    });
 
-    if (_0xcbtn) {
-      _0xcbtn.addEventListener('click', () => _0xm.classList.remove('open'));
+      if (legalCloseBtn) legalCloseBtn.addEventListener('click', () => closeModal(legalModal));
+      legalModal.addEventListener('click', e => {
+        if (e.target === legalModal) closeModal(legalModal);
+      });
     }
-    _0xm.addEventListener('click', e => {
-      if (e.target === _0xm) _0xm.classList.remove('open');
+
+    _0xdoc.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        if (legalModal && legalModal.classList.contains('is-open')) closeModal(legalModal);
+      }
     });
   }
-  // ── Download Hub Smart Telemetry & Conversion Tracker ──
-  (function _initDownloadTelemetry() {
-    const API_ENDPOINT = 'https://dashboard-api-indol-eight.vercel.app/api/telemetry';
 
-    // 1. Detect Referrer
+  // ── 10. Download Hub Telemetry ──
+  function initTelemetry() {
     const ref = _0xdoc.referrer || '';
     let cleanRef = 'مباشر (Direct)';
     if (ref) {
       try {
-        const u = new URL(ref);
-        const host = u.hostname.toLowerCase();
+        const host = new URL(ref).hostname.toLowerCase();
         if (host.includes('google')) cleanRef = 'جوجل (Google Search)';
         else if (host.includes('t.me') || host.includes('telegram')) cleanRef = 'تيليجرام (Telegram)';
         else if (host.includes('facebook') || host.includes('fb.com')) cleanRef = 'فيسبوك (Facebook)';
@@ -439,7 +816,6 @@
       }
     }
 
-    // 2. Detect Device & Browser
     const ua = navigator.userAgent;
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
     const deviceType = isMobile ? 'موبايل' : 'كمبيوتر / مكتبي';
@@ -448,114 +824,37 @@
     else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
     else if (ua.includes('Edge')) browser = 'Edge';
 
-    // 3. Send Visit Beacon
-    const visitPayload = {
-      referrer: cleanRef,
-      rawReferrer: ref,
-      device: deviceType,
-      browser: browser,
-      screen: `${_0xroot.screen.width}x${_0xroot.screen.height}`,
-      language: navigator.language || 'ar',
-      url: _0xroot.location.href,
-    };
-
-    fetch(`${API_ENDPOINT}?route=landing/visit`, {
+    fetch(`${TELEMETRY_API}?route=landing/visit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(visitPayload),
-      keepalive: true,
+      body: JSON.stringify({
+        referrer: cleanRef,
+        rawReferrer: ref,
+        device: deviceType,
+        browser: browser,
+        screen: `${_0xroot.screen.width}x${_0xroot.screen.height}`,
+        language: navigator.language || 'ar',
+        url: _0xroot.location.href
+      }),
+      keepalive: true
     }).catch(() => {});
 
-    // 4. Track Download Button Clicks
-    _0xdoc.addEventListener('click', (e) => {
+    _0xdoc.addEventListener('click', e => {
       const link = e.target.closest('a[href*=".apk"]');
       if (!link) return;
       const href = link.getAttribute('href') || '';
-      const isPlayer = href.includes('zag-player') || href.includes('player');
-      const target = isPlayer ? 'player' : 'app';
+      const target = link.getAttribute('data-apk') || (href.includes('zag-player') ? 'player' : 'app');
 
-      fetch(`${API_ENDPOINT}?route=landing/download`, {
+      fetch(`${TELEMETRY_API}?route=landing/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           target: target,
           referrer: cleanRef,
-          href: href,
+          href: href
         }),
-        keepalive: true,
+        keepalive: true
       }).catch(() => {});
     });
-  })();
-
-  // ── Unified Master Bundle Downloader (Downloads both App & Player together) ──
-  (function initBundleDownloader() {
-    function triggerDownload(url, filename) {
-      // Use window.location for mobile compatibility with redirect chains
-      // Try anchor click first (desktop), fallback to location for mobile
-      try {
-        const a = _0xdoc.createElement('a');
-        a.href = url;
-        a.setAttribute('download', filename);
-        a.style.display = 'none';
-        _0xdoc.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          try { _0xdoc.body.removeChild(a); } catch (_) {}
-        }, 400);
-      } catch (_) {
-        _0xroot.location.href = url;
-      }
-    }
-
-    function handleBundleClick(e) {
-      if (e) e.preventDefault();
-
-      // Show status feedback
-      const msg = _0xdoc.getElementById('bundleStatusMsg');
-      if (msg) {
-        msg.style.display = 'flex';
-      }
-
-      // On mobile, navigate directly (most reliable for APK downloads)
-      const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      if (isMobile) {
-        // Mobile: navigate to app first, player opens after short delay in background
-        _0xroot.open('downloads/zaqzouka-app.apk', '_blank');
-        setTimeout(() => {
-          triggerDownload('downloads/zag-player.apk', 'zag-player.apk');
-        }, 1200);
-      } else {
-        // Desktop: trigger both anchor downloads
-        // 1. Download App APK
-        triggerDownload('downloads/zaqzouka-app.apk', 'zaqzouka-app.apk');
-
-        // 2. Download Player APK with 600ms delay to ensure browsers allow both downloads
-        setTimeout(() => {
-          triggerDownload('downloads/zag-player.apk', 'zag-player.apk');
-        }, 600);
-      }
-
-      // 3. Track telemetry for bundle
-      try {
-        fetch('https://dashboard-api-indol-eight.vercel.app/api/telemetry?route=landing/download', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            target: 'bundle',
-            referrer: _0xdoc.referrer || 'direct',
-            href: 'downloads/bundle',
-          }),
-          keepalive: true,
-        }).catch(() => {});
-      } catch (_) {}
-    }
-
-    const heroBtn = _0xdoc.getElementById('heroBundleBtn');
-    const mobileBtn = _0xdoc.getElementById('mobileBundleBtn');
-    const navBtn = _0xdoc.getElementById('navBundleBtn');
-
-    if (heroBtn) heroBtn.addEventListener('click', handleBundleClick);
-    if (mobileBtn) mobileBtn.addEventListener('click', handleBundleClick);
-    if (navBtn) navBtn.addEventListener('click', handleBundleClick);
-  })();
+  }
 })(window, document);

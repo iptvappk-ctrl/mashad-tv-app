@@ -134,7 +134,7 @@ export default async function handler(req, res) {
           enabled: b.enabled !== false,
           latestVersionCode: Number(b.latestVersionCode || b.versionCode) || 0,
           latestVersionName: String(b.latestVersionName || b.versionName || ''),
-          apkUrl: String(b.apkUrl || b.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk'),
+          apkUrl: String(b.apkUrl || b.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zaqzouka-1.0.86-93.apk'),
           releaseNotes: String(b.releaseNotes || b.notes || ''),
           forced: !!b.forced,
           updatedAt: now,
@@ -142,6 +142,47 @@ export default async function handler(req, res) {
         await db.ref('system_control/app_update').set(updateData);
         await ref.update({ updatedAt: now });
         return res.status(200).json({ ok: true, success: true, action: 'set_app_update', data: updateData });
+      }
+
+      if (action === 'broadcast_notification') {
+        const notif = (req.body && req.body.notification) || {};
+        if (!notif.title) {
+          return res.status(400).json({ error: 'Missing notification payload or title' });
+        }
+        const notifId = notif.id || now;
+        const payload = {
+          id: notifId,
+          title: String(notif.title || '').trim(),
+          body: String(notif.body || notif.message || '').trim(),
+          deepLinkType: notif.deepLinkType || (notif.targetPageUrl ? 'media_detail' : 'general'),
+          targetId: notif.targetId || '',
+          targetTitle: notif.targetTitle || '',
+          targetPageUrl: notif.targetPageUrl || '',
+          isSeries: notif.isSeries === true,
+          poster: notif.poster || '',
+          year: notif.year || '',
+          createdAt: now,
+        };
+        await db.ref('system_control/broadcast_notification').set(payload);
+        await db.ref(`broadcast_notifications/history/${notifId}`).set(payload);
+        await ref.update({ updatedAt: now });
+        return res.status(200).json({ ok: true, success: true, action: 'broadcast_notification', notification: payload });
+      }
+
+      if (action === 'set_system') {
+        const enabledVal = req.body.system_enabled !== false;
+        await ref.update({
+          system_enabled: enabledVal,
+          maintenance_mode: !enabledVal,
+          status: enabledVal ? 'active' : 'frozen',
+          message: enabledVal
+            ? 'المنظومة نشطة وتعمل بكامل طاقتها.'
+            : (message || 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.'),
+          updatedAt: now,
+          updated_at: new Date().toISOString(),
+        });
+        await db.ref('system_control/components/app_enabled').set(enabledVal);
+        return res.status(200).json({ ok: true, success: true, action: 'set_system', system_enabled: enabledVal });
       }
 
       // NEW: Toggle individual component
@@ -228,6 +269,8 @@ export default async function handler(req, res) {
       if (action === 'freeze') {
         const payload = {
           status: 'frozen',
+          system_enabled: false,
+          maintenance_mode: true,
           message: message || 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.',
           updatedAt: now,
           wipeTimestamp: 0,
@@ -276,6 +319,8 @@ export default async function handler(req, res) {
         if (catalog && typeof catalog === 'object') await db.ref('cached_feeds').set(catalog);
         const payload = {
           status: 'active',
+          system_enabled: true,
+          maintenance_mode: false,
           message: message || 'المنظومة نشطة وتعمل بكامل طاقتها.',
           updatedAt: now,
           wipeTimestamp: 0,

@@ -320,48 +320,63 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
       });
     }
 
-    final stopwatch = Stopwatch()..start();
-    try {
-      final url = Uri.parse('$_apiBaseUrl/api/stats');
-      final res = await http.get(
-        url,
-        headers: {
-          'x-admin-secret': _adminSecret,
-          'Accept': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 12));
-      stopwatch.stop();
+    final candidates = <String>[
+      _apiBaseUrl,
+      'https://dashboard-api-amber-chi.vercel.app',
+    ];
+    Object? lastError;
 
-      if (res.statusCode == 200) {
-        final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-        if (mounted) {
-          setState(() {
-            _kpis = data['kpis'] ?? {};
-            _analytics = data['analytics'] ?? {};
-            _monetization = data['monetization'] ?? {};
-            _landingAnalytics = (data['landingAnalytics'] as Map<String, dynamic>?) ?? {};
-            _sessions = data['sessions'] ?? [];
-            _devices = data['devices'] ?? [];
-            _topContent = data['topContent'] ?? [];
-            _searches = data['searches'] ?? [];
-            _activityLog = data['activityLog'] ?? [];
-            _errors = data['errors'] ?? [];
-            _cloudLatencyMs = stopwatch.elapsedMilliseconds;
-            _lastUpdated = DateTime.now();
-            _isLoading = false;
-            _errorMessage = null;
-          });
+    for (final base in candidates) {
+      final stopwatch = Stopwatch()..start();
+      try {
+        final url = Uri.parse('$base/api/stats');
+        final res = await http.get(
+          url,
+          headers: {
+            'x-admin-secret': _adminSecret,
+            'Accept': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 15));
+        stopwatch.stop();
+
+        if (res.statusCode == 200) {
+          final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+          if (mounted) {
+            setState(() {
+              _kpis = data['kpis'] ?? {};
+              _analytics = data['analytics'] ?? {};
+              _monetization = data['monetization'] ?? {};
+              _landingAnalytics = (data['landingAnalytics'] as Map<String, dynamic>?) ?? {};
+              _sessions = data['sessions'] ?? [];
+              _devices = data['devices'] ?? [];
+              _topContent = data['topContent'] ?? [];
+              _searches = data['searches'] ?? [];
+              _activityLog = data['activityLog'] ?? [];
+              _errors = data['errors'] ?? [];
+              _cloudLatencyMs = stopwatch.elapsedMilliseconds;
+              _lastUpdated = DateTime.now();
+              _isLoading = false;
+              _errorMessage = null;
+            });
+          }
+          return;
         }
-      } else {
-        throw Exception('رمز الخطأ من السيرفر: ${res.statusCode}');
+        lastError = Exception('رمز الخطأ من السيرفر: ${res.statusCode}');
+      } catch (e) {
+        lastError = e;
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = e.toString().replaceAll('Exception: ', '');
-          _isLoading = false;
-        });
-      }
+    }
+
+    if (mounted) {
+      // Keep already-loaded data green across background transient hiccups; only surface fatal error if empty or manual refresh.
+      setState(() {
+        if (!isBackground || _sessions.isEmpty) {
+          _errorMessage = (lastError ?? 'تعذر الاتصال بالسيرفر')
+              .toString()
+              .replaceAll('Exception: ', '');
+        }
+        _isLoading = false;
+      });
     }
   }
 
@@ -4052,17 +4067,36 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
         }
       };
 
-      final res = await http.post(
-        Uri.parse('$_apiBaseUrl/api/system_control'),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-secret': _adminSecret,
-        },
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 10));
+      final endpoints = [
+        'https://zaafilm.com/api/system_control',
+        '$_apiBaseUrl/api/system_control',
+        'https://dashboard-api-amber-chi.vercel.app/api/system_control',
+        'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
+      ];
+      http.Response? successRes;
+      Object? lastErr;
+      for (final endpoint in endpoints) {
+        try {
+          final r = await http.post(
+            Uri.parse(endpoint),
+            headers: {
+              'Content-Type': 'application/json',
+              'x-admin-secret': _adminSecret,
+            },
+            body: jsonEncode(payload),
+          ).timeout(const Duration(seconds: 10));
+          if (r.statusCode == 200) {
+            successRes = r;
+            break;
+          }
+          lastErr = Exception('Server responded with ${r.statusCode}: ${r.body}');
+        } catch (err) {
+          lastErr = err;
+        }
+      }
 
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (successRes != null) {
+        final data = jsonDecode(successRes.body) as Map<String, dynamic>;
         setState(() {
           _lastBroadcastNotif = data['notification'] as Map<String, dynamic>? ?? payload['notification'] as Map<String, dynamic>;
         });
@@ -4075,7 +4109,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
           );
         }
       } else {
-        throw Exception('Server responded with ${res.statusCode}: ${res.body}');
+        throw lastErr ?? Exception('فشل الاتصال بجميع خوادم البث');
       }
     } catch (e) {
       if (mounted) {
@@ -4095,38 +4129,38 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
   // TAB 10: إعلانات — إيقاف/تشغيل المنظومة ومسح الطوارئ وإعدادات الإعلانات
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// إيقاف حقيقي — يكتب system_enabled: false في Firebase
+  /// إيقاف حقيقي — يحدث حالة المنظومة عبر السحابة و Firebase
   Future<void> _partnerDoStopSystem() async {
     setState(() {
       _isPartnerSystemLoading = true;
       _partnerSystemMsg = null;
     });
     bool done = false;
-    // 1) Firebase direct
-    try {
-      final res = await http.patch(
-        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control.json'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'system_enabled': false, 'maintenance_mode': true, 'updated_at': DateTime.now().toIso8601String()}),
-      ).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) done = true;
-    } catch (_) {}
+    for (final url in [
+      'https://zaafilm.com/api/system_control',
+      'https://dashboard-api-indol-eight.vercel.app/api/system_control',
+      'https://dashboard-api-amber-chi.vercel.app/api/system_control',
+      'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
+    ]) {
+      try {
+        final res = await http.post(
+          Uri.parse(url),
+          headers: {'Content-Type': 'application/json', 'x-admin-secret': _adminSecret},
+          body: json.encode({'action': 'set_system', 'system_enabled': false, 'secret': _adminSecret}),
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) { done = true; break; }
+      } catch (_) {}
+    }
 
-    // 2) API fallback
     if (!done) {
-      for (final url in [
-        'https://dashboard-api-indol-eight.vercel.app/api/system_control',
-        'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
-      ]) {
-        try {
-          final res = await http.post(
-            Uri.parse(url),
-            headers: {'Content-Type': 'application/json', 'x-admin-secret': _adminSecret},
-            body: json.encode({'action': 'set_system', 'system_enabled': false, 'secret': _adminSecret}),
-          ).timeout(const Duration(seconds: 8));
-          if (res.statusCode == 200) { done = true; break; }
-        } catch (_) {}
-      }
+      try {
+        final res = await http.patch(
+          Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control.json'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({'system_enabled': false, 'maintenance_mode': true, 'updated_at': DateTime.now().toIso8601String()}),
+        ).timeout(const Duration(seconds: 6));
+        if (res.statusCode == 200) done = true;
+      } catch (_) {}
     }
 
     if (mounted) {
@@ -4142,7 +4176,7 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     }
   }
 
-  /// تشغيل حقيقي — يكتب system_enabled: true في Firebase
+  /// تشغيل حقيقي — يحدث حالة المنظومة عبر السحابة و Firebase
   Future<void> _partnerDoStartSystem() async {
     setState(() {
       _isPartnerSystemLoading = true;
@@ -4150,29 +4184,31 @@ class _DashboardHomeScreenState extends State<DashboardHomeScreen>
     });
     bool done = false;
 
-    try {
-      final res = await http.patch(
-        Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control.json'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'system_enabled': true, 'maintenance_mode': false, 'updated_at': DateTime.now().toIso8601String()}),
-      ).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) done = true;
-    } catch (_) {}
+    for (final url in [
+      'https://zaafilm.com/api/system_control',
+      'https://dashboard-api-indol-eight.vercel.app/api/system_control',
+      'https://dashboard-api-amber-chi.vercel.app/api/system_control',
+      'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
+    ]) {
+      try {
+        final res = await http.post(
+          Uri.parse(url),
+          headers: {'Content-Type': 'application/json', 'x-admin-secret': _adminSecret},
+          body: json.encode({'action': 'set_system', 'system_enabled': true, 'secret': _adminSecret}),
+        ).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200) { done = true; break; }
+      } catch (_) {}
+    }
 
     if (!done) {
-      for (final url in [
-        'https://dashboard-api-indol-eight.vercel.app/api/system_control',
-        'https://zaqzouka-dashboard-api.iptvappk.workers.dev/api/system_control',
-      ]) {
-        try {
-          final res = await http.post(
-            Uri.parse(url),
-            headers: {'Content-Type': 'application/json', 'x-admin-secret': _adminSecret},
-            body: json.encode({'action': 'set_system', 'system_enabled': true, 'secret': _adminSecret}),
-          ).timeout(const Duration(seconds: 8));
-          if (res.statusCode == 200) { done = true; break; }
-        } catch (_) {}
-      }
+      try {
+        final res = await http.patch(
+          Uri.parse('https://madartv-default-rtdb.firebaseio.com/system_control.json'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({'system_enabled': true, 'maintenance_mode': false, 'updated_at': DateTime.now().toIso8601String()}),
+        ).timeout(const Duration(seconds: 6));
+        if (res.statusCode == 200) done = true;
+      } catch (_) {}
     }
 
     if (mounted) {

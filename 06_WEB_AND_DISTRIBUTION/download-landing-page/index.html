@@ -1,284 +1,458 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>تحميل تطبيق زقزوقة TV ومشغل زاغ الرسمي — الإصدار المعتمد 2026</title>
-  
-  <!-- SEO & Social OpenGraph -->
-  <meta name="description" content="الموقع الرسمي لتحميل تطبيق زقزوقة TV ومشغل زاغ بلاير الرسمي بروابط مباشرة وسريعة لمشاهدة أحدث الأفلام والمسلسلات بجودة 4K وبدون إعلانات.">
-  <meta name="keywords" content="زقزوقة TV, تحميل زقزوقة, زاغ بلاير, Zag Player, Zaqzouka TV APK, بث مباشر, مسلسلات, أفلام">
-  <meta property="og:title" content="تحميل زقزوقة TV ومشغل زاغ الرسمي — الموقع الرسمي">
-  <meta property="og:description" content="حمل التطبيق والمشغل برابط مباشر بدون إعلانات واستمتع بأقوى مكتبة أفلام ومسلسلات بجودة فائقة.">
-  <meta property="og:image" content="assets/images/logo.jpg">
+  <title>ZaaFilm · زقزوقة TV | تحميل التطبيق الرسمي ومشغل زاغ للأندرويد والشاشات</title>
+
+  <!-- Primary SEO & OpenGraph -->
+  <meta name="description" content="الموقع الرسمي لتحميل تطبيق زقزوقة TV ومشغل زاغ بلاير للأندرويد وشاشات Smart TV. تصفح الأفلام، المسلسلات الكاملة، الملخصات، وبثوث الكورة بدون إعلانات مزعجة أو اشتراكات.">
+  <meta name="keywords" content="ZaaFilm, زقزوقة TV, زاغ بلاير, ZAG Player, زافيلم, تحميل زقزوقة APK, مسلسلات, أفلام, بثوث الكورة, Android TV">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://zaafilm.com/">
+
+  <meta property="og:site_name" content="ZaaFilm · زقزوقة TV">
+  <meta property="og:title" content="ZaaFilm · زقزوقة TV ومشغل زاغ الرسمي">
+  <meta property="og:description" content="واجهة ورق الرمل الهادئة لأحدث الأفلام والمسلسلات والملخصات وبثوث الكورة المباشرة مجاناً للأندرويد والشاشات.">
+  <meta property="og:image" content="assets/images/hero-cinema-art.jpg">
   <meta property="og:type" content="website">
-  
-  <!-- Favicon -->
+  <meta property="og:url" content="https://zaafilm.com/">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#0E0B0E">
+
+  <!-- Branded Favicon -->
   <link rel="icon" type="image/jpeg" href="assets/images/logo.jpg">
-  
-  <!-- Google Fonts: Cairo for Arabic & Outfit for English -->
+  <link rel="apple-touch-icon" href="assets/images/logo.jpg">
+
+  <!-- Fonts: Cairo + Geist Mono (strictly no italic or ultra-bold weights) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  
-  <!-- Stylesheet -->
-  <link rel="stylesheet" href="assets/css/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="assets/css/style.css?v=5.0.0">
+
+  <!-- Structured Data for SEO / AEO -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "Zaqzouka TV & ZAG Player (ZaaFilm)",
+        "operatingSystem": "Android, Android TV, Fire TV",
+        "applicationCategory": "EntertainmentApplication",
+        "softwareVersion": "1.0.86",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "url": "https://zaafilm.com/"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "لماذا نستخدم تطبيق زقزوقة TV مع مشغل زاغ بلاير؟",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "يتولى تطبيق زقزوقة تصفح الأفلام والمسلسلات والملخصات وبثوث الكورة، بينما يعمل مشغل زاغ كمحرك مخصص لتشغيل الفيديو بدقة تصل إلى 4K دون ثقل على الجهاز."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "هل يعمل التطبيق على شاشات التلفاز الذكية Android TV؟",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "نعم، يعمل كل من زقزوقة TV وزاغ بلاير على هواتف أندرويد وشاشات Android TV وأجهزة TV Box و Fire TV Stick مع دعم كامل للريموت."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "ماذا أفعل عند ظهور رسالة السماح بالتثبيت من مصدر غير معروف؟",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "هذه رسالة نظام معتادة من أندرويد عند تثبيت تطبيق من خارج المتجر، افتح الإعدادات وفعل السماح لهذا المتصفح وسيكتمل التثبيت فوراً."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "هل يتطلب التطبيق اشتراكاً شهرياً أو تسجيل حساب؟",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "التطبيق والمشغل مجانيان بالكامل ولا يطلبان تسجيل حساب أو بريد إلكتروني أو بطاقة دفع."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
-<body>
+<body dir="rtl">
 
-  <!-- Background Ambient Glows (Warm Cinema Tone) -->
-  <div class="ambient-glow-top"></div>
-  <div class="ambient-glow-bottom"></div>
+  <a href="#main-content" class="skip-link" data-i18n="skipLink">تخطي إلى المحتوى الرئيسي</a>
 
-  <!-- Header -->
-  <header class="site-header">
-    <div class="container">
-      <nav class="navbar">
-        <a href="#home" class="logo-wrapper">
-          <img src="assets/images/logo.jpg" alt="Zaqzouka Logo" class="logo-img">
-          <div class="logo-text">
-            <span class="brand-name">زقزوقة TV</span>
-            <span class="brand-tag" data-i18n="brandTag">منظومة البث السينمائي المتكاملة</span>
+  <!-- Ambient Warm Gold & Ivory Dust Canvas -->
+  <canvas id="cinema-dust-canvas" aria-hidden="true"></canvas>
+
+  <!-- Floating Translucent Pill Header -->
+  <header class="site-header" id="site-header">
+    <div class="container nav-container">
+      <nav class="floating-nav" aria-label="التنقل الرئيسي">
+        <a href="#hero" class="nav-brand">
+          <img src="assets/images/logo.jpg" alt="شعار زقزوقة TV الرسمي" class="nav-logo-img" width="36" height="36">
+          <div class="nav-brand-meta">
+            <span class="title-4 nav-brand-name">زقزوقة TV</span>
+            <span class="caption-5 mono-code nav-brand-sub">zaafilm.com</span>
           </div>
         </a>
 
-
         <div class="nav-actions">
-          <button id="lang-switch-btn" class="lang-btn" aria-label="Toggle Language">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+          <button type="button" id="lang-switch-btn" class="lang-btn button-sm" aria-label="تبديل اللغة">
+            <!-- Phosphor Globe -->
+            <svg width="16" height="16" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="128" cy="128" r="96"></circle>
+              <line x1="37" y1="96" x2="219" y2="96"></line>
+              <line x1="37" y1="160" x2="219" y2="160"></line>
+              <ellipse cx="128" cy="128" rx="40" ry="96"></ellipse>
             </svg>
             <span class="lang-label">EN</span>
           </button>
-          
-          <a href="javascript:void(0)" class="btn-nav-download" id="navBundleBtn" data-i18n="btnFastDownload">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <span>تحميل مباشر</span>
-          </a>
+
+          <button type="button" class="btn-nav-cta button-sm" id="navDownloadBtn">
+            <span data-i18n="navCta">تحميل التطبيق</span>
+          </button>
         </div>
       </nav>
     </div>
   </header>
 
-  <!-- Hero Section -->
-  <section id="home" class="hero-section">
-    <div class="container">
-      <div class="hero-grid">
-        
-        <!-- Hero Text -->
-        <div class="hero-content">
-          <div class="hero-badge">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-            </svg>
-            <span data-i18n="heroBadge">الإصدار المعتمد 2026 — آمن 100% وخالٍ من الإعلانات</span>
+  <main id="main-content">
+
+    <!-- ================================================================
+         SECTION 1: KINETIC ZAQZOUKA MOTION HERO & LIVE PORTRAIT STAGE
+         ================================================================ -->
+    <section id="hero" class="hero-section">
+      <!-- Subtle Cinema Architectural Backdrop Illustration -->
+      <div class="hero-art-layer" aria-hidden="true">
+        <img src="assets/images/hero-cinema-art.jpg" alt="" class="hero-art-img" id="hero-art-img">
+        <div class="hero-art-scrim"></div>
+      </div>
+
+      <div class="container hero-stage-shell">
+        <div class="hero-grid">
+
+          <!-- RIGHT EDITORIAL & WORDMARK COLUMN (Modeled on zaq-motion.mp4 with App Colors) -->
+          <div class="hero-copy-col">
+            <div class="hero-pill-badge hero-anim" style="--hero-delay: 40ms">
+              <span class="live-status-dot" aria-hidden="true"></span>
+              <span class="caption-3" id="hero-mode-badge" data-i18n="heroBadge">عرض تفاعلي حي · واجهة زقزوقة 2026</span>
+            </div>
+
+            <!-- Iconic Animated "زقزوقة" Wordmark + Twinkling Sparkles -->
+            <div class="wordmark-theater hero-anim" style="--hero-delay: 100ms">
+              <span class="wordmark-spark spark-a" aria-hidden="true">✦</span>
+              <span class="wordmark-spark spark-b" aria-hidden="true">✦</span>
+              <span class="wordmark-spark spark-c" aria-hidden="true">✦</span>
+              <div class="wordmark-kicker">
+                <span class="caption-3 mono-code" id="scene-code-badge">ZAQZOUKA · 01 / 05</span>
+                <span class="caption-3 scene-pill-tag" id="scene-active-label" data-i18n="sc1Label">الرئيسية</span>
+              </div>
+              <div class="zaq-wordmark heading-1" aria-label="زقزوقة">
+                <span data-i18n="wordmarkText">زقزوقة</span>
+              </div>
+            </div>
+
+            <!-- Reactive Scene Title & Description (Transitions with every phone screen move) -->
+            <div class="scene-copy-stage hero-anim" id="scene-copy-stage" style="--hero-delay: 180ms">
+              <h1 class="hero-title heading-2" id="scene-headline" data-i18n="sc1Headline">
+                واجهة <span class="accent-terracotta">دافئة</span> ومتعة فورية.
+              </h1>
+              <p class="hero-subtitle body-3" id="scene-subtitle" data-i18n="sc1Sub">
+                اكتشف مكتبة الأفلام والمسلسلات والملخصات وبثوث الكورة بتصفح سريع في ألوان زقزوقة المريحة للعين دون اشتراكات أو نوافذ مزعجة.
+              </p>
+            </div>
+
+            <!-- Primary Download CTA -->
+            <div class="hero-cta-block hero-anim" style="--hero-delay: 260ms">
+              <div class="cta-buttons-row">
+                <button type="button" class="btn-primary button-md hero-master-btn" id="heroBundleBtn">
+                  <svg width="20" height="20" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M86 110l42 42 42-42"></path>
+                    <line x1="128" y1="40" x2="128" y2="152"></line>
+                    <path d="M216 152v48a8 8 0 0 1-8 8H48a8 8 0 0 1-8-8v-48"></path>
+                  </svg>
+                  <span data-i18n="heroPrimaryCta">تحميل زقزوقة TV ومشغل زاغ</span>
+                </button>
+              </div>
+
+              <!-- Calm Inline Download Progress Drawer (B9) -->
+              <div class="download-progress-card" id="download-progress-card" role="status" aria-live="polite" hidden>
+                <div class="progress-skeleton-row" id="progress-skeleton" aria-hidden="true">
+                  <span class="skeleton-bar skeleton-shimmer"></span>
+                  <span class="skeleton-bar short skeleton-shimmer"></span>
+                </div>
+                <div class="progress-ready-row" id="progress-ready" hidden>
+                  <div class="progress-icon-wrap">
+                    <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <circle cx="128" cy="128" r="96"></circle>
+                      <polyline points="172 104 113 160 84 132"></polyline>
+                    </svg>
+                  </div>
+                  <div class="progress-text-col">
+                    <strong class="body-4" id="download-status-title" data-i18n="dlStartTitle">بدأ تحضير التطبيق والمشغل على جهازك</strong>
+                    <span class="caption-2" id="download-status-sub" data-i18n="dlStartSub">ثبّت تطبيق زقزوقة TV أولاً ثم مشغل زاغ عند اكتمال التنزيل.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="hero-secondary-links caption-2">
+                <span class="muted-label" data-i18n="separateLabel">تحميل مباشر:</span>
+                <a href="https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zaqzouka-1.0.86-93.apk" class="inline-text-link dl-apk-link" data-apk="app" download data-i18n="appOnly">تطبيق زقزوقة TV فقط</a>
+                <span aria-hidden="true">·</span>
+                <a href="https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zag-player-1.1.37.apk" class="inline-text-link dl-apk-link" data-apk="player" download data-i18n="playerOnly">مشغل زاغ فقط</a>
+              </div>
+            </div>
           </div>
 
-          <h1 class="hero-title" data-i18n="heroTitle">
-            عالمك الترفيهي بدون حدود مع <span class="highlight-brick">تطبيق زقزوقة</span> ومحرك <span class="highlight-gold">زاغ بلاير</span>
-          </h1>
+          <!-- LEFT: CREATIVE CINEMA THEATER & SWINGING IPHONE STAGE -->
+          <div class="hero-stage-col hero-anim" style="--hero-delay: 220ms">
+            <div class="cinema-stage-open" id="motion-stage-frame" data-active-scene="0">
 
-          <p class="hero-desc" data-i18n="heroDesc">
-            منظومة متكاملة لمشاهدة آلاف الأفلام والمسلسلات الحصرية والقنوات التلفزيونية والرياضية الحية بأعلى جودة وسيرفرات فائقة السرعة بدون أي تقطيع أو اشتراكات.
-          </p>
+              <!-- Dramatic Projector Light Beams & 35mm Cinema Film Reel Aura (Open Space, No Box) -->
+              <div class="cinema-aura-layer" aria-hidden="true">
+                <svg class="cinema-spotlight-svg" viewBox="0 0 600 640" fill="none">
+                  <!-- Diagonal Cinema Projector Cones -->
+                  <polygon points="90,0 260,0 560,640 40,640" fill="rgba(229,169,88,0.055)"></polygon>
+                  <polygon points="360,0 520,0 580,640 160,640" fill="rgba(185,78,60,0.05)"></polygon>
+                  <!-- Sweeping Kinetic Motion Trails -->
+                  <path class="motion-arc arc-gold" d="M 64,220 C 190,110 410,110 536,220" stroke="rgba(229,169,88,0.34)" stroke-width="1.5" stroke-dasharray="10 10" stroke-linecap="round"></path>
+                  <path class="motion-arc arc-brick" d="M 76,470 C 210,555 390,555 524,470" stroke="rgba(185,78,60,0.42)" stroke-width="1.5" stroke-dasharray="18 12" stroke-linecap="round"></path>
+                </svg>
 
-          <!-- Action Buttons (Single Unified Master Button) -->
-          <div class="hero-cta-group">
-            <a href="javascript:void(0)" class="btn-primary-action btn-bundle-action" id="heroBundleBtn">
-              <div class="btn-icon">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                <!-- Counter-Rotating Cinema Reel Rings -->
+                <svg class="reel-orbit-svg reel-outer" viewBox="0 0 480 480" fill="none">
+                  <circle cx="240" cy="240" r="226" stroke="rgba(229,169,88,0.22)" stroke-width="1" stroke-dasharray="4 14"></circle>
+                  <circle cx="240" cy="14" r="5" fill="#E5A958"></circle>
+                  <circle cx="466" cy="240" r="3.5" fill="#FFFBF5"></circle>
+                </svg>
+                <svg class="reel-orbit-svg reel-inner" viewBox="0 0 380 380" fill="none">
+                  <circle cx="190" cy="190" r="176" stroke="rgba(185,78,60,0.32)" stroke-width="1.4" stroke-dasharray="28 16"></circle>
+                  <circle cx="14" cy="190" r="4.5" fill="#B94E3C"></circle>
                 </svg>
               </div>
-              <div class="btn-text">
-                <span class="btn-main-label" data-i18n="heroBtnBundle">تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل)</span>
-                <span class="btn-sub-label" data-i18n="heroBtnBundleSub">نقرة واحدة لتحميل تطبيق زقزوقة + مشغل زاغ معاً (58 MB)</span>
+
+              <!-- External Floating Cinema Category Pill (Never Overlaps iPhone Screen) -->
+              <div class="orbit-scene-chip" id="phone-float-tag">
+                <span class="float-tag-dot" aria-hidden="true"></span>
+                <span class="caption-3" id="float-tag-text" data-i18n="sc1Tag">أفلام ومسلسلات 2026</span>
               </div>
-            </a>
 
-            <div class="bundle-status-msg" id="bundleStatusMsg" style="display: none;">
-              <span class="pulse-dot"></span>
-              <span data-i18n="bundleDownloading">جاري تنزيل التطبيق والمشغل معاً... بعد اكتمال التنزيل قم بتثبيت كلا الملفين ⚡</span>
-            </div>
+              <!-- Swinging iPhone Pro Titanium Hardware Rig -->
+              <div class="phone-rig" id="phone-rig" data-scene="0" role="button" tabindex="0" aria-label="اضغط للانتقال إلى الصفحة التالية في التطبيق">
+                <div class="iphone-chassis">
+                  <!-- Physical Side Hardware Buttons -->
+                  <span class="hw-btn hw-mute" aria-hidden="true"></span>
+                  <span class="hw-btn hw-vol-up" aria-hidden="true"></span>
+                  <span class="hw-btn hw-vol-dn" aria-hidden="true"></span>
+                  <span class="hw-btn hw-power" aria-hidden="true"></span>
 
-            <div class="hero-sub-links">
-              <span data-i18n="separateDownload">أو تحميل منفصل:</span>
-              <a href="downloads/zaqzouka-app.apk" download data-i18n="appOnly">تطبيق زقزوقة فقط</a>
-              <span>·</span>
-              <a href="downloads/zag-player.apk" download data-i18n="playerOnly">مشغل زاغ فقط</a>
-            </div>
-          </div>
+                  <!-- Tempered Glass OLED Viewport + Dynamic Island -->
+                  <div class="iphone-bezel">
+                    <div class="dynamic-island" aria-hidden="true">
+                      <span class="di-camera-lens"></span>
+                    </div>
 
-          <!-- Trust Badges -->
-          <div class="hero-trust-row">
-            <div class="trust-item">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"></circle>
-                <path d="m9 12 2 2 4-4"></path>
-              </svg>
-              <span data-i18n="trustVerified">مفحوص ونظيف 100%</span>
-            </div>
-            <div class="trust-item">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
-                <line x1="8" y1="21" x2="16" y2="21"></line>
-                <line x1="12" y1="17" x2="12" y2="21"></line>
-              </svg>
-              <span data-i18n="trustSmartTv">يدعم الهواتف وشاشات Smart TV</span>
-            </div>
-            <div class="trust-item">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-              </svg>
-              <span data-i18n="trustNoBuffer">تقنية مانع التقطيع</span>
-            </div>
-          </div>
-        </div>
+                    <div class="phone-display" id="phone-display">
+                      <!-- Specular Glass Light Sweep Overlay on Transition -->
+                      <div class="screen-glint" id="screen-glint" aria-hidden="true"></div>
 
-        <!-- Phone Mockup Showcase -->
-        <div class="hero-showcase">
+                      <!-- 5 Authentic 1080x2400 Portrait App Screens -->
+                      <img src="assets/images/screen-home.png" alt="واجهة تطبيق زقزوقة TV الرئيسية على الهاتف" class="phone-screen-slide is-active" data-slide="0">
+                      <img src="assets/images/screen-movies.png" alt="قسم الأفلام في تطبيق زقزوقة TV على الهاتف" class="phone-screen-slide" data-slide="1">
+                      <img src="assets/images/screen-series.png" alt="قسم المسلسلات والمواسم في تطبيق زقزوقة TV" class="phone-screen-slide" data-slide="2">
+                      <img src="assets/images/screen-recaps.png" alt="قسم ملخصات الأفلام داخل تطبيق زقزوقة TV" class="phone-screen-slide" data-slide="3">
+                      <img src="assets/images/screen-sports.png" alt="قسم بثوث الكورة والمباريات المباشرة في زقزوقة TV" class="phone-screen-slide" data-slide="4">
 
-          <!-- glow ring behind device -->
-          <div class="phone-glow-ring"></div>
+                      <div class="iphone-home-bar" aria-hidden="true"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-          <div class="phone-frame">
-            <div class="phone-notch">
-              <div class="phone-camera-pill"></div>
+              <!-- Dynamic Shadow Tracking Swinging iPhone Below -->
+              <div class="phone-floor-shadow" id="phone-floor-shadow" data-scene="0" aria-hidden="true"></div>
             </div>
-            <div class="phone-screen">
-              <img src="assets/images/screen-1.png" alt="واجهة تطبيق زقزوقة TV" class="screen-img">
-            </div>
-            <!-- reflection overlay -->
-            <div class="phone-reflection"></div>
           </div>
 
         </div>
-
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- FAQ Section -->
-  <section id="faq" class="faq-section">
-    <div class="container">
-      
-      <div class="section-header">
-        <span class="section-tag" data-i18n="faqTag">الأسئلة الشائعة</span>
-        <h2 class="section-title" data-i18n="faqTitle">كل ما تود معرفته عن التطبيق والمشغل</h2>
+    <!-- ================================================================
+         SECTION 2: FAQ ACCORDION
+         ================================================================ -->
+    <section id="faq" class="section-block section-plum reveal-section">
+      <div class="container faq-container">
+        <div class="section-head centered">
+          <span class="section-kicker caption-3" data-i18n="faqKicker">إجابات شاملة</span>
+          <h2 class="section-title heading-2" data-i18n="faqTitle">الأسئلة الشائعة</h2>
+        </div>
+
+        <div class="faq-list" id="faq-list">
+          <div class="faq-item">
+            <button type="button" class="faq-trigger" aria-expanded="false">
+              <span class="title-2" data-i18n="q1">لماذا أحتاج لتثبيت تطبيق زقزوقة TV ومشغل زاغ بلاير معاً؟</span>
+              <span class="faq-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="208 96 128 176 48 96"></polyline>
+                </svg>
+              </span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p class="body-3" data-i18n="a1">تطبيق زقزوقة TV مخصص لتنظيم الأفلام والمسلسلات والملخصات وبثوث الكورة، بينما يعمل مشغل زاغ كمحرك مادي منفصل لفك التشفير، مما يضمن تشغيلاً سريعاً بدون بطء الهاتف.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-trigger" aria-expanded="false">
+              <span class="title-2" data-i18n="q2">هل يعمل التطبيق على شاشات Smart TV و TV Box؟</span>
+              <span class="faq-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="208 96 128 176 48 96"></polyline>
+                </svg>
+              </span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p class="body-3" data-i18n="a2">نعم، يعمل كلا التطبيقين على شاشات Android TV وأجهزة Fire TV Stick وصناديق TV Box مع دعم التنقل بالريموت كنترول وتشغيل الجودات حتى 4K.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-trigger" aria-expanded="false">
+              <span class="title-2" data-i18n="q3">ماذا أفعل عند ظهور رسالة السماح بالتثبيت من مصدر غير معروف؟</span>
+              <span class="faq-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="208 96 128 176 48 96"></polyline>
+                </svg>
+              </span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p class="body-3" data-i18n="a3">هذه خطوة أمان روتينية في أندرويد عند تحميل APK من المتصفح مباشرة. اختر الإعدادات وفعل السماح من هذا المصدر وسيكتمل التثبيت فوراً.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-trigger" aria-expanded="false">
+              <span class="title-2" data-i18n="q4">كيف أنقل الملفات بسرعة إلى التلفزيون الذكي؟</span>
+              <span class="faq-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="208 96 128 176 48 96"></polyline>
+                </svg>
+              </span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p class="body-3" data-i18n="a4">يمكنك فتح zaafilm.com مباشرة من متصفح التلفزيون أو تطبيق Downloader، أو مسح رمز QR وإرسال الملفات عبر تطبيق Send Files to TV.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-trigger" aria-expanded="false">
+              <span class="title-2" data-i18n="q5">هل يوجد أي اشتراك شهري أو تسجيل حساب؟</span>
+              <span class="faq-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="208 96 128 176 48 96"></polyline>
+                </svg>
+              </span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p class="body-3" data-i18n="a5">لا، المنظومة مجانية بالكامل ولا تطلب إنشاء حساب أو إدخال بريد إلكتروني أو بطاقة دفع، فقط ثبت التطبيقين وابدأ المشاهدة.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-trigger" aria-expanded="false">
+              <span class="title-2" data-i18n="q6">هل قسم بثوث الكورة يغطي المباريات المباشرة اليومية؟</span>
+              <span class="faq-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="208 96 128 176 48 96"></polyline>
+                </svg>
+              </span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p class="body-3" data-i18n="a6">نعم، يعرض قسم بثوث الكورة جدول المباريات اليومي وحالة البث الحي والقنوات الرياضية مع ملخصات الأهداف والمواجهات.</p>
+            </div>
+          </div>
+
+          <div class="faq-item">
+            <button type="button" class="faq-trigger" aria-expanded="false">
+              <span class="title-2" data-i18n="q7">كيف أحصل على التحديثات المستقبلية بدون فقدان المفضلة؟</span>
+              <span class="faq-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="208 96 128 176 48 96"></polyline>
+                </svg>
+              </span>
+            </button>
+            <div class="faq-panel" hidden>
+              <p class="body-3" data-i18n="a7">يفحص زقزوقة TV توفر الإصدارات الأحدث تلقائياً، وعند صدور تحديث يعرض لك نافذة تحديث مباشر من داخل التطبيق مع بقاء مفضلتك كاملة.</p>
+            </div>
+          </div>
+        </div>
       </div>
+    </section>
 
-      <div class="faq-list">
-        
-        <div class="faq-item">
-          <button class="faq-question">
-            <span data-i18n="q1">لماذا أحتاج لتحميل تطبيقين (زقزوقة TV ومشغل زاغ)؟</span>
-            <svg class="faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
-          <div class="faq-answer">
-            <p data-i18n="a1">تطبيق زقزوقة يمثل مكتبة العرض والبحث وإدارة المفضلة والمواسم، بينما مشغل زاغ هو المحرك المتخصص بفك التشفير والبث عالي الكفاءة. فصل المشغل يجعل التطبيق خفيفاً جداً ويضمن سرعة تشغيل استثنائية دون تهنيج أو استنزاف للبطارية.</p>
-          </div>
-        </div>
+  </main>
 
-        <div class="faq-item">
-          <button class="faq-question">
-            <span data-i18n="q2">هل التطبيق يعمل على شاشات التلفزيون الذكية (Smart TV)؟</span>
-            <svg class="faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
-          <div class="faq-answer">
-            <p data-i18n="a2">نعم، التطبيقان متوافقان تماماً مع شاشات Android TV وأجهزة TV Box و Fire TV Stick، ويدعمان التحكم الكامل بالريموت كنترول وعرض المحتوى بدقة 4K.</p>
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <button class="faq-question">
-            <span data-i18n="q3">ماذا أفعل إذا ظهرت رسالة "تطبيق غير معروف" أثناء التثبيت؟</span>
-            <svg class="faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
-          <div class="faq-answer">
-            <p data-i18n="a3">هذا إجراء أمان قياسي في أندرويد عند تثبيت أي تطبيق بصيغة APK من خارج متجر جوجل بلاي. كل ما عليك هو الضغط على "الإعدادات" ثم تفعيل "السماح بالتثبيت من هذا المصدر"، فالتطبيق مفحوص وآمن تماماً.</p>
-          </div>
-        </div>
-
-        <div class="faq-item">
-          <button class="faq-question">
-            <span data-i18n="q4">كيف يمكنني تحديث التطبيق عند صدور إصدارات جديدة؟</span>
-            <svg class="faq-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
-          <div class="faq-answer">
-            <p data-i18n="a4">يحتوي تطبيق زقزوقة على نظام تحديث تلقائي ينبهك فوراً عند توفر أي إصدار أحدث ويتيح لك التحديث بنقرة زر واحدة من داخل التطبيق دون فقدان مفضلتك أو بياناتك.</p>
-          </div>
-        </div>
-
-      </div>
-
-    </div>
-  </section>
-
-  <!-- Footer -->
+  <!-- FOOTER -->
   <footer class="site-footer">
-    <div class="container">
-      <div class="footer-content">
-        <div class="footer-brand">
-          <img src="assets/images/logo.jpg" alt="Zaqzouka Logo" class="footer-logo">
-          <span class="footer-name">زقزوقة TV</span>
+    <div class="container footer-inner">
+      <div class="footer-brand-row">
+        <img src="assets/images/logo.jpg" alt="شعار زقزوقة TV" class="footer-logo" width="32" height="32">
+        <div>
+          <strong class="title-3">ZaaFilm · زقزوقة TV</strong>
+          <p class="caption-2 footer-copy" data-i18n="footerCopy">جميع الحقوق محفوظة 2026 منظومة زقزوقة TV ومشغل زاغ بلاير.</p>
         </div>
-        <p class="footer-copy" data-i18n="footerCopy">
-          جميع الحقوق محفوظة © 2026 منظومة زقزوقة TV ومحرك زاغ بلاير الرسمي.
-        </p>
+      </div>
+      <div class="footer-legal-links caption-2">
+        <button type="button" class="inline-text-link legal-modal-trigger" data-legal="privacy" data-i18n="legalPrivacy">سياسة الخصوصية</button>
+        <span aria-hidden="true">·</span>
+        <button type="button" class="inline-text-link legal-modal-trigger" data-legal="terms" data-i18n="legalTerms">شروط الاستخدام</button>
+        <span aria-hidden="true">·</span>
+        <a href="https://zaafilm.com/" class="inline-text-link mono-code">zaafilm.com</a>
       </div>
     </div>
   </footer>
 
-  <!-- QR Code Modal -->
-  <div id="qr-modal" class="modal-overlay">
-    <div class="modal-card">
-      <button class="modal-close-btn" aria-label="إغلاق">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </button>
-
-      <h3 class="modal-title" data-i18n="qrTitle">مسح رمز الاستجابة السريعة (QR)</h3>
-      <p class="modal-desc" data-i18n="qrDesc">امسح الرمز بكاميرا هاتفك أو شاشتك لبدء التحميل الفوري:</p>
-
-      <div class="qr-box">
-        <div id="qr-canvas-wrapper"></div>
+  <!-- LEGAL MODAL (Privacy & Terms) -->
+  <div id="legal-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="legal-modal-title" hidden>
+    <div class="modal-card modal-card-wide">
+      <div class="modal-top">
+        <h3 id="legal-modal-title" class="title-1">سياسة الخصوصية</h3>
+        <button type="button" class="modal-close-btn" id="legal-close-btn" aria-label="إغلاق النافذة">
+          <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="200" y1="56" x2="56" y2="200"></line>
+            <line x1="200" y1="200" x2="56" y2="56"></line>
+          </svg>
+        </button>
       </div>
-
-      <span id="qr-target-filename" class="qr-target-name">zaqzouka-app.apk</span>
+      <div id="legal-modal-body" class="body-6 legal-body"></div>
     </div>
   </div>
 
-  <!-- Sticky Mobile Bar -->
-  <div class="mobile-bottom-bar">
-    <a href="javascript:void(0)" class="btn-mobile-download btn-mobile-bundle" id="mobileBundleBtn">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
+  <!-- STICKY MOBILE DOWNLOAD BAR -->
+  <div class="mobile-bottom-bar" id="mobile-bottom-bar" hidden>
+    <button type="button" class="btn-primary button-md mobile-bar-btn" id="mobileBundleBtn">
+      <svg width="18" height="18" viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M86 110l42 42 42-42"></path>
+        <line x1="128" y1="40" x2="128" y2="152"></line>
+        <path d="M216 152v48a8 8 0 0 1-8 8H48a8 8 0 0 1-8-8v-48"></path>
       </svg>
-      <span data-i18n="mobileBtnBundle">تحميل وتثبيت المنظومة كاملة (التطبيق + المشغل) ⚡</span>
-    </a>
+      <span data-i18n="heroPrimaryCta">تحميل زقزوقة TV ومشغل زاغ</span>
+    </button>
   </div>
 
-  <!-- Scripts -->
-  <script src="assets/js/main.js?v=1.0.85"></script>
+  <script src="assets/js/main.js?v=5.0.1"></script>
 </body>
 </html>

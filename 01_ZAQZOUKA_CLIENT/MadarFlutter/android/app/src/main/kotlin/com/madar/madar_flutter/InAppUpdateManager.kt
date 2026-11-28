@@ -892,7 +892,7 @@ class InAppUpdateManager(private val activity: MainActivity) {
         private const val PROGRESS_INTERVAL_BYTES = 256L * 1024L
         private const val MIN_PLAYER_VERSION_CODE = 37L
         private const val DEFAULT_PLAYER_APK_URL =
-            "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk"
+            "https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zag-player-1.1.37.apk"
         private val RELEASE_TAG = Regex("^v([0-9]+\\.[0-9]+\\.[0-9]+)-([0-9]+)$")
     }
 }

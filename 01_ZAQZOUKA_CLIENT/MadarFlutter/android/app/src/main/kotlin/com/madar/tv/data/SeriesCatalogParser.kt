@@ -595,7 +595,32 @@ internal object SeriesCatalogParser {
                 return heading
             }
         }
-        return element.text().trim().ifBlank { element.attr("title").trim() }
+        val directText = element.text().trim().ifBlank { element.attr("title").trim() }
+        if (directText.isNotBlank()) return directText
+        val targetHref = listOf("href", "data-url", "data-href", "data-link", "data-episode-link")
+            .firstNotNullOfOrNull { attr ->
+                element.absUrl(attr).ifBlank { element.attr(attr).trim() }.takeIf(String::isNotBlank)
+            }
+            ?.let(::normalizedUrl)
+            .orEmpty()
+        if (targetHref.isNotBlank()) {
+            val card = element.parents().take(4).firstOrNull { ancestor ->
+                ancestor.tagName() in setOf("article", "li") ||
+                    ancestor.classNames().any { cls -> cls in setOf("post-item", "item", "br-card", "Small--Box") }
+            }
+            if (card != null) {
+                val headingText = card.select("h2 a[href], h3 a[href], h4 a[href], .entry-title a[href], .post-title a[href]")
+                    .firstOrNull { link ->
+                        val h = link.absUrl("href").ifBlank { link.attr("href").trim() }
+                        h.isNotBlank() && normalizedUrl(h) == targetHref && link.text().isNotBlank()
+                    }
+                    ?.text()
+                    ?.trim()
+                    .orEmpty()
+                if (headingText.isNotBlank()) return headingText
+            }
+        }
+        return ""
     }
 
     /** Parse one provider episode-list page for on-demand, incremental loading. */
@@ -638,8 +663,17 @@ internal object SeriesCatalogParser {
                 ?: defaultSeasonNumber.takeIf { it in 1..60 }
             val key = normalizedUrl(url)
             val previous = collected[key]
-            if (previous == null || (previous.third == null && season != null)) {
-                collected[key] = Triple(title.ifBlank { "الحلقة $number" }, url, season)
+            val resolvedTitle = title.ifBlank { "الحلقة $number" }
+            if (previous == null) {
+                collected[key] = Triple(resolvedTitle, url, season)
+            } else if ((previous.first.startsWith("الحلقة ") && title.isNotBlank() && !title.equals(previous.first, true)) ||
+                (previous.third == null && season != null)
+            ) {
+                collected[key] = Triple(
+                    if (title.isNotBlank() && !previous.first.contains(title)) title else previous.first,
+                    url,
+                    season ?: previous.third,
+                )
             }
         }
         return collected.values.toList()
@@ -688,6 +722,11 @@ internal object SeriesCatalogParser {
         return candidates.singleOrNull()
     }
 
+    data class PaginatedEpisodesResult(
+        val episodes: List<Triple<String, String, Int?>>,
+        val hasMorePages: Boolean,
+    )
+
     /** Fetches numbered/next episode pages concurrently, with a strict time and page cap. */
     fun collectPaginatedEpisodes(
         firstDocument: Document,
@@ -696,14 +735,32 @@ internal object SeriesCatalogParser {
         parseEpisodes: (Document) -> List<Triple<String, String, Int?>>,
         maxPages: Int = 120,
         timeoutSeconds: Long = 20,
-    ): List<Triple<String, String, Int?>> {
+    ): List<Triple<String, String, Int?>> = collectPaginatedEpisodesWithMore(
+        firstDocument = firstDocument,
+        firstPageUrl = firstPageUrl,
+        fetchDocument = fetchDocument,
+        parseEpisodes = parseEpisodes,
+        maxPages = maxPages,
+        timeoutSeconds = timeoutSeconds,
+    ).episodes
+
+    fun collectPaginatedEpisodesWithMore(
+        firstDocument: Document,
+        firstPageUrl: String,
+        fetchDocument: (String) -> Document?,
+        parseEpisodes: (Document) -> List<Triple<String, String, Int?>>,
+        maxPages: Int = 120,
+        timeoutSeconds: Long = 20,
+    ): PaginatedEpisodesResult {
         val byUrl = linkedMapOf<String, Triple<String, String, Int?>>()
         fun merge(rows: List<Triple<String, String, Int?>>) {
             rows.forEach { row ->
                 val key = normalizedUrl(row.second)
                 if (key.isNotBlank()) {
                     val old = byUrl[key]
-                    if (old == null || (old.third == null && row.third != null)) byUrl[key] = row
+                    if (old == null || (old.first.isBlank() && row.first.isNotBlank()) || (old.third == null && row.third != null)) {
+                        byUrl[key] = if (old != null) Triple(old.first.ifBlank { row.first }, row.second, row.third ?: old.third) else row
+                    }
                 }
             }
         }
@@ -749,7 +806,10 @@ internal object SeriesCatalogParser {
             futures.filterNot { it.isDone }.forEach { it.cancel(true) }
             if (System.nanoTime() >= deadline) break
         }
-        return byUrl.values.toList()
+        return PaginatedEpisodesResult(
+            episodes = byUrl.values.toList(),
+            hasMorePages = pending.any { normalizedUrl(it) !in visited },
+        )
     }
 
     fun partNumber(title: String, url: String): Int? = extractLabeledNumber(
@@ -913,11 +973,12 @@ internal object SeriesCatalogParser {
                     }
                     validEpisodes.add(ep)
                 }
+                val seasonMatch = bundle.seasons.firstOrNull { it.number == seasonNumber }
                 val seasonPageUrl = bundle.seasons
                     .firstOrNull { it.number == seasonNumber && it.pageUrl.isNotBlank() }
                     ?.pageUrl
                     .orEmpty()
-                ArabseedSeason(seasonNumber, seasonTitle(seasonNumber), validEpisodes, seasonPageUrl)
+                ArabseedSeason(seasonNumber, seasonTitle(seasonNumber), validEpisodes, seasonPageUrl, seasonMatch?.hasMorePages)
             }
             .filter { it.episodes.isNotEmpty() }
 
@@ -932,15 +993,30 @@ internal object SeriesCatalogParser {
         return ArabseedSeasonBundle(normalizedSeasons, relatedParts)
     }
 
+    private val latinSegmentPattern = Regex("""[a-z][a-z0-9]*(?:\s+[a-z0-9]+)*""")
+    private val arabicCharPattern = Regex("""[\u0600-\u06FF]""")
+    private val genericLatinIdentityStopWords = setOf(
+        "series", "episode", "episodes", "season", "seasons", "movie", "movies",
+        "film", "films", "watch", "download", "online", "ultra", "full",
+        "hd", "fhd", "uhd", "web", "dl", "bluray", "sub", "dub", "ar", "en",
+    )
+
     fun cleanSeriesTitle(title: String): String {
-        val withoutPrefix = normalizeDigits(title)
+        val cleaned = normalizeDigits(title)
+            .replace(Regex("""(?i)\s+نسبة\s+التشابه\s*[0-9]{1,3}\s*%?\s*$"""), "")
+            // Strip leading quality/completion/episode badges on episode & search cards.
+            .replace(Regex("""(?i)^\s*(?:(?:FHD|UHD|HD|4K|WEB-DL|BluRay)\s+)*(?:مكتمل|مستمر|يعرض\s+حاليا)(?:\s*·\s*|\s+)(?:[0-9]{1,4}\s*(?:حلقة|حلقات)\s+)?(?:[0-9]+(?:\.[0-9]+)?\s+)?"""), "")
+            .replace(Regex("""(?i)^\s*(?:(?:والاخيرة|الاخيرة|والاخيره|الاخيره|نهاية\s+الموسم)\s+)+"""), "")
+            .replace(Regex("""(?i)^\s*(?:(?:الحلقة|الحلقه|حلقة|حلقه)\s*(?:رقم\s*)?[0-9]{1,4}\s+(?:(?:والاخيرة|الاخيرة|والاخيره|الاخيره|مترجم|مترجمة|مدبلج|مدبلجة|حصريا)\s+)*)(?=[\p{L}])"""), "")
+            .replace(Regex("""(?i)^\s*(?:(?:اثارة|دراما|اكشن|رومانسي|كوميديا|غموض|رعب|فانتازيا|تاريخي|وثائقي|خيال\s+علمي|مغامرة|جريمة|عائلي|1080p|720p|480p|4k|fhd|uhd|hd|web-dl|bluray|مترجم|مترجمة|مدبلج|مدبلجة)\s+|مسلسلات\s+(?:عربية|اجنبي|اجنبية|تركية|تركي|اسيوية|اسيوي|كورية|كوري|هندية|هندي|انمي|مدبلجة|مترجمة|كارتون|جديدة)\s+|(?:[0-9]+\.[0-9]+)\s+)*(?=(?:مسلسل|سلسلة|انمي|أنمي)\s+)"""), "")
+        val withoutPrefix = cleaned
             .replace(Regex("""(?i)^\s*(?:(?:مشاهدة|مشاهده|تحميل|سلسلة|مسلسل|فيلم|انمي|أنمي|برنامج)\s+)*"""), "")
         val withoutSeriesSuffix = withoutPrefix
             .replace(
-                Regex("""(?i)(?:\s+|(?<=[0-9]))(?:الموسم|موسم|season|الجزء|جزء|part|الحلقة|حلقة|episode|ep)\s*.*$"""),
+                Regex("""(?i)(?:^|\s+|(?<=[0-9]))(?:الموسم|موسم|season|الجزء|جزء|part|الحلقة|حلقة|episode|ep)\s*.*$"""),
                 "",
             )
-            .replace(Regex("""(?i)\s+(?:مترجم|مدبلج|(?:مترج|مدبل)(?=\s*$)|فيلم|مسلسل|WEB-DL|720p|1080p|HD).*"""), "")
+            .replace(Regex("""(?i)\s+(?:مترجم|مترجمة|مدبلج|مدبلجة|(?:مترج|مدبل)(?=\s*$)|فيلم|مسلسل|WEB-DL|720p|1080p|4K|FHD|UHD|HD).*"""), "")
             .trim()
         return withoutSeriesSuffix
     }
@@ -955,6 +1031,108 @@ internal object SeriesCatalogParser {
         title.replace(Regex("""(?<!\d)(?:19|20)\d{2}(?!\d)"""), " "),
     )
 
+    private fun extractScriptSegments(identity: String): Pair<String, String> {
+        val norm = identity.trim()
+        if (norm.isBlank()) return "" to ""
+        val latin = latinSegmentPattern.findAll(norm)
+            .map { it.value.trim() }
+            .filter { segment ->
+                val words = segment.split(' ').filter(String::isNotBlank)
+                val meaningful = words.filterNot { it in genericLatinIdentityStopWords }
+                meaningful.any { word -> word.any { ch -> ch in 'a'..'z' } } &&
+                    (meaningful.size >= 2 || meaningful.joinToString("").length >= 4)
+            }
+            .joinToString(" ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+        val arabic = norm.replace(Regex("""[a-z0-9]+"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+            .takeIf { seg -> arabicCharPattern.containsMatchIn(seg) && seg.count { it.isLetter() } >= 3 }
+            .orEmpty()
+        return arabic to latin
+    }
+
+    internal fun identitiesEquivalent(a: String, b: String): Boolean {
+        if (a.isBlank() || b.isBlank()) return false
+        if (a == b) return true
+        val (aAr, aLat) = extractScriptSegments(a)
+        val (bAr, bLat) = extractScriptSegments(b)
+        // Bilingual <-> Latin or Bilingual <-> Bilingual on full original Latin title.
+        if (aLat.isNotBlank() && bLat.isNotBlank() && aLat == bLat && (aAr.isNotBlank() || bAr.isNotBlank())) {
+            return true
+        }
+        // Same-work Bilingual <-> pure-Arabic archive/episode label (e.g. AraDrama).
+        if (aAr.isNotBlank() && bAr.isNotBlank() && aAr == bAr &&
+            ((aLat.isNotBlank() && bLat.isBlank()) || (bLat.isNotBlank() && aLat.isBlank()))
+        ) {
+            return true
+        }
+        return false
+    }
+
+    private fun hasLatinScript(identity: String): Boolean = extractScriptSegments(identity).second.isNotBlank()
+
+    private fun hasArabicScript(identity: String): Boolean = extractScriptSegments(identity).first.isNotBlank()
+
+    private fun isCompatibleSeriesEvidence(
+        targetIdentities: Set<String>,
+        titleIdentities: List<String>,
+        urlIdentities: List<String>,
+        isUrlOnly: Boolean,
+        allowUrlArabicPrefix: Boolean = false,
+    ): Boolean {
+        val allEvidence = (titleIdentities + urlIdentities).distinct()
+        if (allEvidence.isEmpty()) return false
+        fun isPrefixMatchForUrlArabic(ev: String): Boolean {
+            if (!allowUrlArabicPrefix || ev !in urlIdentities) return false
+            val evHasLatin = hasLatinScript(ev)
+            val evHasArabic = hasArabicScript(ev)
+            if (evHasLatin || !evHasArabic || ev.split(' ').size < 2) return false
+            return targetIdentities.any { t ->
+                val tAr = extractScriptSegments(t).first
+                tAr.startsWith("$ev ")
+            }
+        }
+        val anyMatch = allEvidence.any { ev ->
+            targetIdentities.any { t -> identitiesEquivalent(t, ev) } || isPrefixMatchForUrlArabic(ev)
+        }
+        if (!anyMatch) return false
+
+        val targetHasLatin = targetIdentities.any(::hasLatinScript)
+        val targetHasArabic = targetIdentities.any(::hasArabicScript)
+        val matchingTitle = titleIdentities.firstOrNull { tId ->
+            targetIdentities.any { target -> identitiesEquivalent(target, tId) }
+        }
+
+        for (ev in allEvidence) {
+            if (targetIdentities.any { t -> identitiesEquivalent(t, ev) } || isPrefixMatchForUrlArabic(ev)) continue
+            val evIsUrl = ev in urlIdentities && ev !in titleIdentities
+            val evHasLatin = hasLatinScript(ev)
+            val evHasArabic = hasArabicScript(ev)
+
+            // Cross-script Romanized/foreign URL slug (e.g. EgyDead/Akwam/ArabLionz/Esheeq
+            // using Turkish/Romanized slug alongside an exact Arabic title match).
+            if (evIsUrl && matchingTitle != null) {
+                if (evHasLatin && !evHasArabic && !targetHasLatin) continue
+                // Truncated WordPress Arabic slug prefix of the matching title on the same link.
+                if (!evHasLatin && evHasArabic && matchingTitle.contains(ev) && ev.split(' ').size >= 2) continue
+            }
+            // Also check trailing numeric ID stripped variant on URL slugs when matchingTitle lacks the number.
+            if (evIsUrl) {
+                val strippedNum = ev.replace(Regex("""\s+[0-9]{2,6}$"""), "").trim()
+                if (strippedNum.isNotBlank() && targetIdentities.any { t -> identitiesEquivalent(t, strippedNum) }) {
+                    continue
+                }
+            }
+            // Shared-script conflict means a different work (e.g. alls-fair vs doctor-x).
+            if ((evHasLatin && targetHasLatin) || (evHasArabic && targetHasArabic) || !isUrlOnly) {
+                return false
+            }
+        }
+        return true
+    }
+
     /** Search results may use short prefixes; only full work identities are safe to merge. */
     fun matchesExactSeriesIdentity(
         targetIdentities: Collection<String>,
@@ -967,7 +1145,7 @@ internal object SeriesCatalogParser {
         return candidateTitles.asSequence()
             .filter(String::isNotBlank)
             .map(::normalizedSeriesIdentity)
-            .any { it.isNotBlank() && it in targets }
+            .any { candidate -> candidate.isNotBlank() && targets.any { t -> identitiesEquivalent(t, candidate) } }
     }
 
     /** Verify a candidate catalog/breadcrumb page against both its title and readable URL slug. */
@@ -983,11 +1161,16 @@ internal object SeriesCatalogParser {
             .toSet()
         if (targetIdentities.isEmpty()) return false
 
-        val candidateIdentities = (candidateTitles.mapNotNull(::seriesIdentityFromTitle) +
-            candidatePageUrls.mapNotNull(::seriesIdentityFromUrl))
+        val candidateTitleIdentities = candidateTitles.mapNotNull(::seriesIdentityFromTitle)
             .filter(::isMeaningfulSeriesIdentity)
-            .toSet()
-        return candidateIdentities.isNotEmpty() && candidateIdentities.all { it in targetIdentities }
+        val candidateUrlIdentities = candidatePageUrls.mapNotNull(::seriesIdentityFromUrl)
+            .filter(::isMeaningfulSeriesIdentity)
+        return isCompatibleSeriesEvidence(
+            targetIdentities = targetIdentities,
+            titleIdentities = candidateTitleIdentities,
+            urlIdentities = candidateUrlIdentities,
+            isUrlOnly = false,
+        )
     }
 
     /**
@@ -1013,12 +1196,24 @@ internal object SeriesCatalogParser {
         val evidence = listOfNotNull(titleIdentity, urlIdentity).distinct()
         // A readable title/slug must agree. Opaque IDs may rely on a trusted
         // episode-list container after recommendation containers were excluded.
-        return if (evidence.isEmpty()) allowEpisodeListContext else evidence.all { it in targetIdentities }
+        if (evidence.isEmpty()) return allowEpisodeListContext
+        return isCompatibleSeriesEvidence(
+            targetIdentities = targetIdentities,
+            titleIdentities = listOfNotNull(titleIdentity),
+            urlIdentities = listOfNotNull(urlIdentity),
+            isUrlOnly = titleIdentity == null,
+            allowUrlArabicPrefix = allowEpisodeListContext,
+        )
     }
 
     internal fun seriesIdentityFromTitle(title: String): String? {
         val normalizedTitle = normalizeDigits(title).trim()
-        if (Regex("""(?i)^[0-9\s._-]*(?:الحلقة|حلقة|الحلقه|episode|ep)\s*[0-9]+(?:\s+.*)?$""")
+        val hasSeriesKeyword = Regex("""(?:مسلسل|سلسلة|انمي|أنمي)\s+""").containsMatchIn(normalizedTitle)
+        val hasWrappedSeriesWithTrailingEp = Regex(
+            """(?i)^[0-9\s._-]*(?:الحلقة|حلقة|الحلقه|episode|ep)\s*[0-9]+\s+\S+.*?(?:الحلقة|حلقة|الحلقه|episode|ep)\s*[0-9]+(?:\s*(?:والاخيرة|الاخيرة|والاخيره|الاخيره|مترجمة?|مدبلجة?))*\s*$""",
+        ).containsMatchIn(normalizedTitle)
+        if (!hasSeriesKeyword && !hasWrappedSeriesWithTrailingEp &&
+            Regex("""(?i)^[0-9\s._-]*(?:الحلقة|حلقة|الحلقه|episode|ep)\s*[0-9]+(?:\s+.*)?$""")
                 .matches(normalizedTitle)
         ) return null
         val identity = normalizedSeriesIdentity(title)
@@ -1034,6 +1229,7 @@ internal object SeriesCatalogParser {
             return null
         }
         slug = decodeUrl(slug)
+            .replace(Regex("""(?i)^(?:akdrama|akseries|akfilm)[-_ ]+"""), "")
             // Episode-only slugs should retain the parent series identity.
             // Providers use several readable suffix formats, for example
             // `one-piece-episode-843`, `one-piece-s1-eps843`, and the
@@ -1048,21 +1244,29 @@ internal object SeriesCatalogParser {
             // a 2-char alphanumeric hash (-b5, -p2) or counter (-10, -35), e.g. -الحل-b5, -المو-35, -المو.
             .replace(
                 Regex(
-                    """(?i)(?:^|[-_ ])(?:الحلقة|الحلقه|حلقة|حلقه|الحلق|الحل|الموسم|الموس|المو|موسم|موس|الجزء|الجز)(?:[-_ ]+(?:[0-9]{1,4}|[a-z][0-9]|[0-9][a-z]))?$""",
+                    """(?i)(?:^|[-_ ])(?:الحلقة|الحلقه|حلقة|حلقه|الحلق|الحل|الموسم|الموس|المو|موسم|موس|الجزء|الجز|ال)[-_ ]+(?:[0-9]{1,4}|[a-z][0-9]|[0-9][a-z])(?:[-_ ].*)?$""",
                 ),
                 " ",
             )
+            .replace(
+                Regex(
+                    """(?i)(?:^|[-_ ])(?:الحلقة|الحلقه|حلقة|حلقه|الحلق|الحل|الموسم|الموس|المو|موسم|موس|الجزء|الجز)$""",
+                ),
+                " ",
+            )
+            .replace(Regex("""(?i)(?:^|[-_ ])(?:مترجمة|مترجم|مترج|مدبلجة|مدبلج|مدبل|end)(?=[-_ ]|$)"""), " ")
             .replace(
                 Regex(
                     """(?i)(?:^|[-_ ])(?:الموسم|الموس|المو|موسم|الجزء)[-_ ]+(?:الاولى|الاول|الثانية|الثاني|الثالثة|الثالث|الرابعة|الرابع|الخامسة|الخامس|الثا|الرا|مترج|مدبل)?$""",
                 ),
                 " ",
             )
-            .replace(Regex("""(?i)(?:^|[-_ ])(?:مترجمة|مترجم|مترج|مدبلجة|مدبلج|مدبل)$"""), " ")
-            .replace(Regex("""(?i)(?:^|[-_ ])m[0-9]{1,2}[-_]n[0-9]{1,4}$"""), " ")
-            .replace(Regex("""(?i)(?:^|[-_ ])e[0-9]{1,4}[-_]s[0-9]{1,2}$"""), " ")
+            .replace(Regex("""(?i)(?:[-_ ]+al)?(?:[-_ ]+m[0-9]{1,2}[-_]*(?:n)?[0-9]{1,4})$"""), " ")
+            .replace(Regex("""(?i)(?:[-_ ]+al)?(?:[-_ ]+e[0-9]{1,4}[-_]*(?:s[0-9]{1,2}|ar|en)?)$"""), " ")
             .replace(Regex("""(?i)(?:^|[-_ ])s[0-9]{1,2}(?:[-_ ].*)?$"""), " ")
             .replace(Regex("""(?i)(?:^|[-_ ])season[-_ ]*[0-9]{1,2}(?:[-_ ].*)?$"""), " ")
+            // Strip WordPress/CMS post numeric IDs at end of URL slug (4+ digits excluding 19xx/20xx years).
+            .replace(Regex("""(?i)(?:^|[-_ ])(?!(?:19[0-9]{2}|20[0-3][0-9])$)[0-9]{4,}$"""), " ")
             .replace(Regex("""[-_]+"""), " ")
         val identity = normalizedSeriesIdentity(slug)
         return identity.takeIf(::isMeaningfulSeriesIdentity)

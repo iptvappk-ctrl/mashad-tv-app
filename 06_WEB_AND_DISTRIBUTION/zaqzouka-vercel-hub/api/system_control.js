@@ -106,6 +106,8 @@ export default async function handler(req, res) {
       if (action === 'freeze') {
         const payload = {
           status: 'frozen',
+          system_enabled: false,
+          maintenance_mode: true,
           message: message || 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.',
           updatedAt: now,
           wipeTimestamp: 0,
@@ -120,6 +122,22 @@ export default async function handler(req, res) {
         };
         await ref.set(payload);
         return res.status(200).json({ success: true, action: 'freeze', state: payload });
+      }
+
+      if (action === 'set_system') {
+        const enabledVal = req.body.system_enabled !== false;
+        await ref.update({
+          system_enabled: enabledVal,
+          maintenance_mode: !enabledVal,
+          status: enabledVal ? 'active' : 'frozen',
+          message: enabledVal
+            ? 'المنظومة نشطة وتعمل بكامل طاقتها.'
+            : (message || 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.'),
+          updatedAt: now,
+          updated_at: new Date().toISOString(),
+        });
+        await ref.child('components/app_enabled').set(enabledVal);
+        return res.status(200).json({ success: true, action: 'set_system', system_enabled: enabledVal });
       }
 
       if (action === 'wipe') {
@@ -154,6 +172,8 @@ export default async function handler(req, res) {
         if (catalog && typeof catalog === 'object') await db.ref('cached_feeds').set(catalog);
         const payload = {
           status: 'active',
+          system_enabled: true,
+          maintenance_mode: false,
           message: message || 'المنظومة نشطة وتعمل بكامل طاقتها.',
           updatedAt: now,
           wipeTimestamp: 0,

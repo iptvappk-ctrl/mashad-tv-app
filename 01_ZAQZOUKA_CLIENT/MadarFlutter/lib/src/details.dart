@@ -157,14 +157,31 @@ class _DetailPageState extends State<DetailPage> {
   final Set<int> _episodeSeasonsExhausted = <int>{};
 
   void _seedEpisodePageCursors(Map<String, dynamic>? bundle) {
+    final episodeUrlPattern = RegExp(
+      r'/(?:episodes?)(?:/|[-_])|(?:^|[-_/])(?:eps?|ep)\d{1,4}(?:[-_/]|$)|(?:^|[-_/])s\d{1,2}[-_]e(?:p)?s?\d{1,4}(?:[-_/]|$)',
+      caseSensitive: false,
+    );
     for (final season in _maps(bundle?['seasons'])) {
       final number = _integer(season['number']);
-      if (number <= 0 ||
-          _maps(season['episodes']).isEmpty ||
-          _episodeSeasonsExhausted.contains(number)) {
+      if (number <= 0 || _maps(season['episodes']).isEmpty) {
+        continue;
+      }
+      if (season['hasMorePages'] == false) {
+        _episodePageCursorBySeason.remove(number);
+        _episodeSeasonsExhausted.add(number);
+        continue;
+      }
+      if (season['hasMorePages'] == true) {
+        _episodeSeasonsExhausted.remove(number);
+      } else if (_episodeSeasonsExhausted.contains(number)) {
         continue;
       }
       final pageUrl = _text(season['pageUrl']).trim();
+      if (episodeUrlPattern.hasMatch(pageUrl)) {
+        _episodePageCursorBySeason.remove(number);
+        _episodeSeasonsExhausted.add(number);
+        continue;
+      }
       final currentPageIsSeasonScoped =
           pageUrl == widget.item.pageUrl &&
           RegExp(

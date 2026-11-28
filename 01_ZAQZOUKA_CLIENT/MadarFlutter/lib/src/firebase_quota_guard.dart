@@ -114,7 +114,10 @@ class SystemStatus {
     String resolvedStatus = (j['status'] as String? ?? 'active').toLowerCase();
     String resolvedMessage = j['message'] as String? ?? 'المنظومة نشطة';
 
-    if (resolvedStatus == 'active' && comps['app_enabled'] == false) {
+    if (resolvedStatus == 'active' &&
+        (comps['app_enabled'] == false ||
+            j['system_enabled'] == false ||
+            j['maintenance_mode'] == true)) {
       resolvedStatus = 'frozen';
       resolvedMessage = 'عفواً، التطبيق متوقف حالياً للصيانة.';
     }

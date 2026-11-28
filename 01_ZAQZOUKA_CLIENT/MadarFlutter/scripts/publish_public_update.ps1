@@ -84,7 +84,7 @@ if ($releaseExists) {
 if ($LASTEXITCODE -ne 0) { throw "GitHub Release upload failed." }
 
 # Also upload the companion ZAG Player APK if available
-$playerApk = "<project_root>\realses\zag-player.apk"
+$playerApk = (Join-Path (Resolve-Path (Join-Path $projectRoot "..\..")).Path "realses\zag-player.apk")
 $hasPlayer = Test-Path -LiteralPath $playerApk
 $playerObj = $null
 if ($hasPlayer) {
@@ -101,7 +101,7 @@ if ($hasPlayer) {
     Copy-Item -LiteralPath $playerApk -Destination $playerTempPath -Force
     gh release upload $tag $playerTempPath --repo $Repository --clobber
     $playerObj = [ordered]@{
-        packageName = "com.mader.player"
+        packageName = "com.madar.player"
         versionCode = $playerVersionCode
         versionName = $playerVersionName
         apkUrl = "https://github.com/$Repository/releases/download/$tag/$playerAssetName"
@@ -156,7 +156,7 @@ $firebaseManifest = [ordered]@{
     versionName = $VersionName
     apkUrl = "https://github.com/$Repository/releases/download/$tag/$assetName"
     sha256 = $sha256
-    mandatory = $false
+    mandatory = $true
     releaseNotes = $ReleaseNotes
 }
 if ($playerObj) { $firebaseManifest["player"] = $playerObj }

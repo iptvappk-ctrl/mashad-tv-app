@@ -606,10 +606,11 @@ private fun ArabseedSeasonBundle.toMap(): Map<String, Any?> {
     "seasons" to normalized.seasons.map { season -> mapOf(
         "number" to season.number, "title" to season.title,
         "pageUrl" to season.pageUrl,
+        if (season.hasMorePages != null) "hasMorePages" to season.hasMorePages else "hasMorePages" to null,
         "episodes" to season.episodes.sortedWith(compareBy<ArabseedEpisode> { it.seasonNumber }.thenBy { it.number }).map { episode ->
             mapOf("number" to episode.number, "title" to episode.title, "pageUrl" to episode.pageUrl, "seasonNumber" to episode.seasonNumber, "providerName" to episode.providerName, "alternatePageUrls" to episode.alternatePageUrls)
         },
-    ) },
+    ).filterValues { it != null } },
     "relatedParts" to normalized.relatedParts.map { it.toMap() },
 )
 }

@@ -455,7 +455,7 @@ object ArabseedRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonBundleCache[pageUrl]?.let { return it }
-        CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v28:" + pageUrl)?.let { cached ->
+        CatalogDiskCache.loadSeasonBundle("arabseed:seasons:v29:" + pageUrl)?.let { cached ->
             val normalized = SeriesCatalogParser.normalizeSeasonBundle(cached.value)
             seasonBundleCache[pageUrl] = normalized
             seasonBundleCacheAt[pageUrl] = cached.savedAt
@@ -983,8 +983,10 @@ object ArabseedRepository {
 
                 // A clean sequence on page 1 does not mean a long-running series
                 // has no later pages. Follow the provider's explicit pager.
-                if (SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()) {
-                    val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                val seasonHasMorePages = linkedMapOf<Int, Boolean>()
+                val pageHasPager = SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()
+                if (pageHasPager) {
+                    val paginatedResult = SeriesCatalogParser.collectPaginatedEpisodesWithMore(
                         firstDocument = doc,
                         firstPageUrl = item.pageUrl,
                         fetchDocument = { pageUrl ->
@@ -1002,13 +1004,25 @@ object ArabseedRepository {
                             else -> 5
                         },
                     )
-                    for (ep in paginated) {
+                    (requestedSeasonPageNumber ?: pageSeasonNumber)?.let {
+                        seasonHasMorePages[it] = paginatedResult.hasMorePages
+                    }
+                    for (ep in paginatedResult.episodes) {
                         val existingIndex = rawEpisodes.indexOfFirst {
                             SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(ep.second)
                         }
                         if (existingIndex < 0) rawEpisodes += ep
-                        else if (rawEpisodes[existingIndex].third == null && ep.third != null) rawEpisodes[existingIndex] = ep
+                        else {
+                            val prev = rawEpisodes[existingIndex]
+                            rawEpisodes[existingIndex] = Triple(
+                                if (prev.first.isBlank()) ep.first else prev.first,
+                                prev.second,
+                                prev.third ?: ep.third,
+                            )
+                        }
                     }
+                } else if (pageSeasonNumber != null) {
+                    seasonHasMorePages[pageSeasonNumber] = false
                 }
 
                 val currentPage = SeriesCatalogParser.normalizedUrl(item.pageUrl)
@@ -1288,7 +1302,7 @@ object ArabseedRepository {
                     seasonPageCompletion.submit(Callable {
                         val seasonDoc = Jsoup.parse(fetchSeasonHtml(seasonUrl), BASE_URL)
                         seasonDoc.select("footer, script, style").remove()
-                        val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                        val paginated = SeriesCatalogParser.collectPaginatedEpisodesWithMore(
                             firstDocument = seasonDoc,
                             firstPageUrl = seasonUrl,
                             fetchDocument = { pageUrl ->
@@ -1310,7 +1324,8 @@ object ArabseedRepository {
                                 else -> 5
                             },
                         )
-                        seasonNumber to paginated
+                        seasonHasMorePages[seasonNumber] = paginated.hasMorePages
+                        seasonNumber to paginated.episodes
                     })
                 }
                 // Fetch linked season tabs concurrently with enough headroom for long series.
@@ -1520,6 +1535,7 @@ object ArabseedRepository {
                             pageUrl = seasonPageUrlByNumber[sNum].orEmpty().ifBlank {
                                 item.pageUrl.takeIf { pageSeasonNumber == sNum }.orEmpty()
                             },
+                            hasMorePages = seasonHasMorePages[sNum] ?: false,
                         )
                     }
                 }
@@ -1699,7 +1715,8 @@ object ArabseedRepository {
                                         providerName = item.providerName
                                     )
                                 ),
-                                pageUrl = item.pageUrl
+                                pageUrl = item.pageUrl,
+                                hasMorePages = false,
                             )
                         }
                     }
@@ -1800,7 +1817,7 @@ object ArabseedRepository {
                 if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                     seasonBundleCache[item.pageUrl] = bundle
                     seasonBundleCacheAt[item.pageUrl] = System.currentTimeMillis()
-                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v28:" + item.pageUrl, bundle)
+                    CatalogDiskCache.saveSeasonBundle("arabseed:seasons:v29:" + item.pageUrl, bundle)
                 }
 
                 bundle

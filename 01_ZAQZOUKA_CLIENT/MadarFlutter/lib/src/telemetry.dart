@@ -39,7 +39,7 @@ class AppTelemetry {
   ];
 
   static String _resolvedBaseUrl = 'https://dashboard-api-amber-chi.vercel.app';
-  static String _appVersion = '1.0.83+90';
+  static String _appVersion = '1.0.86+93';
 
   /// Initializes device telemetry and reports session start.
   static Future<void> initialize() async {
@@ -49,8 +49,8 @@ class AppTelemetry {
     try {
       final vInfo = await _native.invokeMapMethod<String, dynamic>('app.versionInfo');
       if (vInfo != null) {
-        final vName = vInfo['versionName']?.toString() ?? '1.0.83';
-        final vCode = vInfo['versionCode']?.toString() ?? '90';
+        final vName = vInfo['versionName']?.toString() ?? '1.0.86';
+        final vCode = vInfo['versionCode']?.toString() ?? '93';
         _appVersion = '$vName+$vCode';
       }
     } catch (_) {}

@@ -224,7 +224,7 @@ object MultiProviderRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonCache[pageUrl]?.let { return it }
-        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v37:" + pageUrl) ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v38:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
         seasonCache[pageUrl] = normalized
         seasonCacheAt[pageUrl] = snapshot.savedAt
@@ -232,7 +232,7 @@ object MultiProviderRepository {
     }
 
     fun loadCachedMergedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
-        val snapshot = CatalogDiskCache.loadSeasonBundle("combined:seasons:v41:$pageUrl") ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("combined:seasons:v42:$pageUrl") ?: return null
         if (System.currentTimeMillis() - snapshot.savedAt > SEASON_TTL) return null
         return SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
     }
@@ -272,7 +272,7 @@ object MultiProviderRepository {
         seasonProviderSweepStatus(pageUrl).complete
 
     private fun seasonProviderSweepKey(pageUrl: String): String =
-        "combined:provider-sweep:v5:${SeriesCatalogParser.normalizedUrl(pageUrl)}"
+        "combined:provider-sweep:v6:${SeriesCatalogParser.normalizedUrl(pageUrl)}"
 
     private fun invalidateProviderSeasonSweep(pageUrl: String) {
         val expected = PROVIDERS.filter { it.enabled }.map { it.id }.distinct().sorted()
@@ -338,7 +338,7 @@ object MultiProviderRepository {
             mergeProviderSeasonBundles(listOf(seasonItem to seasonBundle, seriesItem to existing))
         }
         if (merged.seasons.isNotEmpty() || merged.relatedParts.isNotEmpty()) {
-            CatalogDiskCache.saveSeasonBundle("combined:seasons:v41:${seriesItem.pageUrl}", merged)
+            CatalogDiskCache.saveSeasonBundle("combined:seasons:v42:${seriesItem.pageUrl}", merged)
         }
         val changed = previousSignature != seasonBundleEpisodeSignature(merged)
         if (changed) invalidateProviderSeasonSweep(seriesItem.pageUrl)
@@ -4673,8 +4673,16 @@ object MultiProviderRepository {
                             if (href.startsWith("http") && episodeNumber != null) {
                                 val key = SeriesCatalogParser.normalizedUrl(href)
                                 val previous = collected[key]
-                                if (previous == null || (previous.third == null && seasonNumber != null)) {
+                                if (previous == null) {
                                     collected[key] = Triple(txt, href, seasonNumber)
+                                } else if ((previous.first.isBlank() && txt.isNotBlank()) ||
+                                    (previous.third == null && seasonNumber != null)
+                                ) {
+                                    collected[key] = Triple(
+                                        previous.first.ifBlank { txt },
+                                        href,
+                                        seasonNumber ?: previous.third,
+                                    )
                                 }
                             }
                         }
@@ -4690,16 +4698,21 @@ object MultiProviderRepository {
                 }
                 if (existingIndex < 0) {
                     rawEpisodes += ep
-                } else if (rawEpisodes[existingIndex].third == null && ep.third != null) {
-                    rawEpisodes[existingIndex] = ep
+                } else {
+                    val prev = rawEpisodes[existingIndex]
+                    if ((prev.first.isBlank() && ep.first.isNotBlank()) || (prev.third == null && ep.third != null)) {
+                        rawEpisodes[existingIndex] = Triple(prev.first.ifBlank { ep.first }, prev.second, prev.third ?: ep.third)
+                    }
                 }
             }
+
+            val seasonHasMorePages = linkedMapOf<Int, Boolean>()
 
             // A contiguous first page is not proof that the season is complete.
             // Anime and long-running series commonly paginate cleanly (1, 2, 3…)
             // while still having hundreds of later episodes.
             if (SeriesCatalogParser.linkedEpisodePages(doc, item.pageUrl).isNotEmpty()) {
-                val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                val paginatedResult = SeriesCatalogParser.collectPaginatedEpisodesWithMore(
                     firstDocument = doc,
                     firstPageUrl = item.pageUrl,
                     fetchDocument = { pageUrl ->
@@ -4718,13 +4731,18 @@ object MultiProviderRepository {
                         else -> 6
                     },
                 )
-                for (ep in paginated) {
+                (requestedSeasonPageNumber ?: pageSeasonNumber)?.let {
+                    seasonHasMorePages[it] = paginatedResult.hasMorePages
+                }
+                for (ep in paginatedResult.episodes) {
                     val existingIndex = rawEpisodes.indexOfFirst {
                         SeriesCatalogParser.normalizedUrl(it.second) == SeriesCatalogParser.normalizedUrl(ep.second)
                     }
                     if (existingIndex < 0) rawEpisodes += ep
                     else if (rawEpisodes[existingIndex].third == null && ep.third != null) rawEpisodes[existingIndex] = ep
                 }
+            } else if (pageSeasonNumber != null) {
+                seasonHasMorePages[pageSeasonNumber] = false
             }
 
             val currentPage = SeriesCatalogParser.normalizedUrl(item.pageUrl)
@@ -4800,6 +4818,9 @@ object MultiProviderRepository {
                         )
                     ) continue
                     var parentEps = collectEpisodes(parentDoc)
+                    val parentHasSeasonTabs = SeriesCatalogParser.linkedSeasonPages(parentDoc, parentHref) { href ->
+                        isProviderContentUrl(href, item.pageUrl)
+                    }.isNotEmpty()
                     val parentContainsCurrentEpisode = parentEps.any {
                         SeriesCatalogParser.normalizedUrl(it.second) == currentPage
                     }
@@ -4808,10 +4829,13 @@ object MultiProviderRepository {
                         if (isEpisodePage && !isArchive) parentContainsCurrentEpisode
                         else parentEps.size > rawEpisodes.size
                     )
-                    if (!shouldUseParent) continue
+                    if (!shouldUseParent) {
+                        if (parentHasSeasonTabs) seasonDiscoveryDocs += parentDoc
+                        continue
+                    }
                     if (SeriesCatalogParser.linkedEpisodePages(parentDoc, parentHref).isNotEmpty()) {
                         val parentReferer = pageOrigin(parentHref, itemReferer)
-                        val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                        val paginated = SeriesCatalogParser.collectPaginatedEpisodesWithMore(
                             firstDocument = parentDoc,
                             firstPageUrl = parentHref,
                             fetchDocument = { pageUrl ->
@@ -4823,8 +4847,11 @@ object MultiProviderRepository {
                             maxPages = if (forceRefresh) 16 else 6,
                             timeoutSeconds = if (forceRefresh) 10 else 6,
                         )
-                        if (paginated.size > parentEps.size) {
-                            parentEps = paginated
+                        SeriesCatalogParser.seasonNumber(parentTitle, parentHref)?.let {
+                            seasonHasMorePages[it] = paginated.hasMorePages
+                        }
+                        if (paginated.episodes.size > parentEps.size) {
+                            parentEps = paginated.episodes
                         }
                     }
                     val isCanonical = SeriesCatalogParser.seasonNumber(parentTitle, parentHref) == null &&
@@ -4894,7 +4921,7 @@ object MultiProviderRepository {
                         else fetchHtml(seasonUrl, seasonReferer)
                     val seasonDoc = Jsoup.parse(seasonHtml, seasonUrl)
                     seasonDoc.select("footer, script, style").remove()
-                    val paginated = SeriesCatalogParser.collectPaginatedEpisodes(
+                    val paginated = SeriesCatalogParser.collectPaginatedEpisodesWithMore(
                         firstDocument = seasonDoc,
                         firstPageUrl = seasonUrl,
                         fetchDocument = { pageUrl ->
@@ -4918,7 +4945,8 @@ object MultiProviderRepository {
                             else -> 6
                         },
                     )
-                    seasonNumber to paginated
+                    seasonHasMorePages[seasonNumber] = paginated.hasMorePages
+                    seasonNumber to paginated.episodes
                 })
             }
             // A series page is on the first paint path, so keep short series fast while
@@ -5035,6 +5063,7 @@ object MultiProviderRepository {
                     seasonPageUrlByNumber[seasonNumber].orEmpty().ifBlank {
                         item.pageUrl.takeIf { pageSeasonNumber == seasonNumber }.orEmpty()
                     },
+                    hasMorePages = seasonHasMorePages[seasonNumber] ?: if (isEpisodePage) false else null,
                 )
             }
             val baseSeasonsWithLinks = seasons.map { season ->
@@ -5059,6 +5088,7 @@ object MultiProviderRepository {
                             )
                         ),
                         pageUrl = item.pageUrl,
+                        hasMorePages = false,
                     )
                 ) else baseSeasonsWithLinks
             } else baseSeasonsWithLinks
@@ -5121,7 +5151,7 @@ object MultiProviderRepository {
             if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                 seasonCache[item.pageUrl] = bundle
                 seasonCacheAt[item.pageUrl] = System.currentTimeMillis()
-                CatalogDiskCache.saveSeasonBundle("providers:seasons:v37:" + item.pageUrl, bundle)
+                CatalogDiskCache.saveSeasonBundle("providers:seasons:v38:" + item.pageUrl, bundle)
             }
             bundle
         } catch (_: Exception) {
@@ -5228,7 +5258,7 @@ object MultiProviderRepository {
         primaryBundle: ArabseedSeasonBundle,
         forceRefresh: Boolean = false,
     ): ArabseedSeasonBundle {
-        val cacheKey = "combined:seasons:v41:${item.pageUrl}"
+        val cacheKey = "combined:seasons:v42:${item.pageUrl}"
         if (!forceRefresh) loadCachedMergedSeasonBundle(item.pageUrl)?.let { cached ->
             if (isProviderSeasonSweepComplete(item.pageUrl) && !needsSeasonEnrichment(item, cached) &&
                 (primaryBundle.seasons.isEmpty() ||
@@ -5259,6 +5289,15 @@ object MultiProviderRepository {
             arabicTitle = arTitle.orEmpty(),
         ).take(2)
 
+        val targetMatchTitles = buildList {
+            if (title.isNotBlank()) add(title)
+            item.parentSeriesTitle?.takeIf(String::isNotBlank)?.let(::add)
+            if (item.title.isNotBlank()) add(item.title)
+            if (arTitle != null) add(arTitle)
+        }.distinct()
+        val targetMatchUrls = listOfNotNull(item.parentSeriesPageUrl, item.pageUrl)
+            .filter(String::isNotBlank)
+            .distinct()
         val targetIdentityKeys = buildList {
             add(titleKey)
             item.parentSeriesTitle?.takeIf(String::isNotBlank)?.let { add(seriesIdentityKey(it)) }
@@ -5266,12 +5305,16 @@ object MultiProviderRepository {
         }.filter { it.length >= 3 }.distinct()
         val primarySeasonNumbers = primaryBundle.seasons.map { it.number }.filter { it > 0 }.distinct()
         val cameFromEpisodePage = SeriesCatalogParser.isEpisode(item.title, item.pageUrl)
-        val parentSeasonNumber = if (cameFromEpisodePage) null else {
-            SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
-                ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
-        }
+        val titleExplicitSeason = SeriesCatalogParser.seasonNumber(item.title, "")
+            ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+        val parentSeasonNumber = titleExplicitSeason
+            ?: if (!cameFromEpisodePage) {
+                SeriesCatalogParser.seasonNumber("", item.pageUrl)
+                    ?: primaryBundle.seasons.singleOrNull()?.number
+            } else null
 
         val directDiscoveredEpisodes = java.util.concurrent.ConcurrentLinkedQueue<ArabseedEpisode>()
+        val directMatchedCandidatesByProvider = ConcurrentHashMap<String, MutableList<ArabseedItem>>()
         val year = releaseYear(item)
         val originalProviderId = getProviderForUrl(item.pageUrl)?.id
         val allEnabledProviders = seasonEnrichmentProviders(excludeProviderId = originalProviderId)
@@ -5291,7 +5334,7 @@ object MultiProviderRepository {
                     fun collectMatches(rows: List<ArabseedItem>): List<ArabseedItem> {
                         val seriesPages = mutableListOf<ArabseedItem>()
                         for (candidate in rows) {
-                            val titleMatch = targetIdentityKeys.any { key -> matchesSeriesTitle(key, candidate) }
+                            val titleMatch = matchesSeriesTitle(targetMatchTitles, targetMatchUrls, candidate)
                             if (!titleMatch) continue
                             val isEp = SeriesCatalogParser.isEpisode(candidate.title, candidate.pageUrl)
                             if (isEp) {
@@ -5301,12 +5344,17 @@ object MultiProviderRepository {
                                     candidate.arabicTitle,
                                 )
                                 if (!SeriesCatalogParser.pageBelongsToSeries(
-                                        targetTitles = targetIdentityKeys,
-                                        targetPageUrls = listOf(item.pageUrl),
+                                        targetTitles = targetMatchTitles + targetIdentityKeys,
+                                        targetPageUrls = targetMatchUrls,
                                         candidateTitles = candidateTitles,
                                         candidatePageUrls = listOf(candidate.pageUrl),
                                     )
                                 ) continue
+                                val candidateYear = releaseYear(candidate)
+                                if (year.isNotBlank() && candidateYear.isNotBlank() && year != candidateYear) continue
+                                directMatchedCandidatesByProvider
+                                    .computeIfAbsent(provider.id) { java.util.Collections.synchronizedList(mutableListOf()) }
+                                    .add(candidate)
                                 val epNum = SeriesCatalogParser.episodeNumber(candidate.title, candidate.pageUrl)
                                 if (epNum != null && epNum > 0) {
                                     val sNum = SeriesCatalogParser.directEpisodeSeasonNumber(
@@ -5326,9 +5374,7 @@ object MultiProviderRepository {
                                 }
                             } else {
                                 val candidateYear = releaseYear(candidate)
-                                val isSeasonPage = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl) != null
-                                val compatibleYear = year.isBlank() || year == candidateYear ||
-                                    (candidateYear.isBlank() && isSeasonPage)
+                                val compatibleYear = year.isBlank() || candidateYear.isBlank() || year == candidateYear
                                 if (candidate.type == ArabseedType.SERIES && compatibleYear) {
                                     seriesPages.add(candidate)
                                 }
@@ -5347,7 +5393,8 @@ object MultiProviderRepository {
                         },
                     )
                     var seriesPages = collectMatches(results)
-                    val foundDirect = directDiscoveredEpisodes.any { it.providerName == provider.name }
+                    val foundDirect = directMatchedCandidatesByProvider[provider.id]?.isNotEmpty() == true ||
+                        directDiscoveredEpisodes.any { it.providerName == provider.name }
                     if (foundDirect) {
                         // Anime and long series often appear as episode cards in search,
                         // with older episodes on later result pages. Scan those pages
@@ -5470,6 +5517,12 @@ object MultiProviderRepository {
         }
         val mirrors = allEnabledProviders.mapNotNull { provider ->
             externalMirrorsByProvider[provider.id]?.firstOrNull()
+                ?: directMatchedCandidatesByProvider[provider.id]
+                    ?.sortedByDescending { ep ->
+                        SeriesCatalogParser.episodeNumber(ep.title, ep.pageUrl) ?: 0
+                    }
+                    ?.firstOrNull()
+                    ?.let { epMirror -> epMirror to null }
         }.distinctBy { SeriesCatalogParser.normalizedUrl(it.first.pageUrl) }
 
         val discoveredProviders = discovered
@@ -5755,7 +5808,7 @@ object MultiProviderRepository {
         } ?: primaryBundle
         if (immediateBundle.seasons.isNotEmpty() || immediateBundle.relatedParts.isNotEmpty()) {
             CatalogDiskCache.saveSeasonBundle(
-                "combined:seasons:v41:${item.pageUrl}",
+                "combined:seasons:v42:${item.pageUrl}",
                 immediateBundle,
             )
         }
@@ -5827,7 +5880,7 @@ object MultiProviderRepository {
 
     fun cacheCompletePrimarySeasonBundle(item: ArabseedItem, bundle: ArabseedSeasonBundle): ArabseedSeasonBundle {
         if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
-            CatalogDiskCache.saveSeasonBundle("combined:seasons:v41:${item.pageUrl}", bundle)
+            CatalogDiskCache.saveSeasonBundle("combined:seasons:v42:${item.pageUrl}", bundle)
             recordSeasonEnrichmentAttempt(item, bundle)
         }
         return bundle
@@ -5891,7 +5944,7 @@ object MultiProviderRepository {
     }
 
     private fun seasonEnrichmentAttemptKey(pageUrl: String): String =
-        "combined:season-attempt:v29:$pageUrl"
+        "combined:season-attempt:v30:$pageUrl"
 
     private fun needsSeasonEnrichment(item: ArabseedItem, bundle: ArabseedSeasonBundle): Boolean {
         if (item.type != ArabseedType.SERIES) return false
@@ -5911,10 +5964,14 @@ object MultiProviderRepository {
         }
     }
 
-    private fun matchesSeriesTitle(targetTitle: String, candidate: ArabseedItem): Boolean {
+    private fun matchesSeriesTitle(
+        targetTitles: Collection<String>,
+        targetUrls: Collection<String>,
+        candidate: ArabseedItem,
+    ): Boolean {
         return SeriesCatalogParser.pageBelongsToSeries(
-            targetTitles = listOf(targetTitle),
-            targetPageUrls = emptyList(),
+            targetTitles = targetTitles,
+            targetPageUrls = targetUrls,
             candidateTitles = listOfNotNull(
                 candidate.parentSeriesTitle,
                 candidate.title,
@@ -5998,21 +6055,32 @@ object MultiProviderRepository {
             val seasonUrlNumbers = listOfNotNull(
                 SeriesCatalogParser.seasonNumber("", sourceSeason.pageUrl),
             ).distinct()
-            val explicitSeasonNumbers = (itemSeasonNumbers + seasonUrlNumbers).distinct()
+            val sourceIsEpisodeCard = SeriesCatalogParser.isEpisode(sourceItem.title, sourceItem.pageUrl)
+            val effectiveItemSeasons = if (sourceIsEpisodeCard) emptyList() else itemSeasonNumbers
+            val explicitSeasonNumbers = (effectiveItemSeasons + seasonUrlNumbers).distinct()
             val episodeExplicitSeasons = sourceSeason.episodes.mapNotNull { episode ->
                 SeriesCatalogParser.seasonNumber(episode.title, episode.pageUrl)
             }.distinct()
             // A generated label like "الموسم الأول" is not evidence. Require either
-            // the page/season-tab URL or every explicitly season-tagged episode inside
-            // an un-scoped canonical page to confirm this exact season number.
+            // the page/season-tab URL, every explicitly season-tagged episode inside
+            // an un-scoped canonical page, or an unambiguously single-season series
+            // when both primary and mirror expose only season 1 without conflicts.
             val seasonConfirmedByUrl = explicitSeasonNumbers.size == 1 && explicitSeasonNumbers.single() == sourceSeason.number
-            val seasonConfirmedByEpisodes = itemSeasonNumbers.isEmpty() &&
+            val seasonConfirmedByEpisodes = effectiveItemSeasons.isEmpty() &&
                 seasonUrlNumbers.isEmpty() &&
                 sourceSeason.episodes.isNotEmpty() &&
                 sourceSeason.episodes.all { ep ->
                     SeriesCatalogParser.seasonNumber(ep.title, ep.pageUrl) == sourceSeason.number
                 }
-            if (!seasonConfirmedByUrl && !seasonConfirmedByEpisodes) {
+            val singleSeasonConfirmed = knownPrimarySeasons.size <= 1 &&
+                (knownPrimarySeasons.singleOrNull() ?: 1) == 1 &&
+                (targetSeason == null || targetSeason == 1) &&
+                effectiveItemSeasons.isEmpty() &&
+                seasonUrlNumbers.isEmpty() &&
+                sourceBundle.seasons.size == 1 &&
+                sourceSeason.number == 1 &&
+                episodeExplicitSeasons.none { it != 1 }
+            if (!seasonConfirmedByUrl && !seasonConfirmedByEpisodes && !singleSeasonConfirmed) {
                 return@mapNotNull null
             }
             if (targetSeason != null && !targetCameFromEpisode && targetSeason != sourceSeason.number) {
@@ -6024,6 +6092,8 @@ object MultiProviderRepository {
                 targetCameFromEpisode
             if (!seasonPermitted) return@mapNotNull null
 
+            val verifiedTitles = (targetTitles + sourceTitles).distinct()
+            val verifiedUrls = (targetUrls + listOfNotNull(sourceItem.pageUrl, sourceSeason.pageUrl.takeIf(String::isNotBlank))).distinct()
             val episodes = sourceSeason.episodes.mapNotNull { episode ->
                 if (episode.number <= 0 || !episode.pageUrl.startsWith("http", ignoreCase = true)) {
                     return@mapNotNull null
@@ -6038,10 +6108,23 @@ object MultiProviderRepository {
                     episode.seasonNumber != sourceSeason.number
                 ) return@mapNotNull null
                 val readableIdentity = SeriesCatalogParser.seriesIdentityFromUrl(episode.pageUrl)
-                if (readableIdentity != null && readableIdentity !in targetIdentities) return@mapNotNull null
+                if (readableIdentity != null && !SeriesCatalogParser.episodeBelongsToSeries(
+                        targetTitles = verifiedTitles,
+                        targetPageUrls = verifiedUrls,
+                        episodeTitle = episode.title,
+                        episodeUrl = episode.pageUrl,
+                        allowEpisodeListContext = true,
+                    )
+                ) return@mapNotNull null
                 val alternatives = episode.alternatePageUrls.filter { url ->
                     val identity = SeriesCatalogParser.seriesIdentityFromUrl(url)
-                    identity == null || identity in targetIdentities
+                    identity == null || SeriesCatalogParser.episodeBelongsToSeries(
+                        targetTitles = verifiedTitles,
+                        targetPageUrls = verifiedUrls,
+                        episodeTitle = episode.title,
+                        episodeUrl = url,
+                        allowEpisodeListContext = true,
+                    )
                 }
                 episode.copy(seasonNumber = sourceSeason.number, alternatePageUrls = alternatives)
             }.distinctBy { it.number }.sortedBy { it.number }
@@ -6067,11 +6150,17 @@ object MultiProviderRepository {
                     mutableMapOf(
                         "title" to SeriesCatalogParser.seasonTitle(season.number),
                         "pageUrl" to "",
+                        "hasMorePages" to null,
                         "episodes" to linkedMapOf<Int, ArabseedEpisode>(),
                     )
                 }
                 if (season.pageUrl.isNotBlank() && (target["pageUrl"] as String).isBlank()) {
                     target["pageUrl"] = season.pageUrl
+                }
+                when (season.hasMorePages) {
+                    true -> target["hasMorePages"] = true
+                    false -> if (target["hasMorePages"] == null) target["hasMorePages"] = false
+                    null -> Unit
                 }
                 @Suppress("UNCHECKED_CAST")
                 val episodeMap = target["episodes"] as MutableMap<Int, ArabseedEpisode>
@@ -6108,6 +6197,7 @@ object MultiProviderRepository {
                 title = row["title"] as String,
                 episodes = episodes,
                 pageUrl = row["pageUrl"] as String,
+                hasMorePages = row["hasMorePages"] as Boolean?,
             )
         }
 

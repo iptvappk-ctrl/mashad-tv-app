@@ -666,14 +666,34 @@ async function handleSystemControl(req, url, body) {
 
       if (body.action === 'freeze') {
         await fbWrite('system_control/status', 'frozen');
+        await fbWrite('system_control/system_enabled', false);
+        await fbWrite('system_control/maintenance_mode', true);
         await fbWrite('system_control/message', body.message || 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.');
         await fbWrite('system_control/updatedAt', Date.now());
         return jsonResp({ ok: true, action: 'freeze' });
       }
 
+      if (body.action === 'set_system') {
+        const enabledVal = body.system_enabled !== false;
+        await fbPatch('system_control', {
+          system_enabled: enabledVal,
+          maintenance_mode: !enabledVal,
+          status: enabledVal ? 'active' : 'frozen',
+          message: enabledVal
+            ? 'المنظومة نشطة وتعمل بكامل طاقتها.'
+            : (body.message || 'عفواً، الخدمة متوقفة حالياً للتحديث والصيانة.'),
+          updatedAt: Date.now(),
+          updated_at: new Date().toISOString(),
+        });
+        await fbWrite('system_control/components/app_enabled', enabledVal);
+        return jsonResp({ ok: true, action: 'set_system', system_enabled: enabledVal });
+      }
+
       if (body.action === 'restore') {
         const fullState = {
           status: 'active',
+          system_enabled: true,
+          maintenance_mode: false,
           message: body.message || 'المنظومة نشطة وتعمل بكامل طاقتها.',
           updatedAt: Date.now(),
           wipeTimestamp: 0,
@@ -786,7 +806,7 @@ async function handleSystemControl(req, url, body) {
           enabled:           body.enabled !== false,
           latestVersionCode: Number(body.latestVersionCode || body.versionCode) || 0,
           latestVersionName: String(body.latestVersionName || body.versionName || ''),
-          apkUrl:            String(body.apkUrl || body.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk'),
+          apkUrl:            String(body.apkUrl || body.downloadUrl || 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zaqzouka-1.0.86-93.apk'),
           releaseNotes:      String(body.releaseNotes || body.notes || ''),
           forced:            !!body.forced,
           updatedAt:         Date.now(),
@@ -1055,11 +1075,11 @@ self.addEventListener('activate', (event) => {
         const lowerName = rawName.toLowerCase();
         let ghUrl;
         if (lowerName === 'zaqzouka-app.apk' || lowerName === 'zaqzouka-latest.apk' || lowerName.startsWith('zaqzouka-1.0.')) {
-          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zaqzouka-1.0.85-92.apk';
+          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zaqzouka-1.0.86-93.apk';
         } else if (lowerName === 'zag-player.apk' || lowerName === 'zaqzouka-player.apk' || lowerName.startsWith('zag-player-')) {
-          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk';
+          ghUrl = 'https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zag-player-1.1.37.apk';
         } else {
-          ghUrl = `https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/${rawName}`;
+          ghUrl = `https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/${rawName}`;
         }
         return Response.redirect(ghUrl, 302);
       }

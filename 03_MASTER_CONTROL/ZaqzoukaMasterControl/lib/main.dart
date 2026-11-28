@@ -198,10 +198,10 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   // In-App Update Management State
   bool _updateEnabled = false;
   bool _isForcedUpdate = false;
-  final TextEditingController _versionCodeCtrl = TextEditingController(text: '85');
-  final TextEditingController _versionNameCtrl = TextEditingController(text: '1.0.78');
+  final TextEditingController _versionCodeCtrl = TextEditingController(text: '93');
+  final TextEditingController _versionNameCtrl = TextEditingController(text: '1.0.86');
   final TextEditingController _apkUrlCtrl = TextEditingController(text: 'https://zaafilm.com/downloads/zaqzouka-latest.apk');
-  final TextEditingController _releaseNotesCtrl = TextEditingController(text: 'تحديث أمني وسيرفرات فائقة السرعة');
+  final TextEditingController _releaseNotesCtrl = TextEditingController(text: 'تحديث استقرار وجلب جميع حلقات ومواسم المسلسلات بالكامل');
   bool _isSavingUpdate = false;
   bool _hasFetchedUpdate = false;
 
@@ -314,8 +314,8 @@ class _MasterDashboardScreenState extends State<MasterDashboardScreen> {
   }
 
   Future<void> _publishAppUpdate({required bool forced}) async {
-    final vCode = int.tryParse(_versionCodeCtrl.text.trim()) ?? 85;
-    final vName = _versionNameCtrl.text.trim().isEmpty ? '1.0.78' : _versionNameCtrl.text.trim();
+    final vCode = int.tryParse(_versionCodeCtrl.text.trim()) ?? 93;
+    final vName = _versionNameCtrl.text.trim().isEmpty ? '1.0.86' : _versionNameCtrl.text.trim();
     final url = _apkUrlCtrl.text.trim().isEmpty ? 'https://zaafilm.com/downloads/zaqzouka-latest.apk' : _apkUrlCtrl.text.trim();
     final notes = _releaseNotesCtrl.text.trim();
 

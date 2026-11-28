@@ -613,4 +613,70 @@ void main() {
           .setMockMethodCallHandler(_channel, null);
     },
   );
+
+  testWidgets(
+    'does not show load-more button when season hasNoMorePages or uses an episode URL',
+    (tester) async {
+      final completedBundle = <String, dynamic>{
+        'seasons': [
+          {
+            'number': 1,
+            'title': 'الموسم الأول',
+            'pageUrl': 'https://media.example/series/show-s1-eps2',
+            'hasMorePages': false,
+            'episodes': List.generate(12, (index) => _episode(index + 1)),
+          },
+        ],
+        'relatedParts': <dynamic>[],
+      };
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(_channel, (call) async {
+            switch (call.method) {
+              case 'media.detail.cached':
+              case 'media.seasons.cached':
+              case 'cache.read':
+              case 'cache.write':
+                return null;
+              case 'media.story.fetch':
+                return {'overview': '', 'cast': <dynamic>[]};
+              case 'media.seasons.fetch':
+                return {
+                  ...completedBundle,
+                  'backgroundRefreshing': false,
+                  'providerSweepComplete': true,
+                  'pendingProviderIds': <String>[],
+                  'episodeGaps': <String>[],
+                };
+              case 'media.servers':
+                return <dynamic>[];
+              default:
+                return null;
+            }
+          });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DetailPage(
+            item: const MediaItem(
+              id: 'show-s1-eps2',
+              title: 'Show الموسم الأول الحلقة 2',
+              pageUrl: 'https://media.example/series/show-s1-eps2',
+              isSeries: true,
+            ),
+            onOpenItem: (_) {},
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      _expectNoScaryErrorUi();
+      expect(find.text('الحلقة 12'), findsOneWidget);
+      expect(find.text('تحميل حلقات إضافية من المصدر'), findsNothing);
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(_channel, null);
+    },
+  );
 }

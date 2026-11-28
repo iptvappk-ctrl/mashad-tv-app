@@ -146,8 +146,8 @@ class MainActivity : FlutterActivity() {
                         }.getOrNull()
                         val code = if (pkgInfo != null) {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pkgInfo.longVersionCode else @Suppress("DEPRECATION") pkgInfo.versionCode.toLong()
-                        } else 92L
-                        val name = pkgInfo?.versionName ?: "1.0.85"
+                        } else 93L
+                        val name = pkgInfo?.versionName ?: "1.0.86"
                         result.success(
                             mapOf(
                                 "versionCode" to code,
@@ -499,7 +499,7 @@ class MainActivity : FlutterActivity() {
     }
     private fun openPlayerStore(result: MethodChannel.Result) {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.85-92/zag-player-1.1.37.apk")).apply {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/iptvappk-ctrl/madartv-updates/releases/download/v1.0.86-93/zag-player-1.1.37.apk")).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             })
             result.success(true)

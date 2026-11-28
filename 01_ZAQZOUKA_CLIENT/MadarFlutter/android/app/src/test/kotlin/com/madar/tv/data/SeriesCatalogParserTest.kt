@@ -1157,6 +1157,114 @@ class SeriesCatalogParserTest {
         )
     }
 
+    @Test
+    fun matchesBilingualAndTransliteratedSeriesAcrossProvidersWithoutFalsePositives() {
+        // 1. Arabic prefix translations alongside exact Latin series titles match across mirrors
+        assertTrue(
+            SeriesCatalogParser.pageBelongsToSeries(
+                targetTitles = listOf("Doctor X: Mafia in White"),
+                targetPageUrls = listOf("https://m.myseed.tv/مسلسل-doctor-x-mafia-in-white-s1-eps2/"),
+                candidateTitles = listOf("الطبيبة إكس: مافيا باللون الأبيض Doctor X: Mafia in White"),
+                candidatePageUrls = listOf("https://aradramatv.cc/2026/10/الطبيبة-إكس-مافيا-باللون-الأبيض-doctor-x-mafia-in-white/"),
+            ),
+        )
+        assertTrue(
+            SeriesCatalogParser.pageBelongsToSeries(
+                targetTitles = listOf("Doctor X: Mafia in White"),
+                targetPageUrls = listOf("https://m.myseed.tv/مسلسل-doctor-x-mafia-in-white-s1-eps2/"),
+                candidateTitles = listOf("الاخيرة حلقة 12 اثارة 1080p WEB-DL مسلسل الدكتورة اكس Doctor X: Mafia in White"),
+                candidatePageUrls = listOf("https://topcinemaa.tv/مسلسل-الدكتورة-اكس-doctor-x-mafia-in-white-الحلقة-12-والاخيرة-مترجمة/"),
+            ),
+        )
+        assertTrue(
+            SeriesCatalogParser.pageBelongsToSeries(
+                targetTitles = listOf("Doctor X: Mafia in White"),
+                targetPageUrls = listOf("https://m.myseed.tv/مسلسل-doctor-x-mafia-in-white-s1-eps2/"),
+                candidateTitles = listOf("الدكتورة إكس (Doctor X: Mafia in White)"),
+                candidatePageUrls = listOf("https://www.shahid4u.si/series/doctor-x-mafia-in-white-293610/"),
+            ),
+        )
+        assertTrue(
+            SeriesCatalogParser.pageBelongsToSeries(
+                targetTitles = listOf("Rivals"),
+                targetPageUrls = listOf("https://m.myseed.tv/مسلسل-rivals-s2-eps11/"),
+                candidateTitles = listOf("مسلسل Rivals الموسم الثاني الحلقة 11"),
+                candidatePageUrls = listOf("https://akw.cam/akdrama-rivals-al-e2-s11/"),
+            ),
+        )
+        assertTrue(
+            SeriesCatalogParser.pageBelongsToSeries(
+                targetTitles = listOf("Rivals"),
+                targetPageUrls = listOf("https://m.myseed.tv/مسلسل-rivals-s2-eps11/"),
+                candidateTitles = listOf("مسلسل Rivals مترجم"),
+                candidatePageUrls = listOf("https://faselhd.online/مسلسل-rivals-1132/"),
+            ),
+        )
+        // Must still reject related-but-different Latin works
+        assertFalse(
+            SeriesCatalogParser.pageBelongsToSeries(
+                targetTitles = listOf("Doctor X: Mafia in White"),
+                targetPageUrls = listOf("https://m.myseed.tv/مسلسل-doctor-x-mafia-in-white-s1-eps2/"),
+                candidateTitles = listOf("دكتور اكس الموسم الخامس Doctor-X: Surgeon Michiko Daimon"),
+                candidatePageUrls = listOf("https://www.shahid4u.si/series/doctor-x-surgeon-michiko-daimon-46052/"),
+            ),
+        )
+
+        // 2. Transliterated/Turkish URL slugs match when the Arabic work title matches
+        assertTrue(
+            SeriesCatalogParser.pageBelongsToSeries(
+                targetTitles = listOf("مسلسل هذا البحر سوف يفيض"),
+                targetPageUrls = listOf("https://m.myseed.tv/مسلسل-هذا-البحر-سوف-يفيض-s2-eps9/"),
+                candidateTitles = listOf("مسلسل هذا البحر سوف يفيض الحلقة 40 مترجمة"),
+                candidatePageUrls = listOf("https://egweg1.sbs/episode/tasacak-bu-deniz-e40/"),
+            ),
+        )
+        assertTrue(
+            SeriesCatalogParser.episodeBelongsToSeries(
+                targetTitles = listOf("مسلسل هذا البحر سوف يفيض"),
+                targetPageUrls = listOf("https://m.myseed.tv/مسلسل-هذا-البحر-سوف-يفيض-s2-eps9/"),
+                episodeTitle = "حلقة 40 هذا البحر سوف يفيض الحلقة 40",
+                episodeUrl = "https://qesset.net/clarus/tasak-bu-deniz-episode-40/",
+            ),
+        )
+        assertTrue(
+            SeriesCatalogParser.episodeBelongsToSeries(
+                targetTitles = listOf("الطبيبة إكس: مافيا باللون الأبيض Doctor X: Mafia in White"),
+                targetPageUrls = listOf("https://aradramatv.cc/2026/10/الطبيبة-إكس-مافيا-باللون-الأبيض-doctor-x-mafia-in-white/"),
+                episodeTitle = "الطبيبة إكس: مافيا باللون الأبيض الحلقة 12 الأخيرة",
+                episodeUrl = "https://aradramatv.cc/2026/11/الطبيبة-إكس-الحلقة-12/",
+            ),
+        )
+
+        // 3. Reconciles unambiguous single-season mirrors without mixing multi-season shows
+        val target = seriesItem("Doctor X: Mafia in White", "https://m.myseed.tv/مسلسل-doctor-x-mafia-in-white-s1-eps2/")
+        val sparsePrimary = ArabseedSeasonBundle(
+            listOf(
+                season(1, "https://m.myseed.tv/مسلسل-doctor-x-mafia-in-white-s1-eps2/",
+                    episode(1, 1, "https://m.myseed.tv/مسلسل-doctor-x-mafia-in-white-s1-eps1/"),
+                    episode(2, 1, "https://m.myseed.tv/مسلسل-doctor-x-mafia-in-white-s1-eps2/"),
+                ),
+            ),
+        )
+        val araDramaMirror = seriesItem(
+            "الطبيبة إكس: مافيا باللون الأبيض Doctor X: Mafia in White",
+            "https://aradramatv.cc/2026/10/الطبيبة-إكس-مافيا-باللون-الأبيض-doctor-x-mafia-in-white/",
+        )
+        val araDramaBundle = ArabseedSeasonBundle(
+            listOf(
+                season(1, "",
+                    episode(1, 1, "https://aradramatv.cc/2026/10/الطبيبة-إكس-الحلقة-01/"),
+                    episode(2, 1, "https://aradramatv.cc/2026/10/الطبيبة-إكس-الحلقة-02/"),
+                    episode(3, 1, "https://aradramatv.cc/2026/10/الطبيبة-إكس-الحلقة-03/"),
+                    episode(12, 1, "https://aradramatv.cc/2026/11/الطبيبة-إكس-الحلقة-12/"),
+                ),
+            ),
+        )
+        val reconciled = MultiProviderRepository.reconcileMirrorSeasonBundle(target, sparsePrimary, araDramaMirror, araDramaBundle)
+        assertEquals(listOf(1), reconciled.seasons.map { it.number })
+        assertEquals(listOf(1, 2, 3, 12), reconciled.seasons.single().episodes.map { it.number })
+    }
+
     private fun episode(number: Int, season: Int, url: String) = ArabseedEpisode(
         number = number,
         title = "الحلقة $number",
