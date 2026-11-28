@@ -319,10 +319,12 @@ object StreamExtractorHelper {
     // =====================================================================
 
     private fun fetchPage(url: String, client: OkHttpClient, referer: String = ""): String {
+        val safeUrl = SeriesCatalogParser.asciiSafeUrl(url)
+        val safeReferer = SeriesCatalogParser.asciiSafeHeaderValue(referer)
         val req = Request.Builder()
-            .url(url)
+            .url(safeUrl)
             .header("User-Agent", DEFAULT_UA)
-            .apply { if (referer.isNotEmpty()) header("Referer", referer) }
+            .apply { if (safeReferer.isNotEmpty()) header("Referer", safeReferer) }
             .build()
         return client.newCall(req).execute().body?.string() ?: ""
     }

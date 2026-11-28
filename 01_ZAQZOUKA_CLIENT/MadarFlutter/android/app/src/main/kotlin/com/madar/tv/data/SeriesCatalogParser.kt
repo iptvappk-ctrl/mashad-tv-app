@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
 
 /** Shared, conservative parsing for episode/season/part labels found in provider pages. */
 internal object SeriesCatalogParser {
-    private val episodePaginationPool = Executors.newFixedThreadPool(8)
+    private val episodePaginationPool = Executors.newFixedThreadPool(16)
     private val episodeNumberPattern = Regex(
         """(?i)(?:الحلقة|حلقة|episode|(?<![a-z])eps?|(?<![a-z])ep)(?:[\s._#=/:-]+|[\s._:-]*رقم[\s._:-]*)*([0-9]{1,4})(?![0-9])""",
     )
@@ -122,32 +122,25 @@ internal object SeriesCatalogParser {
     fun episodeNumber(title: String, url: String, allowNumericTitle: Boolean = false): Int? {
         val titleText = normalizeText(title)
         val urlText = normalizeText(url)
-        val labeled = sequenceOf(titleText, urlText)
-            .mapNotNull { episodeNumberPattern.find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
-            .firstOrNull { it > 0 }
-        if (labeled != null) return labeled
-
-        val trailing = sequenceOf(titleText, urlText)
-            .mapNotNull { trailingEpisodeNumberPattern.find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
-            .firstOrNull { it > 0 }
-        if (trailing != null) return trailing
-
-        val compact = compactArabicEpisodePattern.find(titleText)?.groupValues?.getOrNull(1)?.toIntOrNull()
-        if (compact != null && compact > 0) return compact
-
-        val akwamEp = akwamEpisodeUrlPattern.find(urlText)?.groupValues?.getOrNull(1)?.toIntOrNull()
-        if (akwamEp != null && akwamEp > 0) return akwamEp
-
-        val cimaEp = cimaEpisodeUrlPattern.find(urlText)?.groupValues?.getOrNull(1)?.toIntOrNull()
-        if (cimaEp != null && cimaEp > 0) return cimaEp
-
-        if (allowNumericTitle) {
-            return normalizeDigits(titleText).trim().toIntOrNull()?.takeIf { it in 1..9999 }
-        }
-        return null
+        val fromTitle = episodeNumberFromValue(titleText, isUrl = false, allowNumericTitle = allowNumericTitle)
+        val fromUrl = episodeNumberFromValue(urlText, isUrl = true, allowNumericTitle = false)
+        if (fromTitle != null && fromUrl != null && fromTitle != fromUrl) return null
+        return fromTitle ?: fromUrl
     }
 
     fun seasonNumber(title: String, url: String): Int? {
+        if (hasConflictingSeasonNumbers(title, url)) return null
+        return seasonNumberFromValues(title, url)?.takeIf { it in 1..60 }
+    }
+
+    fun hasConflictingSeasonNumbers(title: String, url: String): Boolean {
+        if (title.isBlank() || url.isBlank()) return false
+        val fromTitle = seasonNumber(title, "")
+        val fromUrl = seasonNumber("", url)
+        return fromTitle != null && fromUrl != null && fromTitle != fromUrl
+    }
+
+    private fun seasonNumberFromValues(title: String, url: String): Int? {
         extractLabeledNumber(
             title = title,
             url = url,
@@ -199,6 +192,7 @@ internal object SeriesCatalogParser {
      * containers such as `season-2` or `data-season="2"`.
      */
     fun seasonNumberFromElement(element: Element, title: String, url: String): Int? {
+        if (hasConflictingSeasonNumbers(title, url)) return null
         seasonNumber(title, url)?.let { return it }
 
         val seasonAttributes = listOf("data-season-number", "data-season", "data-season_num")
@@ -316,7 +310,7 @@ internal object SeriesCatalogParser {
             val explicitUrlNumber = seasonNumber("", href)
             val dataSeason = listOf("data-season-number", "data-season", "data-season_num")
                 .firstNotNullOfOrNull { name ->
-                    link.attr(name).toIntOrNull()?.takeIf { it > 0 }
+                    link.attr(name).toIntOrNull()?.takeIf { it in 1..60 }
                         ?: seasonNumber(link.attr(name), "")
                 }
             var inheritedSeasonNumber: Int? = null
@@ -344,7 +338,7 @@ internal object SeriesCatalogParser {
                     inheritedSeasonNumber = seasonNumber(marker, "")
                     inheritedSeasonNumber = listOf("data-season-number", "data-season", "data-season_num")
                         .firstNotNullOfOrNull { name ->
-                            node.attr(name).toIntOrNull()?.takeIf { it > 0 }
+                            node.attr(name).toIntOrNull()?.takeIf { it in 1..60 }
                                 ?: seasonNumber(node.attr(name), "")
                         } ?: inheritedSeasonNumber
                 }
@@ -357,9 +351,10 @@ internal object SeriesCatalogParser {
             // A number is accepted only when it belongs to a season navigation
             // context or is explicitly carried in a data-season attribute.
             val explicitSeasonNumber = explicitLabelNumber ?: explicitUrlNumber
-            val number = dataSeason ?: inheritedSeasonNumber
+            val number = (dataSeason ?: inheritedSeasonNumber
                 ?: explicitSeasonNumber?.takeIf { seasonTabContext }
                 ?: numericTab
+                ?: return@mapNotNull null).takeIf { it in 1..60 }
                 ?: return@mapNotNull null
             number to href
         }
@@ -428,7 +423,7 @@ internal object SeriesCatalogParser {
         // Some providers render a complete numbered pager and omit a "next"
         // link. Keep the whole bounded pager; a 12-link cap silently dropped
         // older episodes on long seasons.
-        }.distinctBy(::normalizedUrl).take(60)
+        }.distinctBy(::normalizedUrl).take(120)
     }
 
     val episodeLinkSelectors = listOf(
@@ -445,6 +440,7 @@ internal object SeriesCatalogParser {
         ".episodes-list a", ".EpisodesList a", ".EpisodesList li a", ".eplister li a",
         ".eps-list li a", ".eps a", "a.ep", "a.episode__item", ".episode__item a", "a.ep-item",
         ".Episodes--List a", ".EpisodeBlock a", ".episodios li a", ".eplist a",
+        ".EpsList a[href]", ".List--Episodes a[href]", "a[href*='/video/']:has(.episode-number)",
         ".br-episode-grid a[href]", ".br-series-detail-grid a[href]", ".br-series-season a[href]",
         "a[href*='/akdrama-']",
         ".sh-single-episode-grid a[href]", "#episodes a[href]",
@@ -467,7 +463,7 @@ internal object SeriesCatalogParser {
         "episodes__list", "episodes__section", "allepcont", "pds-episodes", "pds-episode",
         "pds-season", "season-list", "tab-content", "tab-pane", "tabcontent", "postep", "block-post",
         "episodios", "pwr-season-panel", "br-episode-grid", "br-series-detail-grid",
-        "br-series-season", "sh-single-episode-grid", "fhd-original-episodes-grid",
+        "br-series-season", "list--episodes", "sh-single-episode-grid", "fhd-original-episodes-grid",
         "tt-episode-grid", "tt-season", "block_ep", "epis",
         "listnumberepisodesmobile", "areanewly", "itemnewly",
     )
@@ -549,6 +545,59 @@ internal object SeriesCatalogParser {
         return found.values.toList()
     }
 
+    /**
+     * Find likely canonical-series and season pages linked from a direct
+     * episode page. Keep this provider-scoped and leave exact identity checks
+     * to the caller before any candidate page is fetched.
+     */
+    fun linkedSeriesParentPages(
+        document: Document,
+        currentPageUrl: String,
+        isAllowedContentUrl: (String) -> Boolean,
+    ): List<Pair<String, String>> {
+        val selectors = listOf(
+            "a[href*='/series/']", "a[href*='/selary/']", "a[href*='/season/']",
+            "a[href*='الموسم']", ".br-breadcrumb a", ".sh-single-breadcrumb a",
+            ".myseed-single-breadcrumbs a", ".SeriesTitle a", ".series-title a",
+            ".breadcrumb a", "ol.breadcrumb a", ".entry-breadcrumb a", "nav a",
+        )
+        val found = linkedMapOf<String, Pair<String, String>>()
+        for (selector in selectors) {
+            for (element in document.select(selector)) {
+                val rawUrl = element.attr("abs:href").ifBlank { element.attr("href") }.trim()
+                val href = if (rawUrl.startsWith("http", ignoreCase = true)) rawUrl else {
+                    runCatching { java.net.URI(currentPageUrl).resolve(rawUrl).toString() }
+                        .getOrDefault("")
+                }
+                val title = element.text().trim().replace(Regex("\\s+"), " ")
+                val validCategory = !href.contains("/category/", ignoreCase = true) ||
+                    isSpecificSeriesArchiveUrl(href)
+                val validTag = !href.contains("/tag/", ignoreCase = true) &&
+                    (!href.contains("tag.php", ignoreCase = true) || title.contains("حلقات"))
+                val valid = href.startsWith("http", ignoreCase = true) &&
+                    normalizedUrl(href) != normalizedUrl(currentPageUrl) &&
+                    isAllowedContentUrl(href) && validCategory && validTag &&
+                    !title.contains("الرئيسية") && !title.contains("home", ignoreCase = true) &&
+                    !isEpisode(title, href) && !isInsideUnrelatedContentContainer(element)
+                if (valid) found.putIfAbsent(normalizedUrl(href), href to title)
+            }
+        }
+        return found.values.toList()
+    }
+
+    fun episodeLinkText(element: Element): String {
+        if (element.selectFirst(".ov, .desc, .description, .synopsis") != null) {
+            val heading = element.selectFirst("b, strong, .ep-title, .episode-title, .title, h2, h3, h4")
+                ?.text()
+                ?.trim()
+                .orEmpty()
+            if (heading.isNotBlank() && episodeMarkerPattern.containsMatchIn(normalizeText(heading))) {
+                return heading
+            }
+        }
+        return element.text().trim().ifBlank { element.attr("title").trim() }
+    }
+
     /** Parse one provider episode-list page for on-demand, incremental loading. */
     fun parseEpisodeEntries(
         document: Document,
@@ -581,11 +630,12 @@ internal object SeriesCatalogParser {
             val url = unwrapRedirectUrl(resolvedUrl)
             if (url.isBlank() || !isAllowedContentUrl(url)) continue
 
-            val title = element.text().trim().ifBlank { element.attr("title").trim() }
+            val title = episodeLinkText(element)
+            if (hasConflictingSeasonNumbers(title, url)) continue
             val number = episodeNumber(title, url, allowNumericTitle = isEpisodeListElement(element)) ?: continue
             val season = seasonNumber(title, url)
                 ?: seasonNumberFromElement(element, title, url)
-                ?: defaultSeasonNumber.takeIf { it > 0 }
+                ?: defaultSeasonNumber.takeIf { it in 1..60 }
             val key = normalizedUrl(url)
             val previous = collected[key]
             if (previous == null || (previous.third == null && season != null)) {
@@ -630,12 +680,11 @@ internal object SeriesCatalogParser {
                 .find(uri.path.orEmpty())?.groupValues?.getOrNull(1)?.toIntOrNull()
         }
 
-        val currentNumber = pageNumber(currentPageUrl)
-        if (currentNumber != null) {
-            return candidates.mapNotNull { candidate ->
-                pageNumber(candidate)?.takeIf { it > currentNumber }?.let { it to candidate }
-            }.minByOrNull { it.first }?.second
-        }
+        val currentNumber = pageNumber(currentPageUrl) ?: 1
+        val numberedNext = candidates.mapNotNull { candidate ->
+            pageNumber(candidate)?.takeIf { it > currentNumber }?.let { it to candidate }
+        }.minByOrNull { it.first }?.second
+        if (numberedNext != null) return numberedNext
         return candidates.singleOrNull()
     }
 
@@ -645,8 +694,8 @@ internal object SeriesCatalogParser {
         firstPageUrl: String,
         fetchDocument: (String) -> Document?,
         parseEpisodes: (Document) -> List<Triple<String, String, Int?>>,
-        maxPages: Int = 25,
-        timeoutSeconds: Long = 14,
+        maxPages: Int = 120,
+        timeoutSeconds: Long = 20,
     ): List<Triple<String, String, Int?>> {
         val byUrl = linkedMapOf<String, Triple<String, String, Int?>>()
         fun merge(rows: List<Triple<String, String, Int?>>) {
@@ -670,7 +719,7 @@ internal object SeriesCatalogParser {
         while (pending.isNotEmpty() && visitedPages < maxPages) {
             val batch = pending.asSequence()
                 .filter { visited.add(normalizedUrl(it)) }
-                .take(minOf(6, maxPages - visitedPages))
+                .take(minOf(16, maxPages - visitedPages))
                 .toList()
             pending.removeAll(batch.toSet())
             if (batch.isEmpty()) break
@@ -754,6 +803,37 @@ internal object SeriesCatalogParser {
      * count. Providers rarely expose a trustworthy total; sparse lists and gaps
      * in numbered episodes are the signals we can verify locally.
      */
+    fun episodeSequenceGaps(episodeNumbers: Collection<Int>): List<IntRange> {
+        val numbers = episodeNumbers.asSequence()
+            .filter { it > 0 }
+            .distinct()
+            .sorted()
+            .toList()
+        return numbers.zipWithNext().mapNotNull { (previous, next) ->
+            if (next - previous > 1) (previous + 1)..(next - 1) else null
+        }
+    }
+
+    fun episodeSequenceCoverageGaps(
+        episodeNumbers: Collection<Int>,
+        expectedLastEpisode: Int? = null,
+    ): List<IntRange> {
+        val numbers = episodeNumbers.asSequence()
+            .filter { it > 0 }
+            .distinct()
+            .sorted()
+            .toList()
+        val leadingGap = numbers.firstOrNull()
+            ?.takeIf { it > 1 }
+            ?.let { listOf(1..(it - 1)) }
+            .orEmpty()
+        val trailingGap = expectedLastEpisode
+            ?.takeIf { it > 0 && it > (numbers.lastOrNull() ?: 0) }
+            ?.let { last -> listOf(((numbers.lastOrNull() ?: 0) + 1)..last) }
+            .orEmpty()
+        return leadingGap + episodeSequenceGaps(numbers) + trailingGap
+    }
+
     fun needsEpisodeSequenceRepair(episodeNumbers: Collection<Int>): Boolean {
         val numbers = episodeNumbers.asSequence()
             .filter { it > 0 }
@@ -761,19 +841,27 @@ internal object SeriesCatalogParser {
             .sorted()
             .toList()
         if (numbers.size < 3 || numbers.first() > 1) return true
-        return numbers.zipWithNext().any { (previous, next) -> next - previous > 1 }
+        return episodeSequenceGaps(numbers).isNotEmpty()
     }
 
     /** Normalize provider and disk-cache data before the UI uses it. */
     fun normalizeSeasonBundle(bundle: ArabseedSeasonBundle): ArabseedSeasonBundle {
         val byUrl = linkedMapOf<String, Pair<Int, ArabseedEpisode>>()
-        bundle.seasons.sortedBy { it.number }.forEach { season ->
-            season.episodes.forEach { episode ->
-                if (episode.number <= 0 || !episode.pageUrl.startsWith("http", ignoreCase = true)) return@forEach
+        bundle.seasons.sortedBy { it.number }.forEach seasonLoop@{ season ->
+            if (season.number !in 1..60) return@seasonLoop
+            season.episodes.forEach episodeLoop@{ episode ->
+                if (episode.number <= 0 || !episode.pageUrl.startsWith("http", ignoreCase = true)) return@episodeLoop
+                val allowNumeric = normalizeDigits(episode.title).trim().toIntOrNull() in 1..1949
+                if (episodeNumber(episode.title, episode.pageUrl, allowNumericTitle = allowNumeric) != episode.number ||
+                    hasConflictingSeasonNumbers(episode.title, episode.pageUrl)
+                ) return@episodeLoop
                 val explicitSeason = seasonNumber(episode.title, episode.pageUrl)
                 // A season marker in the episode URL/title is more reliable than a stale
                 // parent grouping. Otherwise keep the provider's season assignment.
-                val targetSeason = explicitSeason ?: episode.seasonNumber.takeIf { it > 0 } ?: season.number
+                val targetSeason = explicitSeason
+                    ?: episode.seasonNumber.takeIf { it in 1..60 }
+                    ?: season.number.takeIf { it in 1..60 }
+                    ?: return@episodeLoop
                 val key = normalizedUrl(episode.pageUrl)
                 val previous = byUrl[key]
                 if (previous == null) {
@@ -788,7 +876,7 @@ internal object SeriesCatalogParser {
         }
         val episodesBySeason = byUrl.values.groupBy { it.first }
         val seasonNumbers = (bundle.seasons.map { it.number } + episodesBySeason.keys)
-            .filter { it > 0 }
+            .filter { it in 1..60 }
             .distinct()
             .sorted()
         val normalizedSeasons = seasonNumbers
@@ -831,7 +919,7 @@ internal object SeriesCatalogParser {
                     .orEmpty()
                 ArabseedSeason(seasonNumber, seasonTitle(seasonNumber), validEpisodes, seasonPageUrl)
             }
-            .filter { it.episodes.isNotEmpty() || it.pageUrl.isNotBlank() }
+            .filter { it.episodes.isNotEmpty() }
 
         val relatedParts = bundle.relatedParts
             .filter { it.pageUrl.startsWith("http", ignoreCase = true) }
@@ -849,10 +937,10 @@ internal object SeriesCatalogParser {
             .replace(Regex("""(?i)^\s*(?:(?:مشاهدة|مشاهده|تحميل|سلسلة|مسلسل|فيلم|انمي|أنمي|برنامج)\s+)*"""), "")
         val withoutSeriesSuffix = withoutPrefix
             .replace(
-                Regex("""(?i)\s+(?:الموسم|موسم|season|الجزء|جزء|part|الحلقة|حلقة|episode|ep)\s*.*$"""),
+                Regex("""(?i)(?:\s+|(?<=[0-9]))(?:الموسم|موسم|season|الجزء|جزء|part|الحلقة|حلقة|episode|ep)\s*.*$"""),
                 "",
             )
-            .replace(Regex("""(?i)\s+(?:مترجم|مدبلج|فيلم|مسلسل|WEB-DL|720p|1080p|HD).*"""), "")
+            .replace(Regex("""(?i)\s+(?:مترجم|مدبلج|(?:مترج|مدبل)(?=\s*$)|فيلم|مسلسل|WEB-DL|720p|1080p|HD).*"""), "")
             .trim()
         return withoutSeriesSuffix
     }
@@ -861,6 +949,161 @@ internal object SeriesCatalogParser {
         .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
+
+    /** Stable identity for comparing catalog search results across providers. */
+    fun normalizedSeriesIdentity(title: String): String = normalizedSeriesTitle(
+        title.replace(Regex("""(?<!\d)(?:19|20)\d{2}(?!\d)"""), " "),
+    )
+
+    /** Search results may use short prefixes; only full work identities are safe to merge. */
+    fun matchesExactSeriesIdentity(
+        targetIdentities: Collection<String>,
+        candidateTitles: Collection<String>,
+    ): Boolean {
+        val targets = targetIdentities.map(::normalizedSeriesIdentity)
+            .filter(String::isNotBlank)
+            .toSet()
+        if (targets.isEmpty()) return false
+        return candidateTitles.asSequence()
+            .filter(String::isNotBlank)
+            .map(::normalizedSeriesIdentity)
+            .any { it.isNotBlank() && it in targets }
+    }
+
+    /** Verify a candidate catalog/breadcrumb page against both its title and readable URL slug. */
+    fun pageBelongsToSeries(
+        targetTitles: Collection<String>,
+        targetPageUrls: Collection<String>,
+        candidateTitles: Collection<String>,
+        candidatePageUrls: Collection<String>,
+    ): Boolean {
+        val targetIdentities = (targetTitles.mapNotNull(::seriesIdentityFromTitle) +
+            targetPageUrls.mapNotNull(::seriesIdentityFromUrl))
+            .filter(::isMeaningfulSeriesIdentity)
+            .toSet()
+        if (targetIdentities.isEmpty()) return false
+
+        val candidateIdentities = (candidateTitles.mapNotNull(::seriesIdentityFromTitle) +
+            candidatePageUrls.mapNotNull(::seriesIdentityFromUrl))
+            .filter(::isMeaningfulSeriesIdentity)
+            .toSet()
+        return candidateIdentities.isNotEmpty() && candidateIdentities.all { it in targetIdentities }
+    }
+
+    /**
+     * A provider's series page can contain recommendation cards from unrelated
+     * shows. Keep an episode link only when its own title or readable URL slug
+     * identifies the same work as the page currently being parsed.
+     */
+    fun episodeBelongsToSeries(
+        targetTitles: Collection<String>,
+        targetPageUrls: Collection<String>,
+        episodeTitle: String,
+        episodeUrl: String,
+        allowEpisodeListContext: Boolean = false,
+    ): Boolean {
+        val targetIdentities = (targetTitles.mapNotNull(::seriesIdentityFromTitle) +
+            targetPageUrls.mapNotNull(::seriesIdentityFromUrl))
+            .filter(::isMeaningfulSeriesIdentity)
+            .toSet()
+        if (targetIdentities.isEmpty()) return false
+
+        val titleIdentity = seriesIdentityFromTitle(episodeTitle)
+        val urlIdentity = seriesIdentityFromUrl(episodeUrl)
+        val evidence = listOfNotNull(titleIdentity, urlIdentity).distinct()
+        // A readable title/slug must agree. Opaque IDs may rely on a trusted
+        // episode-list container after recommendation containers were excluded.
+        return if (evidence.isEmpty()) allowEpisodeListContext else evidence.all { it in targetIdentities }
+    }
+
+    internal fun seriesIdentityFromTitle(title: String): String? {
+        val normalizedTitle = normalizeDigits(title).trim()
+        if (Regex("""(?i)^[0-9\s._-]*(?:الحلقة|حلقة|الحلقه|episode|ep)\s*[0-9]+(?:\s+.*)?$""")
+                .matches(normalizedTitle)
+        ) return null
+        val identity = normalizedSeriesIdentity(title)
+        return identity.takeIf(::isMeaningfulSeriesIdentity)
+    }
+
+    internal fun seriesIdentityFromUrl(rawUrl: String): String? {
+        val path = runCatching { java.net.URI(rawUrl.trim()).rawPath.orEmpty() }
+            .getOrDefault("")
+            .trimEnd('/')
+        var slug = path.substringAfterLast('/', "")
+        if (slug.isBlank() || Regex("""^[a-z0-9]{9,24}$""", RegexOption.IGNORE_CASE).matches(slug)) {
+            return null
+        }
+        slug = decodeUrl(slug)
+            // Episode-only slugs should retain the parent series identity.
+            // Providers use several readable suffix formats, for example
+            // `one-piece-episode-843`, `one-piece-s1-eps843`, and the
+            // Cima/Akwam `show-m2-n4` / `show-e2-s4` encodings.
+            .replace(
+                Regex(
+                    """(?i)(?:^|[-_ ])(?:episode|episodes|eps?|الحلقة|الحلقه|حلقة|حلقه)[-_ ]*[0-9]{1,4}(?:[-_ ].*)?$""",
+                ),
+                " ",
+            )
+            // WordPress truncates long Arabic episode/season slugs mid-word and often appends
+            // a 2-char alphanumeric hash (-b5, -p2) or counter (-10, -35), e.g. -الحل-b5, -المو-35, -المو.
+            .replace(
+                Regex(
+                    """(?i)(?:^|[-_ ])(?:الحلقة|الحلقه|حلقة|حلقه|الحلق|الحل|الموسم|الموس|المو|موسم|موس|الجزء|الجز)(?:[-_ ]+(?:[0-9]{1,4}|[a-z][0-9]|[0-9][a-z]))?$""",
+                ),
+                " ",
+            )
+            .replace(
+                Regex(
+                    """(?i)(?:^|[-_ ])(?:الموسم|الموس|المو|موسم|الجزء)[-_ ]+(?:الاولى|الاول|الثانية|الثاني|الثالثة|الثالث|الرابعة|الرابع|الخامسة|الخامس|الثا|الرا|مترج|مدبل)?$""",
+                ),
+                " ",
+            )
+            .replace(Regex("""(?i)(?:^|[-_ ])(?:مترجمة|مترجم|مترج|مدبلجة|مدبلج|مدبل)$"""), " ")
+            .replace(Regex("""(?i)(?:^|[-_ ])m[0-9]{1,2}[-_]n[0-9]{1,4}$"""), " ")
+            .replace(Regex("""(?i)(?:^|[-_ ])e[0-9]{1,4}[-_]s[0-9]{1,2}$"""), " ")
+            .replace(Regex("""(?i)(?:^|[-_ ])s[0-9]{1,2}(?:[-_ ].*)?$"""), " ")
+            .replace(Regex("""(?i)(?:^|[-_ ])season[-_ ]*[0-9]{1,2}(?:[-_ ].*)?$"""), " ")
+            .replace(Regex("""[-_]+"""), " ")
+        val identity = normalizedSeriesIdentity(slug)
+        return identity.takeIf(::isMeaningfulSeriesIdentity)
+    }
+
+    private fun isMeaningfulSeriesIdentity(identity: String): Boolean =
+        identity.any { it.isLetter() } && identity !in setOf(
+            "episode", "episodes", "ep", "video", "watch", "series", "season",
+            "movie", "film", "مسلسل", "انمي", "فيلم", "حلقة", "الحلقة",
+        )
+
+    /** A direct episode search result must have a season we can assign without guessing. */
+    fun directEpisodeSeasonNumber(
+        title: String,
+        url: String,
+        parentSeasonNumber: Int?,
+    ): Int? {
+        if (episodeNumber(title, url) == null || hasConflictingSeasonNumbers(title, url)) return null
+        return seasonNumber(title, url)
+            ?: parentSeasonNumber?.takeIf { it in 1..60 }
+    }
+
+    private fun episodeNumberFromValue(value: String, isUrl: Boolean, allowNumericTitle: Boolean): Int? {
+        episodeNumberPattern.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?.takeIf { it > 0 }?.let { return it }
+        trailingEpisodeNumberPattern.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?.takeIf { it > 0 }?.let { return it }
+        if (!isUrl) {
+            compactArabicEpisodePattern.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                ?.takeIf { it > 0 }?.let { return it }
+            if (allowNumericTitle) {
+                normalizeDigits(value).trim().toIntOrNull()?.takeIf { it in 1..9999 }?.let { return it }
+            }
+            return null
+        }
+        akwamEpisodeUrlPattern.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?.takeIf { it > 0 }?.let { return it }
+        cimaEpisodeUrlPattern.find(value)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?.takeIf { it > 0 }?.let { return it }
+        return null
+    }
 
     private fun extractLabeledNumber(
         title: String,
@@ -886,4 +1129,48 @@ internal object SeriesCatalogParser {
     private fun decodeUrl(value: String): String = runCatching {
         URLDecoder.decode(value.replace("+", "%2B"), "UTF-8")
     }.getOrDefault(value)
+
+    /** Percent-encodes non-ASCII UTF-8 bytes and illegal URI path/query characters for Java URI and OkHttp. */
+    fun asciiSafeUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return ""
+        val schemeIdx = trimmed.indexOf("://")
+        val authorityStart = if (schemeIdx >= 0) schemeIdx + 3 else 0
+        val pathStart = trimmed.indexOfAny(charArrayOf('/', '?', '#'), startIndex = authorityStart)
+            .let { if (it < 0) trimmed.length else it }
+        val sb = StringBuilder(trimmed.length + 16)
+        var i = 0
+        while (i < trimmed.length) {
+            val ch = trimmed[i]
+            val code = ch.code
+            val inPathOrQuery = i >= pathStart
+            val encodeBracket = inPathOrQuery && (ch == '[' || ch == ']')
+            val unsafeAscii = ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+                ch == '<' || ch == '>' || ch == '"' || ch == '{' || ch == '}' ||
+                ch == '|' || ch == '\\' || ch == '^' || ch == '`' || encodeBracket || code < 0x20 || code == 0x7F
+            if (code in 0x20..0x7E && !unsafeAscii) {
+                sb.append(ch)
+                i++
+            } else {
+                val cp = trimmed.codePointAt(i)
+                val charCount = Character.charCount(cp)
+                val bytes = String(Character.toChars(cp)).toByteArray(Charsets.UTF_8)
+                for (b in bytes) {
+                    val v = b.toInt() and 0xFF
+                    sb.append('%')
+                    sb.append("0123456789ABCDEF"[v ushr 4])
+                    sb.append("0123456789ABCDEF"[v and 0x0F])
+                }
+                i += charCount
+            }
+        }
+        return sb.toString()
+    }
+
+    /** Ensures HTTP header values (e.g. Referer/Origin) contain only OkHttp-valid ASCII characters. */
+    fun asciiSafeHeaderValue(raw: String): String {
+        val cleaned = raw.trim().replace("\r", "").replace("\n", "")
+        if (cleaned.isEmpty()) return ""
+        return asciiSafeUrl(cleaned)
+    }
 }

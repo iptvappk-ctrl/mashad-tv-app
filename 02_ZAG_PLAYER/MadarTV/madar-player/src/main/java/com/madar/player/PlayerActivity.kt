@@ -2772,6 +2772,7 @@ private fun PlayerScreen(
     }
     var downloadedBytes by remember(streamUrl) { mutableLongStateOf(0L) }
     var bufferingSinceMs by remember(effectiveStreamUrl) { mutableLongStateOf(0L) }
+    var webViewInitialPlaybackWaitMs by remember(effectiveStreamUrl) { mutableLongStateOf(0L) }
     var bufferingFallbackUsed by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var hasRenderedFirstFrame by remember(effectiveStreamUrl) { mutableStateOf(false) }
     var hasStartedPlaying by remember(effectiveStreamUrl) { mutableStateOf(false) }
@@ -2780,6 +2781,7 @@ private fun PlayerScreen(
     var resumeAfterAd by remember(effectiveStreamUrl) { mutableStateOf(true) }
     var wasAdOverlayActive by remember(effectiveStreamUrl) { mutableStateOf(isAdOverlayActive) }
     var liveRetryAttempted by remember(effectiveStreamUrl) { mutableStateOf(false) }
+    var chunklessPreparationEnabled by remember(effectiveStreamUrl) { mutableStateOf(true) }
     val streamStartedMs = remember(effectiveStreamUrl) { System.currentTimeMillis() }
 
     var showControls by remember { mutableStateOf(true) }
@@ -2844,7 +2846,7 @@ private fun PlayerScreen(
 
         val mediaSource = if (isHls) {
             HlsMediaSource.Factory(dataSourceFactory)
-                .setAllowChunklessPreparation(false)
+                .setAllowChunklessPreparation(chunklessPreparationEnabled)
                 .createMediaSource(mediaItem)
         } else {
             DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
@@ -2898,6 +2900,15 @@ private fun PlayerScreen(
 
                     override fun onPlayerError(error: PlaybackException) {
                         Log.w("MadarPlayer", "ExoPlayer error host=${safeHost(streamUrl)} code=${error.errorCodeName} msg=${error.cause?.message}")
+                        if (isHls && chunklessPreparationEnabled &&
+                            (error.errorCodeName.contains("PARSING") ||
+                                error.errorCodeName.contains("DECODER"))
+                        ) {
+                            Log.i("MadarPlayer", "Retrying HLS with segment-based preparation")
+                            chunklessPreparationEnabled = false
+                            exoRetryKey++
+                            return
+                        }
                         if (isLive && !liveRetryAttempted) {
                             liveRetryAttempted = true
                             exoRetryKey++
@@ -3008,6 +3019,54 @@ private fun PlayerScreen(
                     isBuffering = false
                 }
             }
+        }
+    }
+
+    // A WebView embed can fail before onPageStarted/onReceivedError fires.
+    // In that case the normal page watchdog never begins and the creative
+    // loader can remain on screen indefinitely. Bound that silent state and
+    // move to the next verified source, or show the retry UI when none remain.
+    LaunchedEffect(effectiveStreamUrl, useWebViewFallback, isAdOverlayActive) {
+        if (!useWebViewFallback) return@LaunchedEffect
+        while (!hasRenderedFirstFrame && playbackError == null) {
+            kotlinx.coroutines.delay(500)
+            if (!isAdOverlayActive) webViewInitialPlaybackWaitMs += 500L
+            if (webViewInitialPlaybackWaitMs < 12_000L || bufferingFallbackUsed) continue
+
+            bufferingFallbackUsed = true
+            if (backupSources.isNotEmpty()) {
+                val directIdx = backupSources.indexOfFirst { isDirectStreamUrl(it.url) }
+                val currentHost = safeHost(effectiveStreamUrl)
+                val differentHostIdx = backupSources.indexOfFirst {
+                    val candidateHost = safeHost(it.url)
+                    candidateHost.isNotBlank() && candidateHost != currentHost
+                }
+                val nextIdx = when {
+                    directIdx >= 0 -> directIdx
+                    differentHostIdx >= 0 -> differentHostIdx
+                    else -> 0
+                }
+                val next = backupSources.removeAt(nextIdx)
+                Log.w(
+                    "MadarPlayer",
+                    "WebView made no playback progress after ${webViewInitialPlaybackWaitMs}ms; " +
+                        "switching host=${safeHost(next.url)} backups=${backupSources.size}",
+                )
+                onSwitchStream(
+                    next.url,
+                    next.userAgent.ifBlank { cleanUa },
+                    next.referer.ifBlank { cleanRef },
+                    next.headers,
+                )
+            } else {
+                Log.w(
+                    "MadarPlayer",
+                    "WebView made no playback progress after ${webViewInitialPlaybackWaitMs}ms; no backups remain",
+                )
+                playbackError = "لم يبدأ الفيديو من هذا المصدر خلال 12 ثانية. اختر سيرفرًا آخر أو أعد المحاولة."
+                isBuffering = false
+            }
+            return@LaunchedEffect
         }
     }
 
@@ -3263,7 +3322,19 @@ private fun PlayerScreen(
                                 if (!pageFailureScheduled.compareAndSet(false, true)) return
                                 Log.w("MadarPlayer", "source failed host=${safeHost(activePageUrl.get())} backups=${backupSources.size}")
                                 if (backupSources.isNotEmpty()) {
-                                    val next = backupSources.removeAt(0)
+                                    val currentHost = safeHost(activePageUrl.get())
+                                        .ifBlank { safeHost(effectiveStreamUrl) }
+                                    val directIndex = backupSources.indexOfFirst { isDirectStreamUrl(it.url) }
+                                    val differentHostIndex = backupSources.indexOfFirst {
+                                        val candidateHost = safeHost(it.url)
+                                        candidateHost.isNotBlank() && candidateHost != currentHost
+                                    }
+                                    val nextIndex = when {
+                                        directIndex >= 0 -> directIndex
+                                        differentHostIndex >= 0 -> differentHostIndex
+                                        else -> 0
+                                    }
+                                    val next = backupSources.removeAt(nextIndex)
                                     Log.i("MadarPlayer", "trying backup host=${safeHost(next.url)}")
                                     pageFailureScheduled.set(false)
                                     mediaHandoffScheduled.set(false)

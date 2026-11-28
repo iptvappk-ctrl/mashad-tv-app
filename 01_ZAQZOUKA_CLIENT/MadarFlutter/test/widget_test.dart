@@ -1,24 +1,16 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:madar_flutter/main.dart';
 
 void main() {
-  testWidgets('shows the branded intro and the app navigation', (
+  testWidgets('shows the startup status gate before the app content', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const MyApp());
     await tester.pump();
 
-    expect(find.text('زقزوقة'), findsWidgets);
-    expect(find.text('تخطي'), findsOneWidget);
-
-    await tester.tap(find.text('تخطي'));
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pump(const Duration(milliseconds: 350));
-
-    expect(find.text('أفلام ومسلسلات'), findsOneWidget);
-    expect(find.text('ملخصات'), findsOneWidget);
-    expect(find.text('بثات الكورة'), findsOneWidget);
-    expect(find.text('المفضلة'), findsOneWidget);
+    expect(find.text('جاري التحقق من المنظومة...'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
   });
 }

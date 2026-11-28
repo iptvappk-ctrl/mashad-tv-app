@@ -1925,7 +1925,7 @@ Future<void> _showPlayerNotFoundDialog(
           ),
           const SizedBox(height: 10),
           const Text(
-            'لتشغيل الأفلام والمسلسلات والمباريات بأعلى دقة وسرعة، يرجى تثبيت مشغل زاغ الرسمي (خفيف وسريع 5MB فقط).',
+            'لتشغيل الأفلام والمسلسلات والمباريات بأعلى دقة وسرعة، يرجى تثبيت مشغل زاغ الرسمي (خفيف وسريع، حوالي 5MB).',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.white70, fontSize: 13.5, height: 1.5),
           ),
@@ -1942,7 +1942,7 @@ Future<void> _showPlayerNotFoundDialog(
               ),
               icon: const Icon(Icons.download_rounded, size: 22),
               label: const Text(
-                'تثبيت مشغل زاغ الآن (4MB)',
+                'تثبيت مشغل زاغ الآن (حوالي 5MB)',
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               ),
               onPressed: () async {

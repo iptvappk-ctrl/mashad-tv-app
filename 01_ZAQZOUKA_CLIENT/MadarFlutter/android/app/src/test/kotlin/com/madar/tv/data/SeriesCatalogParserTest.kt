@@ -42,6 +42,47 @@ class SeriesCatalogParserTest {
     }
 
     @Test
+    fun findsMySeedCanonicalAndSeasonParentsFromSelaryBreadcrumbs() {
+        val episodeUrl =
+            "https://m.myseed.tv/%d9%85%d8%b3%d9%84%d8%b3%d9%84-doctor-x-mafia-in-white-s1-eps1/"
+        val canonicalUrl =
+            "https://m.myseed.tv/selary/%d9%85%d8%b3%d9%84%d8%b3%d9%84-doctor-x-mafia-in-white-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
+        val seasonUrl =
+            "https://m.myseed.tv/selary/%d9%85%d8%b3%d9%84%d8%b3%d9%84-doctor-x-mafia-in-white-%d8%a7%d9%84%d9%85%d9%88%d8%b3%d9%85-%d8%a7%d9%84%d8%a7%d9%88%d9%84-%d9%85%d8%aa%d8%b1%d8%ac%d9%85/"
+        val document = Jsoup.parse(
+            """
+            <div class="episode-breadcrumb">
+              <a href="$canonicalUrl">مسلسل Doctor X: Mafia in White مترجم</a>
+              <a href="$seasonUrl">مسلسل Doctor X: Mafia in White الموسم الاول مترجم</a>
+            </div>
+            <div class="related"><a href="/selary/alls-fair-season-2">All's Fair الموسم الثاني</a></div>
+            """.trimIndent(),
+            episodeUrl,
+        )
+
+        val parents = SeriesCatalogParser.linkedSeriesParentPages(
+            document = document,
+            currentPageUrl = episodeUrl,
+            isAllowedContentUrl = { it.startsWith("https://m.myseed.tv/") },
+        )
+
+        assertEquals(listOf(canonicalUrl, seasonUrl), parents.map { it.first })
+        assertTrue(parents.none { it.first.contains("alls-fair") })
+        assertTrue(
+            parents.all { (url, title) ->
+                SeriesCatalogParser.pageBelongsToSeries(
+                    targetTitles = listOf(
+                        "مسلسل Doctor X: Mafia in White الموسم الاول الحلقة 1 الاولي مترجمة",
+                    ),
+                    targetPageUrls = listOf(episodeUrl),
+                    candidateTitles = listOf(title),
+                    candidatePageUrls = listOf(url),
+                )
+            },
+        )
+    }
+
+    @Test
     fun ignoresSeasonLookingLinksOutsideSeasonNavigation() {
         val document = Jsoup.parse(
             """
@@ -69,6 +110,359 @@ class SeriesCatalogParserTest {
         )
 
         assertEquals(listOf(1, 2, 3), seasons.map { it.first })
+    }
+
+    @Test
+    fun matchesOnlyTheFullSeriesIdentityFromProviderSearchResults() {
+        val identity = "Doctor X: Mafia in White"
+        val episodeTitle = "مسلسل Doctor X: Mafia in White الموسم الاول الحلقة 1 الاولي مترجمة"
+
+        assertTrue(
+            SeriesCatalogParser.matchesExactSeriesIdentity(
+                targetIdentities = listOf(identity),
+                candidateTitles = listOf(episodeTitle),
+            ),
+        )
+        assertFalse(
+            SeriesCatalogParser.matchesExactSeriesIdentity(
+                targetIdentities = listOf(identity),
+                candidateTitles = listOf("Doctor on the Edge الموسم الأول الحلقة 6"),
+            ),
+        )
+        assertFalse(
+            SeriesCatalogParser.matchesExactSeriesIdentity(
+                targetIdentities = listOf(identity),
+                candidateTitles = listOf("Doctor X الموسم الأول الحلقة 6"),
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsEpisodeLinksFromUnrelatedRecommendationsOnASeasonPage() {
+        val targetTitle = "مسلسل انمي One Piece الحلقة 1178 مترجمة"
+        val targetUrl = "https://m.myseed.tv/مسلسل-انمي-one-piece-s1-eps1178/"
+        assertEquals("one piece", SeriesCatalogParser.seriesIdentityFromUrl(targetUrl))
+        assertEquals(
+            "one piece",
+            SeriesCatalogParser.seriesIdentityFromUrl(
+                "https://m.myseed.tv/انمي-one-piece-الحلقة-843-مترجمة/",
+            ),
+        )
+
+        assertTrue(
+            SeriesCatalogParser.episodeBelongsToSeries(
+                targetTitles = listOf(targetTitle),
+                targetPageUrls = listOf(targetUrl),
+                episodeTitle = "الحلقة 843",
+                episodeUrl = "https://m.myseed.tv/انمي-one-piece-الحلقة-843-مترجمة/",
+            ),
+        )
+        assertFalse(
+            SeriesCatalogParser.episodeBelongsToSeries(
+                targetTitles = listOf(targetTitle),
+                targetPageUrls = listOf(targetUrl),
+                episodeTitle = "مسلسل Alls Fair الموسم الثاني الحلقة 3 مترجمة",
+                episodeUrl = "https://m.myseed.tv/مسلسل-alls-fair-s2-eps3/",
+            ),
+        )
+        assertFalse(
+            SeriesCatalogParser.episodeBelongsToSeries(
+                targetTitles = listOf("One Piece"),
+                targetPageUrls = emptyList(),
+                episodeTitle = "Episode 3",
+                episodeUrl = "https://wecima.cc/video/wa4th782mvck/",
+            ),
+        )
+        assertTrue(
+            SeriesCatalogParser.episodeBelongsToSeries(
+                targetTitles = listOf("One Piece"),
+                targetPageUrls = emptyList(),
+                episodeTitle = "Episode 3",
+                episodeUrl = "https://wecima.cc/video/wa4th782mvck/",
+                allowEpisodeListContext = true,
+            ),
+        )
+    }
+
+    @Test
+    fun matchesGenericEpisodeTitlesWhenTheReadableEpisodeSlugContainsTheSeriesName() {
+        val cases = listOf(
+            Triple(
+                "One Piece",
+                "https://m.myseed.tv/anime/one-piece",
+                "https://m.myseed.tv/anime/one-piece-episode-843",
+            ),
+            Triple(
+                "One Piece",
+                "https://m.myseed.tv/anime/one-piece",
+                "https://m.myseed.tv/anime/انمي-one-piece-الحلقة-843-مترجمة",
+            ),
+            Triple(
+                "Crash",
+                "https://akw.cam/akdrama-crash",
+                "https://akw.cam/akdrama-crash-e2-s4",
+            ),
+            Triple(
+                "Crash",
+                "https://c4u.cam/crash",
+                "https://c4u.cam/crash-m2-n4",
+            ),
+        )
+
+        cases.forEach { (title, seriesUrl, episodeUrl) ->
+            assertTrue(
+                "$episodeUrl should resolve to $title",
+                SeriesCatalogParser.episodeBelongsToSeries(
+                    targetTitles = listOf(title),
+                    targetPageUrls = listOf(seriesUrl),
+                    episodeTitle = "الحلقة 4",
+                    episodeUrl = episodeUrl,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun providerSearchUsesTheCardHeadingInsteadOfGenericPosterAltText() {
+        val provider = MultiProviderRepository.PROVIDERS.first { it.id == "wecima" }
+        val page = """
+            <ul class="latest-data">
+              <li class="video-grid">
+                <div class="thumb">
+                  <a href="https://wecima.cc/video/wa4th782mvck/">
+                    <img alt="One Piece" src="poster.webp">
+                  </a>
+                </div>
+                <div class="data">
+                  <h2 class="title">
+                    <a href="https://wecima.cc/video/wa4th782mvck/">
+                      أنمي ون بيس الحلقة 1153 مترجمة ماي سيما – One Piece
+                    </a>
+                  </h2>
+                </div>
+              </li>
+            </ul>
+        """.trimIndent()
+
+        val results = MultiProviderRepository.parseItems(page, provider, ArabseedType.SERIES)
+
+        assertEquals(1, results.size)
+        assertTrue(results.single().title.contains("الحلقة 1153"))
+        assertTrue(SeriesCatalogParser.isEpisode(results.single().title, results.single().pageUrl))
+    }
+
+    @Test
+    fun everyEnabledProviderIsIncludedInSeasonEnrichment() {
+        val expectedIds = setOf(
+            "arabseed", "wecima", "akwam", "faselhd", "iegybest", "topcinema",
+            "shahid4u", "shahid4u_si", "cima4u", "fushaar", "arablionz", "lodynet",
+            "aradrama", "esheeq", "prestige", "cimaclub", "egydead", "cimanow", "cimawbas",
+        )
+
+        assertEquals(expectedIds, MultiProviderRepository.seasonEnrichmentProviders().map { it.id }.toSet())
+        assertEquals(18, MultiProviderRepository.seasonEnrichmentProviders("arabseed").size)
+        assertFalse(MultiProviderRepository.seasonEnrichmentProviders().any { !it.enabled })
+    }
+
+    @Test
+    fun directEpisodeMergePreservesSameEpisodeMirrorsWithoutCrossingSeasonOrNumber() {
+        val merged = MultiProviderRepository.mergeDiscoveredEpisodeMirrors(
+            listOf(
+                ArabseedEpisode(
+                    number = 1,
+                    title = "الحلقة 1",
+                    pageUrl = "https://m.myseed.tv/one-piece-s1-e1/",
+                    seasonNumber = 1,
+                    providerName = "عرب سيد",
+                ),
+                ArabseedEpisode(
+                    number = 1,
+                    title = "الحلقة 1",
+                    pageUrl = "https://fushaar.cam/one-piece-season-1-episode-1/",
+                    seasonNumber = 1,
+                    providerName = "فشار",
+                ),
+                ArabseedEpisode(
+                    number = 2,
+                    title = "الحلقة 2",
+                    pageUrl = "https://fushaar.cam/one-piece-season-1-episode-2/",
+                    seasonNumber = 1,
+                    providerName = "فشار",
+                ),
+                ArabseedEpisode(
+                    number = 1,
+                    title = "الحلقة 1",
+                    pageUrl = "https://fushaar.cam/one-piece-season-2-episode-1/",
+                    seasonNumber = 2,
+                    providerName = "فشار",
+                ),
+            ),
+        )
+
+        assertEquals(listOf(1 to 1, 1 to 2, 2 to 1), merged.map { it.seasonNumber to it.number })
+        val firstSeasonFirstEpisode = merged.first()
+        assertEquals("https://m.myseed.tv/one-piece-s1-e1/", firstSeasonFirstEpisode.pageUrl)
+        assertEquals(
+            listOf("https://fushaar.cam/one-piece-season-1-episode-1/"),
+            firstSeasonFirstEpisode.alternatePageUrls,
+        )
+        assertTrue(merged.drop(1).all { it.alternatePageUrls.isEmpty() })
+    }
+
+    @Test
+    fun assignsSeasonOnlyFromAnExplicitMarkerOrParentSeasonContext() {
+        assertEquals(
+            7,
+            SeriesCatalogParser.directEpisodeSeasonNumber(
+                title = "Doctor X الموسم السابع الحلقة 1",
+                url = "https://example.test/doctor-x-s7-e1",
+                parentSeasonNumber = 1,
+            ),
+        )
+        assertNull(
+            SeriesCatalogParser.directEpisodeSeasonNumber(
+                title = "Episode 9",
+                url = "https://example.test/episode-9",
+                parentSeasonNumber = null,
+            ),
+        )
+        assertNull(
+            SeriesCatalogParser.directEpisodeSeasonNumber(
+                title = "Episode 9",
+                url = "https://example.test/episode-9",
+                parentSeasonNumber = null,
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsConflictingSeasonAndEpisodeNumbersBetweenTitleAndUrl() {
+        assertNull(
+            SeriesCatalogParser.episodeNumber(
+                title = "Doctor X الموسم الثاني الحلقة 8",
+                url = "https://example.test/doctor-x-s2-episode-9",
+            ),
+        )
+        assertNull(
+            SeriesCatalogParser.seasonNumber(
+                title = "Doctor X الموسم الثاني الحلقة 8",
+                url = "https://example.test/doctor-x-s3-episode-8",
+            ),
+        )
+        assertNull(
+            SeriesCatalogParser.directEpisodeSeasonNumber(
+                title = "Doctor X الموسم الثاني الحلقة 8",
+                url = "https://example.test/doctor-x-s3-episode-8",
+                parentSeasonNumber = 2,
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsDatabaseSeasonIdsInsteadOfTreatingThemAsSeasonNumbers() {
+        val currentUrl = "https://provider.test/series/doctor-x"
+        val document = Jsoup.parse(
+            """
+                <nav class="seasons">
+                  <li data-season-number="503201" data-url="/series/doctor-x?tab=503201">الموسم</li>
+                  <a data-season-number="2" href="/series/doctor-x-season-2">الموسم الثاني</a>
+                </nav>
+            """.trimIndent(),
+            currentUrl,
+        )
+
+        val linkedSeasons = SeriesCatalogParser.linkedSeasonPages(document, currentUrl) { true }
+        assertEquals(listOf(2), linkedSeasons.map { it.first })
+        assertNull(SeriesCatalogParser.seasonNumber("", "https://provider.test/season-503201"))
+
+        val normalized = SeriesCatalogParser.normalizeSeasonBundle(
+            ArabseedSeasonBundle(
+                listOf(
+                    ArabseedSeason(503201, "الموسم", emptyList(), "https://provider.test/season-db-id"),
+                ),
+            ),
+        )
+        assertTrue(normalized.seasons.isEmpty())
+    }
+
+    @Test
+    fun rejectsSeasonlessMirrorRowsAndUncorroboratedExtraSeasons() {
+        val target = seriesItem("One Piece", "https://primary.test/anime/one-piece")
+        val primary = ArabseedSeasonBundle(
+            listOf(
+                season(1, "https://primary.test/anime/one-piece/season-1", episode(1, 1, "https://primary.test/anime/one-piece-s1-e1")),
+                season(2, "https://primary.test/anime/one-piece/season-2", episode(1, 2, "https://primary.test/anime/one-piece-s2-e1")),
+            ),
+        )
+        val mirror = seriesItem("One Piece", "https://mirror.test/anime/one-piece")
+        val unscopedBundle = ArabseedSeasonBundle(
+            listOf(
+                season(1, "https://mirror.test/anime/one-piece", episode(1153, 1, "https://mirror.test/anime/one-piece-episode-1153")),
+                season(28, "https://mirror.test/anime/one-piece-season-28", episode(1, 28, "https://mirror.test/anime/one-piece-s28-e1")),
+            ),
+        )
+
+        val result = MultiProviderRepository.reconcileMirrorSeasonBundle(target, primary, mirror, unscopedBundle)
+
+        assertTrue(result.seasons.isEmpty())
+    }
+
+    @Test
+    fun mergesOnlyEpisodesFromAnExplicitSeasonThatExistsOnThePrimary() {
+        val target = seriesItem("Doctor X: Mafia in White", "https://primary.test/series/doctor-x-mafia-in-white")
+        val primary = ArabseedSeasonBundle(
+            listOf(
+                season(1, "https://primary.test/series/doctor-x-mafia-in-white-season-1", episode(1, 1, "https://primary.test/series/doctor-x-mafia-in-white-s1-e1")),
+                season(2, "https://primary.test/series/doctor-x-mafia-in-white-season-2", episode(1, 2, "https://primary.test/series/doctor-x-mafia-in-white-s2-e1")),
+            ),
+        )
+        val mirror = seriesItem("Doctor X: Mafia in White", "https://mirror.test/series/doctor-x-mafia-in-white-season-1")
+        val source = ArabseedSeasonBundle(
+            listOf(
+                season(1, "https://mirror.test/series/doctor-x-mafia-in-white-season-1", episode(2, 1, "https://mirror.test/series/doctor-x-mafia-in-white-s1-e2")),
+                season(2, "https://mirror.test/series/doctor-x-mafia-in-white-season-2", episode(99, 2, "https://mirror.test/series/doctor-x-mafia-in-white-s2-e99")),
+            ),
+        )
+
+        val result = MultiProviderRepository.reconcileMirrorSeasonBundle(target, primary, mirror, source)
+
+        assertEquals(listOf(1), result.seasons.map { it.number })
+        assertEquals(listOf(2), result.seasons.single().episodes.map { it.number })
+    }
+
+    @Test
+    fun rejectsMirrorWhenReadablePageSlugNamesAnotherSeries() {
+        val target = seriesItem("Doctor X: Mafia in White", "https://primary.test/series/doctor-x-mafia-in-white")
+        val primary = ArabseedSeasonBundle(
+            listOf(season(1, "https://primary.test/series/doctor-x-mafia-in-white-season-1", episode(1, 1, "https://primary.test/doctor-x-mafia-in-white-s1-e1"))),
+        )
+        val wrongMirror = seriesItem("Doctor X: Mafia in White", "https://mirror.test/series/alls-fair-season-2")
+        val source = ArabseedSeasonBundle(
+            listOf(season(1, "https://mirror.test/series/alls-fair-season-2", episode(3, 1, "https://mirror.test/series/alls-fair-s2-e3"))),
+        )
+
+        val result = MultiProviderRepository.reconcileMirrorSeasonBundle(target, primary, wrongMirror, source)
+
+        assertTrue(result.seasons.isEmpty())
+    }
+
+    @Test
+    fun startsNumberedPaginationAtPageTwoWhenTheRootHasNoPageNumber() {
+        val rootUrl = "https://m.myseed.tv/series/example-season-1"
+        val document = Jsoup.parse(
+            """
+            <div class="pagination">
+              <a href="?page=2">2</a>
+              <a href="?page=3">3</a>
+            </div>
+            """.trimIndent(),
+            rootUrl,
+        )
+
+        assertEquals(
+            "https://m.myseed.tv/series/example-season-1?page=2",
+            SeriesCatalogParser.nextEpisodePage(document, rootUrl),
+        )
     }
 
     @Test
@@ -206,6 +600,60 @@ class SeriesCatalogParserTest {
     }
 
     @Test
+    fun flagsTheOnePieceGapVisibleInTheLatestDeviceScreenshot() {
+        val numbers = (881..891).toList() + (1166..1177).toList()
+
+        assertEquals(listOf(892..1165), SeriesCatalogParser.episodeSequenceGaps(numbers))
+        assertTrue(SeriesCatalogParser.needsEpisodeSequenceRepair(numbers))
+    }
+
+    @Test
+    fun reportsTheLargeOnePieceEpisodeGapShownInTheDeviceScreenshot() {
+        val numbers = (881..891).toList() + (1166..1177).toList()
+
+        assertEquals(listOf(892..1165), SeriesCatalogParser.episodeSequenceGaps(numbers))
+        assertEquals(
+            listOf(1..880, 892..1165),
+            SeriesCatalogParser.episodeSequenceCoverageGaps(numbers),
+        )
+        assertTrue(SeriesCatalogParser.needsEpisodeSequenceRepair(numbers))
+    }
+
+    @Test
+    fun treatsAContiguousListStartingAtALateEpisodeAsIncomplete() {
+        val numbers = 31..34
+
+        assertEquals(listOf(1..30), SeriesCatalogParser.episodeSequenceCoverageGaps(numbers.toList()))
+        assertTrue(SeriesCatalogParser.needsEpisodeSequenceRepair(numbers.toList()))
+    }
+
+    @Test
+    fun keepsAContiguousButStaleListIncompleteWhenCurrentEpisodeProvesItsTailIsMissing() {
+        val numbers = 1..8
+
+        assertEquals(
+            listOf(9..1177),
+            SeriesCatalogParser.episodeSequenceCoverageGaps(
+                numbers.toList(),
+                expectedLastEpisode = 1177,
+            ),
+        )
+    }
+
+    @Test
+    fun includesTheKnownCurrentEpisodeWhenDetectingTheOnePieceGap() {
+        val numbers = (881..891).toList() + (1166..1177).toList()
+
+        assertEquals(
+            listOf(1..880, 892..1165),
+            SeriesCatalogParser.episodeSequenceCoverageGaps(
+                numbers,
+                expectedLastEpisode = 1177,
+            ),
+        )
+    }
+
+    @Test
     fun retainsNumberedEpisodePagesPastTheFormerTwelvePageLimit() {
         val firstPageUrl = "https://m.myseed.tv/series/long-season"
         val firstDocument = Jsoup.parse(
@@ -248,6 +696,24 @@ class SeriesCatalogParserTest {
         assertEquals((1..16).toList(), episodes.mapNotNull {
             SeriesCatalogParser.episodeNumber(it.first, it.second)
         }.distinct().sorted())
+    }
+
+    @Test
+    fun retainsLargeAnimeEpisodePagersInsteadOfStoppingAtSixtyPages() {
+        val pageUrl = "https://m.myseed.tv/series/one-piece"
+        val document = Jsoup.parse(
+            buildString {
+                append("<div class='episodes-list'><a href='/episode-1'>Episode 1</a></div>")
+                append("<div class='pagination'>")
+                for (page in 2..140) append("<a href='?page=$page'>$page</a>")
+                append("</div>")
+            },
+            pageUrl,
+        )
+
+        val pages = SeriesCatalogParser.linkedEpisodePages(document, pageUrl)
+        assertEquals(120, pages.size)
+        assertTrue(pages.any { it.endsWith("page=121") })
     }
 
     @Test
@@ -462,7 +928,7 @@ class SeriesCatalogParserTest {
                 <li><a href="https://cimawbas.rest/watch.php?vid=ep1">1 حلقة</a></li>
               </ul></div>
               <div id="Season1" class="tabcontent"><ul>
-                <li><a href="https://cimawbas.rest/watch.php?vid=ep20">1 حلقة</a></li>
+                <li><a href="https://cimawbas.rest/watch.php?vid=ep20">20 حلقة</a></li>
               </ul></div>
             </div>
             <a href="https://cimawbas.rest/tag.php?t=test-all">مسلسل جميع الحلقات</a>
@@ -624,11 +1090,99 @@ class SeriesCatalogParserTest {
         )
     }
 
+    @Test
+    fun handlesTruncatedMySeedSlugsDropsEmptySeasonsAndDetectsProviderEmptySearch() {
+        val parentUrl = "https://m.myseed.tv/selary/مسلسل-محمد-الفاتح-سلطان-الفتوحات-مترج/"
+        val expectedId = "محمد الفاتح سلطان الفتوحات"
+        assertEquals(expectedId, SeriesCatalogParser.seriesIdentityFromUrl(parentUrl))
+        for (epUrl in listOf(
+            "https://m.myseed.tv/مسلسل-محمد-الفاتح-سلطان-الفتوحات-الحل-b5/",
+            "https://m.myseed.tv/مسلسل-محمد-الفاتح-سلطان-الفتوحات-الحل-10/",
+            "https://m.myseed.tv/مسلسل-محمد-الفاتح-سلطان-الفتوحات-المو-p2/",
+            "https://m.myseed.tv/مسلسل-محمد-الفاتح-سلطان-الفتوحات-المو-35/",
+            "https://m.myseed.tv/selary/مسلسل-محمد-الفاتح-سلطان-الفتوحات-المو/",
+        )) {
+            assertEquals(expectedId, SeriesCatalogParser.seriesIdentityFromUrl(epUrl))
+            assertTrue(
+                "Expected truncated URL $epUrl to belong to series",
+                SeriesCatalogParser.episodeBelongsToSeries(
+                    targetTitles = listOf("محمد الفاتح سلطان الفتوحات"),
+                    targetPageUrls = listOf(parentUrl),
+                    episodeTitle = "الحلقة 5",
+                    episodeUrl = epUrl,
+                ),
+            )
+        }
+        assertEquals(
+            "الحل الاخير",
+            SeriesCatalogParser.seriesIdentityFromUrl("https://m.myseed.tv/فيلم-الحل-الاخير/"),
+        )
+
+        val cleanedBundle = SeriesCatalogParser.normalizeSeasonBundle(
+            ArabseedSeasonBundle(
+                seasons = listOf(
+                    ArabseedSeason(1, "الموسم الأول", emptyList(), "https://m.myseed.tv/selary/show-s1/"),
+                    ArabseedSeason(
+                        2,
+                        "الموسم الثاني",
+                        listOf(
+                            ArabseedEpisode(
+                                number = 29,
+                                title = "29",
+                                pageUrl = "https://m.myseed.tv/مسلسل-محمد-الفاتح-سلطان-الفتوحات-المو-29/",
+                                seasonNumber = 2,
+                                providerName = "fixture",
+                            ),
+                        ),
+                        "https://m.myseed.tv/selary/show-s2/",
+                    ),
+                ),
+            ),
+        )
+        assertEquals(listOf(2), cleanedBundle.seasons.map { it.number })
+        assertEquals(listOf(29), cleanedBundle.seasons.single().episodes.map { it.number })
+
+        val emptyCases = listOf(
+            "https://wecima.cc/?s=test" to "<body><p>عذراً لا توجد نتائج لـ : test</p></body>",
+            "https://qesset.net/?s=test" to "<body><p>لم يتم العثور على أي نتيجة.</p></body>",
+            "https://topcinemaa.tv/search/?query=test" to "<body><p>لا توجد نتائج مطابقة للبحث</p></body>",
+        )
+        for ((url, html) in emptyCases) {
+            val doc = Jsoup.parse(html, url)
+            assertTrue(MultiProviderRepository.isSearchEmptyResultPage(html, url, url, doc))
+        }
+        assertEquals(
+            "https://egweg1.sbs",
+            MultiProviderRepository.PROVIDERS.first { it.id == "egydead" }.baseUrl,
+        )
+    }
+
     private fun episode(number: Int, season: Int, url: String) = ArabseedEpisode(
         number = number,
         title = "الحلقة $number",
         pageUrl = url,
         seasonNumber = season,
         providerName = "fixture",
+    )
+
+    private fun season(number: Int, url: String, vararg episodes: ArabseedEpisode) = ArabseedSeason(
+        number = number,
+        title = SeriesCatalogParser.seasonTitle(number),
+        episodes = episodes.toList(),
+        pageUrl = url,
+    )
+
+    private fun seriesItem(title: String, url: String) = ArabseedItem(
+        id = "test_${title.hashCode()}",
+        title = title,
+        arabicTitle = "",
+        posterUrl = null,
+        year = "",
+        quality = "HD",
+        rating = "",
+        type = ArabseedType.SERIES,
+        pageUrl = url,
+        category = "series",
+        providerName = "test",
     )
 }

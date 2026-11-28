@@ -63,6 +63,72 @@ class FavoritesPage extends StatelessWidget {
   }
 }
 
+/// Identifies a search result that links directly to an episode page without a
+/// canonical series page. Episode links on these pages are only a partial view
+/// and must not be presented as the series' confirmed total episode count.
+bool isUnlinkedEpisodeResult(MediaItem item) {
+  if (item.parentSeriesPageUrl.trim().isNotEmpty) return false;
+  final title = item.title.toLowerCase();
+  final url = item.pageUrl.toLowerCase();
+  final explicitEpisodeUrl = RegExp(
+    r'/(?:episodes?)(?:/|[-_])|(?:^|[-_/])(?:eps?|ep)\d{1,4}(?:[-_/]|$)|(?:^|[-_/])s\d{1,2}[-_]e(?:p)?s?\d{1,4}(?:[-_/]|$)',
+    caseSensitive: false,
+  ).hasMatch(url);
+  if (explicitEpisodeUrl) return true;
+
+  final hasSeasonLabel = RegExp(
+    r'(?:الموسم|موسم|season\s*\d|(?:^|\W)s\d{1,2}(?:\W|$))',
+    caseSensitive: false,
+  ).hasMatch(title);
+  final hasEpisodeLabel = RegExp(
+    r'(?:الحلق[ةه]|episode|(?:^|\W)eps?\s*\d)',
+    caseSensitive: false,
+  ).hasMatch(title);
+  return hasSeasonLabel &&
+      hasEpisodeLabel &&
+      _episodeNumberFrom('${item.title} ${item.pageUrl}') != null;
+}
+
+/// Episode URLs sometimes contain an `s1` token even when the provider does
+/// not identify a season in the episode title. For an unlinked episode page,
+/// that URL token alone is weak evidence and must not be shown as a confirmed
+/// season number.
+bool isSeasonGroupingUnverified(MediaItem item) {
+  if (!isUnlinkedEpisodeResult(item)) return false;
+  return !RegExp(
+    r'(?:الموسم|موسم|season\s*\d{1,2}|(?:^|\W)s\d{1,2}(?:\W|$))',
+    caseSensitive: false,
+  ).hasMatch(item.title);
+}
+
+String episodeCollectionLabel({
+  required MediaItem item,
+  required int? seasonNumber,
+  String? sourceTitle,
+}) {
+  if (isSeasonGroupingUnverified(item)) {
+    return seasonNumber != null && seasonNumber > 0
+        ? 'التجميعة $seasonNumber من المصدر'
+        : 'تجميعة من المصدر';
+  }
+  final title = sourceTitle?.trim() ?? '';
+  if (title.isNotEmpty) return title;
+  return seasonNumber != null && seasonNumber > 0
+      ? 'الموسم $seasonNumber'
+      : 'الموسم';
+}
+
+bool canInferEpisodeForSelectedSeason({
+  required int? episodeSeasonNumber,
+  required int? selectedSeasonNumber,
+  required int availableSeasonCount,
+}) {
+  if (episodeSeasonNumber != null && selectedSeasonNumber != null) {
+    return episodeSeasonNumber == selectedSeasonNumber;
+  }
+  return episodeSeasonNumber == null && availableSeasonCount == 1;
+}
+
 class DetailPage extends StatefulWidget {
   const DetailPage({super.key, required this.item, required this.onOpenItem});
   final MediaItem item;
@@ -77,6 +143,8 @@ class _DetailPageState extends State<DetailPage> {
   bool _loading = true;
   bool _serversLoading = true;
   bool _seasonsLoading = true;
+  bool _backgroundSyncing = false;
+  bool _bundleFromCache = false;
   String? _error;
   int _seasonIndex = 0, _request = 0;
   int? _manualSeasonNumber;
@@ -87,6 +155,28 @@ class _DetailPageState extends State<DetailPage> {
   final Map<int, int> _visibleEpisodeCountBySeason = <int, int>{};
   final Set<int> _loadingMoreEpisodeSeasons = <int>{};
   final Set<int> _episodeSeasonsExhausted = <int>{};
+
+  void _seedEpisodePageCursors(Map<String, dynamic>? bundle) {
+    for (final season in _maps(bundle?['seasons'])) {
+      final number = _integer(season['number']);
+      if (number <= 0 ||
+          _maps(season['episodes']).isEmpty ||
+          _episodeSeasonsExhausted.contains(number)) {
+        continue;
+      }
+      final pageUrl = _text(season['pageUrl']).trim();
+      final currentPageIsSeasonScoped =
+          pageUrl == widget.item.pageUrl &&
+          RegExp(
+            r'(?:season[-_/ ]*\d{1,2}|(?:^|[-_/])s\d{1,2}(?:[-_/]|$)|الموسم)',
+            caseSensitive: false,
+          ).hasMatch('${widget.item.title} $pageUrl');
+      if (pageUrl.startsWith('http') &&
+          (pageUrl != widget.item.pageUrl || currentPageIsSeasonScoped)) {
+        _episodePageCursorBySeason.putIfAbsent(number, () => pageUrl);
+      }
+    }
+  }
 
   Future<void> _loadMoreEpisodes(Map<String, dynamic> season) async {
     final number = _integer(season['number']);
@@ -99,18 +189,24 @@ class _DetailPageState extends State<DetailPage> {
       return;
     }
     final existing = _orderedEpisodes(season['episodes']);
-    final visible = _visibleEpisodeCountBySeason[number] ?? 60;
+    var visible = _visibleEpisodeCountBySeason[number] ?? 60;
     if (visible < existing.length) {
+      visible = (visible + 60).clamp(0, existing.length);
       setState(() {
-        _visibleEpisodeCountBySeason[number] = (visible + 60).clamp(
-          0,
-          existing.length,
-        );
-        _loadingMoreEpisodeSeasons.remove(number);
+        _visibleEpisodeCountBySeason[number] = visible;
       });
-      return;
+      final canFetchNextPage =
+          (_episodePageCursorBySeason[number]?.isNotEmpty ?? false) &&
+          !_episodeSeasonsExhausted.contains(number);
+      if (!canFetchNextPage) {
+        _loadingMoreEpisodeSeasons.remove(number);
+        return;
+      }
     }
-    if (_episodeSeasonsExhausted.contains(number)) {
+    final canFetchNextPage =
+        (_episodePageCursorBySeason[number]?.isNotEmpty ?? false) &&
+        !_episodeSeasonsExhausted.contains(number);
+    if (!canFetchNextPage) {
       _loadingMoreEpisodeSeasons.remove(number);
       return;
     }
@@ -130,8 +226,15 @@ class _DetailPageState extends State<DetailPage> {
             .map((episode) => _text(episode['pageUrl']))
             .where((url) => url.startsWith('http'))
             .toList(growable: false),
-      });
-      if (!mounted || request != _request || fresh == null) return;
+      }).timeout(const Duration(seconds: 20), onTimeout: () => null);
+      if (!mounted || request != _request) return;
+      if (fresh == null) {
+        _message(
+          context,
+          'انتهت مهلة تحميل بقية الحلقات. اضغط المحاولة مرة أخرى.',
+        );
+        return;
+      }
       final newEpisodes = _maps(fresh['seasons'])
           .where((row) => _integer(row['number']) == number)
           .expand((row) => _maps(row['episodes']))
@@ -151,14 +254,16 @@ class _DetailPageState extends State<DetailPage> {
             orElse: () => const <String, dynamic>{},
           )['episodes'],
         ).length;
-        _visibleEpisodeCountBySeason[number] =
-            (visible + (newEpisodes.isEmpty ? 60 : newEpisodes.length)).clamp(
-              0,
-              loadedCount,
-            );
+        _visibleEpisodeCountBySeason[number] = (visible + newEpisodes.length)
+            .clamp(0, loadedCount);
       });
+      if (newEpisodes.isEmpty && nextCursor.isEmpty) {
+        _message(context, 'وصلت إلى آخر الحلقات التي يعرضها المصدر.');
+      }
     } catch (_) {
-      // Keep the already-loaded rows available and let the user retry this cursor.
+      if (mounted && request == _request) {
+        _message(context, 'تعذر تحميل بقية الحلقات. اضغط المحاولة مرة أخرى.');
+      }
     } finally {
       _loadingMoreEpisodeSeasons.remove(number);
       if (mounted && request == _request) setState(() {});
@@ -171,12 +276,67 @@ class _DetailPageState extends State<DetailPage> {
     unawaited(_load());
   }
 
+  bool _bundleHasEpisodes(Map<String, dynamic>? bundle) =>
+      _maps(bundle?['seasons']).any((s) => _maps(s['episodes']).isNotEmpty);
+
+  int _bundleEpisodeCount(Map<String, dynamic>? bundle) => _maps(
+    bundle?['seasons'],
+  ).fold<int>(0, (sum, s) => sum + _maps(s['episodes']).length);
+
+  bool _hasSubstantialEpisodeList(Map<String, dynamic>? bundle) {
+    for (final season in _maps(bundle?['seasons'])) {
+      final eps = _orderedEpisodes(season['episodes']);
+      if (eps.isEmpty) continue;
+      final nums =
+          eps.map(_episodeNumber).where((n) => n > 0).toSet().toList()..sort();
+      if (nums.isEmpty) continue;
+      if (nums.length >= 3 && nums.first == 1) return true;
+      if (_bundleFromCache && nums.length >= 3) return true;
+    }
+    return false;
+  }
+
+  Map<String, dynamic>? _pickBestSeasonBundle(
+    Map<String, dynamic>? current,
+    Map<String, dynamic>? incoming,
+  ) {
+    final currentHasSeasons =
+        current != null &&
+        (_maps(current['seasons']).isNotEmpty ||
+            _maps(current['relatedParts']).isNotEmpty);
+    final incomingHasSeasons =
+        incoming != null &&
+        (_maps(incoming['seasons']).isNotEmpty ||
+            _maps(incoming['relatedParts']).isNotEmpty);
+    if (!currentHasSeasons) return incoming;
+    if (!incomingHasSeasons) return current;
+    final merged = _mergeSeasonBundles(current, incoming);
+    return _bundleEpisodeCount(merged) >= _bundleEpisodeCount(current)
+        ? merged
+        : current;
+  }
+
+  String _seasonTabLabel(Map<String, dynamic>? season) {
+    final title = _text(season?['title']).trim();
+    if (title.isNotEmpty) return title;
+    final number = _integer(season?['number']);
+    return number > 0 ? 'الموسم $number' : 'الموسم';
+  }
+
   Future<void> _load({bool force = false}) async {
     final request = ++_request;
+    if (force) {
+      _episodePageCursorBySeason.clear();
+      _episodeSeasonsExhausted.clear();
+      _visibleEpisodeCountBySeason.clear();
+      _bundleFromCache = false;
+    }
     setState(() {
       _loading = true;
       _serversLoading = true;
-      _seasonsLoading = true;
+      _seasonsLoading = _isSeriesLookup;
+      _backgroundSyncing = _isSeriesLookup;
+      if (force && _isSeriesLookup) _bundle = null;
       _error = null;
     });
     final args = {'item': widget.item.toMap(), 'force': force};
@@ -188,15 +348,23 @@ class _DetailPageState extends State<DetailPage> {
       if (!mounted || request != _request) return;
       setState(() {
         _detail = cached[0];
-        _bundle = cached[1];
+        final cachedHasEpisodes = _bundleHasEpisodes(cached[1]);
+        if (!force || cached[1] != null) {
+          _bundle = _pickBestSeasonBundle(_bundle, cached[1]);
+        }
+        if (cachedHasEpisodes && !force) {
+          _bundleFromCache = true;
+        }
+        _seedEpisodePageCursors(_bundle);
         _serverRows = _maps(cached[0]?['servers']);
         _loading = _detail == null;
         _serversLoading = _serverRows.isEmpty;
         final seasonsList = _maps(_bundle?['seasons']);
-        final hasAnyGap = seasonsList.any(
-          (season) => _seasonNeedsEnrichment(_maps(season['episodes'])),
-        );
-        _seasonsLoading = _bundle == null || seasonsList.isEmpty || hasAnyGap || force;
+        final hasSubstantialCached = _hasSubstantialEpisodeList(_bundle);
+        final needsEpisodeSweep = _isSeriesLookup || seasonsList.isNotEmpty;
+        // Keep shimmer loading visible until substantial real episodes are ready.
+        _seasonsLoading = needsEpisodeSweep && (!hasSubstantialCached || force);
+        _backgroundSyncing = needsEpisodeSweep;
         if (_bundle != null) {
           _seasonIndex = _seasonIndexFor(
             _bundle!,
@@ -239,90 +407,137 @@ class _DetailPageState extends State<DetailPage> {
       final bundle = await NativeBridge.map('media.seasons.fetch', args);
       if (!mounted || request != _request) return;
       if (bundle == null) {
-        setState(() => _seasonsLoading = false);
+        final status = (_isSeriesLookup || _seasons.isNotEmpty)
+            ? await NativeBridge.map('media.seasons.status', args)
+            : null;
+        await _finishSeasonSweep(request, args, status ?? const {});
         return;
       }
-      final hasEpisodes = _maps(bundle['seasons'])
-          .any((season) => _maps(season['episodes']).isNotEmpty);
-      final hasParts = _maps(bundle['relatedParts']).isNotEmpty;
       final backgroundRefreshing = bundle['backgroundRefreshing'] == true;
-      setState(() {
-        if (hasEpisodes || hasParts) {
-          // Provider enrichment is incremental. Do not let a fast but partial
-          // response erase episodes already collected for an earlier season.
-          _bundle = _mergeSeasonBundles(_bundle, bundle);
-          _seasonIndex = _seasonIndexFor(
-            _bundle!,
-            preferredNumber: _manualSeasonNumber,
-          );
+      if (bundle.containsKey('seasons') || bundle.containsKey('relatedParts')) {
+        final merged = _pickBestSeasonBundle(_bundle, bundle);
+        final hasEpisodesNow = _bundleHasEpisodes(merged);
+        final hasSubstantialNow = _hasSubstantialEpisodeList(merged);
+        if (mounted && request == _request) {
+          setState(() {
+            _bundle = merged;
+            _seedEpisodePageCursors(_bundle);
+            if (merged != null) {
+              _seasonIndex = _seasonIndexFor(
+                merged,
+                preferredNumber: _manualSeasonNumber,
+              );
+            }
+            if (hasEpisodesNow && (!backgroundRefreshing || hasSubstantialNow)) {
+              _seasonsLoading = false;
+            }
+          });
         }
-        _seasonsLoading = backgroundRefreshing;
-      });
-      _refreshCurrentSeasonIfSparse();
-      if (backgroundRefreshing) {
-        unawaited(_pollSeasonCache(request, args));
       }
-    } catch (error) {
+      if (backgroundRefreshing) {
+        final requiresSweep =
+            _isSeriesLookup ||
+            _seasons.isNotEmpty ||
+            _maps(bundle['seasons']).isNotEmpty;
+        if (mounted && request == _request) {
+          setState(() {
+            _backgroundSyncing = requiresSweep;
+            _seasonsLoading =
+                _seasonsLoading && !_hasSubstantialEpisodeList(_bundle);
+          });
+        }
+        unawaited(_pollSeasonCache(request, args));
+        return;
+      }
+      await _finishSeasonSweep(request, args, bundle);
+    } catch (_) {
       if (mounted && request == _request) {
         setState(() {
-          if (_bundle == null) _error ??= '$error';
           _seasonsLoading = false;
+          _backgroundSyncing = false;
         });
       }
     }
   }
 
+  Future<void> _finishSeasonSweep(
+    int request,
+    Map<String, Object?> args,
+    Map<String, dynamic> status,
+  ) async {
+    if (!mounted || request != _request) return;
+    final requiresSweep =
+        _isSeriesLookup ||
+        _seasons.isNotEmpty ||
+        _maps(status['seasons']).isNotEmpty;
+    final cached = requiresSweep
+        ? await NativeBridge.map('media.seasons.cached', args)
+        : null;
+    if (!mounted || request != _request) return;
+    final incoming = status.containsKey('seasons') ? status : null;
+    final best = _pickBestSeasonBundle(
+      _pickBestSeasonBundle(_bundle, incoming),
+      cached,
+    );
+    final finalBundle =
+        best ?? <String, dynamic>{'seasons': const [], 'relatedParts': const []};
+    setState(() {
+      _bundle = finalBundle;
+      _seedEpisodePageCursors(_bundle);
+      _seasonIndex = _seasonIndexFor(
+        finalBundle,
+        preferredNumber: _manualSeasonNumber,
+      );
+      _backgroundSyncing = false;
+      _seasonsLoading = false;
+    });
+    _refreshCurrentSeasonIfSparse();
+  }
+
   Future<void> _pollSeasonCache(int request, Map<String, Object?> args) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
     try {
-      // Poll briskly while bounded native enrichment completes.
-      for (var attempt = 0; attempt < 30; attempt++) {
-        await Future<void>.delayed(
-          Duration(milliseconds: attempt < 10 ? 250 : 400),
-        );
+      while (mounted && request == _request) {
+        await Future<void>.delayed(const Duration(milliseconds: 350));
         if (!mounted || request != _request) return;
-        final cached = await NativeBridge.map('media.seasons.cached', args);
-        if (cached != null) {
-          final hasEpisodes = _maps(cached['seasons'])
-              .any((season) => _maps(season['episodes']).isNotEmpty);
-          final hasParts = _maps(cached['relatedParts']).isNotEmpty;
-          if (hasEpisodes || hasParts) {
-            final merged = _mergeSeasonBundles(_bundle, cached);
-            if (_seasonBundleSignature(merged) !=
-                _seasonBundleSignature(_bundle)) {
+        final status = await NativeBridge.map('media.seasons.status', args);
+        if (!mounted || request != _request) return;
+        if (status?['backgroundRefreshing'] == true &&
+            DateTime.now().isBefore(deadline)) {
+          final cached = await NativeBridge.map('media.seasons.cached', args);
+          if (!mounted || request != _request) return;
+          if (cached != null) {
+            final best = _pickBestSeasonBundle(_bundle, cached);
+            final grew =
+                _bundleEpisodeCount(best) > _bundleEpisodeCount(_bundle) ||
+                _maps(best?['seasons']).length > _seasons.length;
+            if (grew) {
               setState(() {
-                _bundle = merged;
-                _seasonIndex = _seasonIndexFor(
-                  merged,
-                  preferredNumber: _manualSeasonNumber,
-                );
+                _bundle = best;
+                _seedEpisodePageCursors(_bundle);
+                if (best != null) {
+                  _seasonIndex = _seasonIndexFor(
+                    best,
+                    preferredNumber: _manualSeasonNumber,
+                  );
+                }
+                if (_hasSubstantialEpisodeList(_bundle)) _seasonsLoading = false;
               });
             }
           }
+          continue;
         }
-        final status = await NativeBridge.map('media.seasons.status', args);
-        if (status?['backgroundRefreshing'] != true) break;
+        await _finishSeasonSweep(request, args, status ?? const {});
+        return;
       }
     } catch (_) {
-      // Keep already loaded detail data visible if background enrichment fails.
-    } finally {
       if (mounted && request == _request) {
-        setState(() => _seasonsLoading = false);
+        setState(() {
+          _backgroundSyncing = false;
+          _seasonsLoading = false;
+        });
       }
     }
-  }
-
-  String _seasonBundleSignature(Map<String, dynamic>? bundle) {
-    if (bundle == null) return '';
-    final seasons = _maps(bundle['seasons'])
-      ..sort((a, b) => _integer(a['number']).compareTo(_integer(b['number'])));
-    return seasons
-        .map((season) {
-          final episodes = _maps(season['episodes'])
-            ..sort((a, b) => _episodeNumber(a).compareTo(_episodeNumber(b)));
-          return '${_integer(season['number'])}:'
-              '${episodes.map(_episodeNumber).join(',')}';
-        })
-        .join('|');
   }
 
   Future<void> _refreshSeasonPage(Map<String, dynamic> season) async {
@@ -335,26 +550,46 @@ class _DetailPageState extends State<DetailPage> {
       return;
     }
     final request = _request;
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        _backgroundSyncing = true;
+      });
+    }
     try {
       final fresh = await NativeBridge.map('media.season.page.fetch', {
         'item': widget.item.toMap(),
         'seasonUrl': seasonUrl,
         'seasonNumber': seasonNumber,
-      }).timeout(
-        const Duration(seconds: 8),
-        onTimeout: () => null,
-      );
-      if (!mounted || request != _request || fresh == null) return;
-      final merged = _mergeSeasonBundles(_bundle, fresh);
-      if (_seasonBundleSignature(merged) != _seasonBundleSignature(_bundle)) {
-        setState(() {
-          _bundle = merged;
-          _seasonIndex = _seasonIndexFor(merged, preferredNumber: seasonNumber);
+      });
+      if (!mounted || request != _request) return;
+      if (fresh == null) return;
+      if (fresh.containsKey('seasons')) {
+        final merged = _pickBestSeasonBundle(_bundle, fresh);
+        if (merged != null) {
+          setState(() {
+            _bundle = merged;
+            _seedEpisodePageCursors(_bundle);
+          });
+        }
+      }
+      if (fresh['backgroundRefreshing'] == true) {
+        unawaited(_pollSeasonCache(request, {'item': widget.item.toMap()}));
+      } else {
+        final status = await NativeBridge.map('media.seasons.status', {
+          'item': widget.item.toMap(),
         });
+        if (!mounted || request != _request) return;
+        await _finishSeasonSweep(request, {
+          'item': widget.item.toMap(),
+        }, status ?? fresh);
       }
     } catch (_) {
-      // Keep the episodes already shown if an individual season page is unavailable.
+      if (mounted && request == _request) {
+        setState(() {
+          _backgroundSyncing = false;
+          _seasonsLoading = false;
+        });
+      }
     } finally {
       _refreshingSeasonPages.remove(seasonUrl);
       if (mounted && request == _request) setState(() {});
@@ -465,7 +700,35 @@ class _DetailPageState extends State<DetailPage> {
     return _cleanSeriesTitle(raw);
   }
 
-  bool get _isEpisodeCard => widget.item.parentSeriesPageUrl.trim().isNotEmpty;
+  bool get _isEpisodeCard =>
+      widget.item.parentSeriesPageUrl.trim().isNotEmpty ||
+      isUnlinkedEpisodeResult(widget.item);
+
+  bool get _isSeriesLookup => widget.item.isSeries || _isEpisodeCard;
+
+  int? get _currentEpisodeSeasonNumber {
+    final currentUrl = _normalizedMediaUrl(widget.item.pageUrl);
+    return _maps(_bundle?['seasons'])
+            .where(
+              (season) => _maps(season['episodes']).any(
+                (episode) =>
+                    _normalizedMediaUrl(_text(episode['pageUrl'])) ==
+                    currentUrl,
+              ),
+            )
+            .map((season) => _integer(season['number']))
+            .where((number) => number > 0)
+            .firstOrNull ??
+        _seasonNumberFrom(
+          '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
+        );
+  }
+
+  int? get _selectedSeasonNumber => _seasons.isEmpty
+      ? null
+      : _integer(
+          _seasons[_seasonIndex.clamp(0, _seasons.length - 1)]['number'],
+        );
 
   int _seasonIndexFor(Map<String, dynamic> bundle, {int? preferredNumber}) {
     final seasons = _maps(bundle['seasons']);
@@ -493,7 +756,10 @@ class _DetailPageState extends State<DetailPage> {
       );
       if (matching >= 0) return matching;
     }
-    return 0;
+    final firstNonEmpty = seasons.indexWhere(
+      (season) => _maps(season['episodes']).isNotEmpty,
+    );
+    return firstNonEmpty >= 0 ? firstNonEmpty : 0;
   }
 
   int? _currentEpisodeIndex(List<Map<String, dynamic>> episodes) {
@@ -513,33 +779,11 @@ class _DetailPageState extends State<DetailPage> {
       );
       return latestIndex >= 0 ? latestIndex : null;
     }
-    final itemSeasonNumber =
-        _maps(_bundle?['seasons'])
-            .where(
-              (season) => _maps(season['episodes']).any(
-                (episode) =>
-                    _normalizedMediaUrl(_text(episode['pageUrl'])) ==
-                    currentUrl,
-              ),
-            )
-            .map((season) => _integer(season['number']))
-            .where((number) => number > 0)
-            .firstOrNull ??
-        _seasonNumberFrom(
-          '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
-        );
-    final selectedSeasonNumber = _seasons.isEmpty
-        ? null
-        : _integer(
-            _seasons[_seasonIndex.clamp(0, _seasons.length - 1)]['number'],
-          );
-    final sameKnownSeason =
-        itemSeasonNumber != null &&
-        selectedSeasonNumber != null &&
-        itemSeasonNumber == selectedSeasonNumber;
-    final onlySeasonCanBeInferred =
-        itemSeasonNumber == null && _seasons.length == 1;
-    if (!sameKnownSeason && !onlySeasonCanBeInferred) {
+    if (!canInferEpisodeForSelectedSeason(
+      episodeSeasonNumber: _currentEpisodeSeasonNumber,
+      selectedSeasonNumber: _selectedSeasonNumber,
+      availableSeasonCount: _seasons.length,
+    )) {
       return null;
     }
     final number = _episodeNumberFrom(
@@ -577,6 +821,13 @@ class _DetailPageState extends State<DetailPage> {
         )
         .firstOrNull;
     if (exact != null) return exact;
+    if (!canInferEpisodeForSelectedSeason(
+      episodeSeasonNumber: _currentEpisodeSeasonNumber,
+      selectedSeasonNumber: _selectedSeasonNumber,
+      availableSeasonCount: _seasons.length,
+    )) {
+      return null;
+    }
     final inferredNumber = _episodeNumberFrom(
       '${widget.item.title} ${widget.item.latestEpisodeLabel} ${widget.item.pageUrl}',
     );
@@ -587,7 +838,7 @@ class _DetailPageState extends State<DetailPage> {
         'pageUrl': widget.item.pageUrl,
       };
     }
-    return episodes.isNotEmpty ? episodes.last : null;
+    return null;
   }
 
   int? _latestEpisodeNumberForSeason(Map<String, dynamic>? season) {
@@ -605,6 +856,7 @@ class _DetailPageState extends State<DetailPage> {
 
   bool get _isSeriesEffective =>
       widget.item.isSeries ||
+      _isEpisodeCard ||
       _seasons.any((season) => _maps(season['episodes']).isNotEmpty);
 
   @override
@@ -627,9 +879,7 @@ class _DetailPageState extends State<DetailPage> {
         ? episodes.length
         : _seasons.fold<int>(0, (sum, s) => sum + _maps(s['episodes']).length);
     return Scaffold(
-      bottomNavigationBar: const SafeArea(
-        child: AppBannerAdStrip(),
-      ),
+      bottomNavigationBar: const SafeArea(child: AppBannerAdStrip()),
       appBar: AppBar(
         title: Text(_seriesTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
@@ -648,8 +898,8 @@ class _DetailPageState extends State<DetailPage> {
             _DetailHeader(
               item: widget.item,
               isSeries: isSeriesEffective,
-              episodeCount: _seasonsLoading ? 0 : totalEpisodeCount,
-              seasonCount: _seasonsLoading ? 0 : _seasons.length,
+              episodeCount: totalEpisodeCount,
+              seasonCount: _seasons.length,
             ),
             const SizedBox(height: 14),
             Row(
@@ -684,6 +934,13 @@ class _DetailPageState extends State<DetailPage> {
                     fontSize: 14,
                   ),
                 ),
+              ),
+            ] else if (_loading && _detail == null) ...[
+              const SizedBox(height: 17),
+              _SectionCard(
+                title: 'القصة كاملة',
+                icon: '📖',
+                child: _storyLoadingSkeleton(),
               ),
             ],
             if (cast.isNotEmpty) ...[
@@ -720,8 +977,10 @@ class _DetailPageState extends State<DetailPage> {
               const SizedBox(height: 13),
               _seasonsSection(season, episodes),
             ] else ...[
-              const SizedBox(height: 12),
-              _downloadMovieCard(),
+              if (_servers.isNotEmpty || !_serversLoading) ...[
+                const SizedBox(height: 12),
+                _downloadMovieCard(),
+              ],
               const SizedBox(height: 13),
               _serverSection(
                 _servers,
@@ -732,7 +991,8 @@ class _DetailPageState extends State<DetailPage> {
             ],
             if (isSeriesEffective &&
                 !_isEpisodeCard &&
-                downloadEpisode != null) ...[
+                downloadEpisode != null &&
+                !_shouldShowSeasonSkeleton(season, episodes)) ...[
               const SizedBox(height: 12),
               _downloadEpisodeCard(downloadEpisode, season),
             ],
@@ -765,11 +1025,6 @@ class _DetailPageState extends State<DetailPage> {
                 ),
               ),
             ],
-            if (_loading && _detail == null)
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: _detailLoadingSkeleton(),
-              ),
             if (_error != null && _detail == null)
               Padding(
                 padding: const EdgeInsets.all(15),
@@ -793,6 +1048,16 @@ class _DetailPageState extends State<DetailPage> {
     );
   }
 
+  bool _shouldShowSeasonSkeleton(
+    Map<String, dynamic>? selected,
+    List<Map<String, dynamic>> episodes,
+  ) {
+    if (_seasonsLoading) return true;
+    final selectedUrl = _text(selected?['pageUrl']).trim();
+    final isRefreshingSelected = _refreshingSeasonPages.contains(selectedUrl);
+    return episodes.isEmpty && (_backgroundSyncing || isRefreshingSelected);
+  }
+
   Widget _seasonsSection(
     Map<String, dynamic>? selected,
     List<Map<String, dynamic>> episodes,
@@ -802,73 +1067,87 @@ class _DetailPageState extends State<DetailPage> {
     final visibleEpisodes = episodes.take(visibleCount).toList(growable: false);
     // hasLoadedMore: هناك حلقات في الذاكرة أكثر مما هو معروض (تحتاج "عرض المزيد")
     final hasLoadedMore = episodes.length > visibleEpisodes.length;
-    // hasNextPageCursor: المصدر نفسه أرجع رابط صريح لصفحة تالية
-    final hasNextPageCursor = _episodePageCursorBySeason[seasonNumber] != null &&
-        _episodePageCursorBySeason[seasonNumber]!.isNotEmpty &&
-        _episodePageCursorBySeason[seasonNumber] != _text(selected?['pageUrl']) &&
+    final hasNextPageCursor =
+        (_episodePageCursorBySeason[seasonNumber]?.isNotEmpty ?? false) &&
         !_episodeSeasonsExhausted.contains(seasonNumber);
-    final isSeasonSyncing = _seasonsLoading ||
-        (_refreshingSeasonPages.contains(_text(selected?['pageUrl'])) && episodes.isEmpty);
+    final isRefreshingSelected = _refreshingSeasonPages.contains(
+      _text(selected?['pageUrl']).trim(),
+    );
+    final showInitialSkeleton = _shouldShowSeasonSkeleton(selected, episodes);
     final canRequestMore =
-        !isSeasonSyncing && (hasLoadedMore || hasNextPageCursor);
+        !showInitialSkeleton && (hasLoadedMore || hasNextPageCursor);
     return _SectionCard(
       title: 'حلقات هذا الجزء / الموسم',
       icon: '📺',
       trailing: Text(
-        isSeasonSyncing
-            ? 'جاري تحميل المواسم والحلقات…'
-            : '${episodes.length} حلقة',
+        showInitialSkeleton
+            ? 'جاري تحميل الحلقات…'
+            : '${episodes.length} حلقة${(_backgroundSyncing || isRefreshingSelected) ? ' · جاري التحديث' : ''}',
         style: const TextStyle(color: _muted, fontSize: 12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (isSeasonSyncing)
+          if (showInitialSkeleton)
             _seasonEpisodesSkeleton()
-          else ...[
-            if (_seasons.isNotEmpty) ...[
-              SizedBox(
-                height: 42,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _seasons.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 7),
-                  itemBuilder: (_, index) {
-                    final season = _seasons[index];
-                    final label = _text(season['title'])
-                        .ifEmpty('الموسم ${_text(season['number'])}');
-                    return ChoiceChip(
-                      label: Text(label),
-                      selected: index == _seasonIndex,
-                      showCheckmark: false,
-                      labelStyle: TextStyle(
-                        color: index == _seasonIndex ? Colors.white : _muted,
-                        fontSize: 12,
-                      ),
-                      side: BorderSide(
-                        color: index == _seasonIndex ? _brick : _line,
-                      ),
-                      onSelected: (_) {
-                        final seasonEpisodes = _maps(season['episodes']);
-                        setState(() {
-                          _seasonIndex = index;
-                          _manualSeasonNumber = _integer(season['number']);
-                        });
-                        if (_seasonNeedsEnrichment(seasonEpisodes)) {
-                          unawaited(_refreshSeasonPage(season));
-                        }
-                      },
-                    );
-                  },
-                ),
+          else if (_seasons.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'لم يتم العثور على حلقات حالياً.',
+                textDirection: TextDirection.rtl,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: _muted, fontSize: 13),
               ),
-              const SizedBox(height: 12),
-            ],
+            )
+          else ...[
+            SizedBox(
+              height: 42,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _seasons.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 7),
+                itemBuilder: (_, index) {
+                  final season = _seasons[index];
+                  final label = _seasonTabLabel(season);
+                  return ChoiceChip(
+                    label: Text(label),
+                    selected: index == _seasonIndex,
+                    showCheckmark: false,
+                    labelStyle: TextStyle(
+                      color: index == _seasonIndex ? Colors.white : _muted,
+                      fontSize: 12,
+                    ),
+                    side: BorderSide(
+                      color: index == _seasonIndex ? _brick : _line,
+                    ),
+                    onSelected: (_) {
+                      final seasonEpisodes = _maps(season['episodes']);
+                      setState(() {
+                        _seasonIndex = index;
+                        _manualSeasonNumber = _integer(season['number']);
+                      });
+                      if (_seasonNeedsEnrichment(seasonEpisodes)) {
+                        unawaited(_refreshSeasonPage(season));
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
             if (episodes.isEmpty)
-              const Text(
-                'المصدر لم يرجع حلقات لهذا الجزء.',
-                style: TextStyle(color: _muted),
-              )
+              (isRefreshingSelected || _backgroundSyncing)
+                  ? _seasonEpisodesSkeleton()
+                  : const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 10),
+                      child: Text(
+                        'لا توجد حلقات متاحة لهذا الموسم حالياً.',
+                        textDirection: TextDirection.rtl,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: _muted, fontSize: 13),
+                      ),
+                    )
             else ...[
               Wrap(
                 spacing: 8,
@@ -894,82 +1173,58 @@ class _DetailPageState extends State<DetailPage> {
                   );
                 }),
               ),
-            if (canRequestMore) ...[
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed:
-                    seasonNumber > 0 &&
-                        _loadingMoreEpisodeSeasons.contains(seasonNumber)
-                    ? null
-                    : () => _loadMoreEpisodes(selected!),
-                icon: _loadingMoreEpisodeSeasons.contains(seasonNumber)
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: _brick,
-                        ),
-                      )
-                    : const Icon(Icons.expand_more_rounded),
-                label: Text(
-                  hasLoadedMore
-                      ? 'عرض المزيد من الحلقات (${episodes.length - visibleEpisodes.length} إضافية)'
-                      : 'تحميل باقي الحلقات من المصدر',
+              if (canRequestMore) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed:
+                      seasonNumber > 0 &&
+                          _loadingMoreEpisodeSeasons.contains(seasonNumber)
+                      ? null
+                      : () => _loadMoreEpisodes(selected!),
+                  icon: _loadingMoreEpisodeSeasons.contains(seasonNumber)
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: _brick,
+                          ),
+                        )
+                      : const Icon(Icons.expand_more_rounded),
+                  label: Text(
+                    hasLoadedMore
+                        ? hasNextPageCursor
+                              ? 'عرض ${episodes.length - visibleEpisodes.length} حلقة وجلب التالية'
+                              : 'عرض ${episodes.length - visibleEpisodes.length} حلقات إضافية'
+                        : 'تحميل حلقات إضافية من المصدر',
+                  ),
                 ),
-              ),
+              ],
             ],
-          ],
           ],
         ],
       ),
     );
   }
 
-  Widget _detailLoadingSkeleton() => _ShimmerLoading(
+  Widget _storyLoadingSkeleton() => _ShimmerLoading(
     child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 126,
-              height: 184,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEADBCB),
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _SkeletonBlock(
-                    width: MediaQuery.sizeOf(context).width * .40,
-                    height: 18,
-                  ),
-                  const SizedBox(height: 14),
-                  const _SkeletonBlock(width: 112, height: 10),
-                  const SizedBox(height: 12),
-                  const _SkeletonBlock(width: 148, height: 12),
-                ],
-              ),
-            ),
-          ],
+        _SkeletonBlock(
+          width: MediaQuery.sizeOf(context).width * .82,
+          height: 12,
         ),
-        const SizedBox(height: 18),
-        for (var i = 0; i < 3; i++) ...[
-          Container(
-            height: 54,
-            margin: const EdgeInsets.only(bottom: 9),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEADBCB),
-              borderRadius: BorderRadius.circular(13),
-            ),
-          ),
-        ],
+        const SizedBox(height: 10),
+        _SkeletonBlock(
+          width: MediaQuery.sizeOf(context).width * .68,
+          height: 12,
+        ),
+        const SizedBox(height: 10),
+        _SkeletonBlock(
+          width: MediaQuery.sizeOf(context).width * .48,
+          height: 12,
+        ),
       ],
     ),
   );
@@ -978,12 +1233,6 @@ class _DetailPageState extends State<DetailPage> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'جاري تحميل كل المواسم والحلقات…',
-          textAlign: TextAlign.right,
-          style: TextStyle(color: _muted, fontSize: 12),
-        ),
-        const SizedBox(height: 10),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
@@ -1030,8 +1279,7 @@ class _DetailPageState extends State<DetailPage> {
   ) {
     final url = _text(episode['pageUrl']);
     final number = _episodeNumber(episode);
-    final seasonTitle = _text(season?['title'])
-        .ifEmpty('الموسم ${_text(season?['number'])}');
+    final seasonTitle = _seasonTabLabel(season);
     final loading = _downloadingMediaUrl == url;
     return Material(
       color: const Color(0xFF078B68),
@@ -1391,8 +1639,7 @@ class _DetailPageState extends State<DetailPage> {
           seriesTitle: _seriesTitle,
           provider: _text(episodes[index]['providerName'])
               .ifEmpty(widget.item.provider),
-          seasonTitle: _text(season?['title'])
-              .ifEmpty('الموسم ${_text(season?['number'])}'),
+          seasonTitle: _seasonTabLabel(season),
           episodes: episodesForPage,
           index: index,
         ),
@@ -1434,7 +1681,10 @@ class _DetailPageState extends State<DetailPage> {
       return;
     }
     final referer = _text(candidate['sourcePageUrl']).ifEmpty(pageUrl);
-    final resolvedMeta = await _resolveServerStreamDetail(candidate, referer: referer);
+    final resolvedMeta = await _resolveServerStreamDetail(
+      candidate,
+      referer: referer,
+    );
     if (resolvedMeta == null || !mounted) return;
     final resolvedUrl = _text(resolvedMeta['url']).trim();
     final resolvedRef = _text(resolvedMeta['referer']).trim();
@@ -1535,7 +1785,10 @@ class _DetailPageState extends State<DetailPage> {
         return;
       }
       if (_servers.isNotEmpty) {
-        final selected = await _findWorkingServer(_servers, widget.item.pageUrl);
+        final selected = await _findWorkingServer(
+          _servers,
+          widget.item.pageUrl,
+        );
         if (!mounted) return;
         if (selected != null) {
           await _openServer(selected, widget.item.title, widget.item.pageUrl);
@@ -1584,7 +1837,8 @@ class _DetailPageState extends State<DetailPage> {
     if (server['playableVerified'] == true && _isUsablePlaybackUrl(direct)) {
       url = direct;
       candidateEmbedVerified = true;
-    } else if (server['embedAlive'] == true && _isUsablePlaybackUrl(candidateUrl)) {
+    } else if (server['embedAlive'] == true &&
+        _isUsablePlaybackUrl(candidateUrl)) {
       // Already verified alive inside _findWorkingServer; avoid wasting a second network roundtrip.
       url = candidateUrl;
       candidateEmbedVerified = true;
@@ -1690,118 +1944,123 @@ class _DetailHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final effectiveSeries = isSeries || item.isSeries;
     return Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: SizedBox(
-          width: 126,
-          height: 184,
-          child: _NetworkImage(url: item.poster),
-        ),
-      ),
-      const SizedBox(width: 14),
-      Expanded(
-        child: Padding(
-          padding: const EdgeInsets.only(top: 7),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item.parentSeriesTitle.trim().isNotEmpty
-                    ? item.parentSeriesTitle.trim()
-                    : item.title,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _ink,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  height: 1.3,
-                ),
-              ),
-              if (item.parentSeriesTitle.trim().isNotEmpty &&
-                  item.title != item.parentSeriesTitle) ...[
-                const SizedBox(height: 4),
-                Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: _muted, fontSize: 12),
-                ),
-              ],
-              if (effectiveSeries && episodeCount > 0) ...[
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
-                  decoration: BoxDecoration(
-                    color: _brick.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _brick.withOpacity(0.35)),
-                  ),
-                  child: Text(
-                    '📺 عدد الحلقات: $episodeCount حلقة' +
-                        (seasonCount > 1 ? ' · $seasonCount مواسم' : ''),
-                    style: const TextStyle(
-                      color: _brick,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                [
-                  if (item.year.isNotEmpty) item.year,
-                  if (item.quality.isNotEmpty) item.quality,
-                  effectiveSeries
-                      ? (episodeCount > 0 ? 'مسلسل ($episodeCount حلقة)' : 'مسلسل')
-                      : 'فيلم',
-                  item.visibleProvider,
-                ].join(' · '),
-                style: const TextStyle(
-                  color: _muted,
-                  height: 1.5,
-                  fontSize: 12,
-                ),
-              ),
-              if (item.latestEpisodeLabel.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  item.latestEpisodeLabel,
-                  style: const TextStyle(
-                    color: _brick,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-              if (item.rating.isNotEmpty) ...[
-                const SizedBox(height: 9),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.star_rounded,
-                      size: 18,
-                      color: Color(0xFFD79A31),
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      item.rating,
-                      style: const TextStyle(
-                        color: _ink,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ],
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: SizedBox(
+            width: 126,
+            height: 184,
+            child: _NetworkImage(url: item.poster),
           ),
         ),
-      ),
-    ],
-  );
+        const SizedBox(width: 14),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 7),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.parentSeriesTitle.trim().isNotEmpty
+                      ? item.parentSeriesTitle.trim()
+                      : item.title,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _ink,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    height: 1.3,
+                  ),
+                ),
+                if (item.parentSeriesTitle.trim().isNotEmpty &&
+                    item.title != item.parentSeriesTitle) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: _muted, fontSize: 12),
+                  ),
+                ],
+                if (effectiveSeries && episodeCount > 0) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 3.5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _brick.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _brick.withOpacity(0.35)),
+                    ),
+                    child: Text(
+                      '📺 عدد الحلقات: $episodeCount حلقة' +
+                          (seasonCount > 1 ? ' · $seasonCount مواسم' : ''),
+                      style: const TextStyle(
+                        color: _brick,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Text(
+                  [
+                    if (item.year.isNotEmpty) item.year,
+                    if (item.quality.isNotEmpty) item.quality,
+                    effectiveSeries
+                        ? episodeCount > 0
+                              ? 'مسلسل ($episodeCount حلقة)'
+                              : 'مسلسل'
+                        : 'فيلم',
+                    item.visibleProvider,
+                  ].join(' · '),
+                  style: const TextStyle(
+                    color: _muted,
+                    height: 1.5,
+                    fontSize: 12,
+                  ),
+                ),
+                if (item.latestEpisodeLabel.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    item.latestEpisodeLabel,
+                    style: const TextStyle(
+                      color: _brick,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+                if (item.rating.isNotEmpty) ...[
+                  const SizedBox(height: 9),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.star_rounded,
+                        size: 18,
+                        color: Color(0xFFD79A31),
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        item.rating,
+                        style: const TextStyle(
+                          color: _ink,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -1826,19 +2085,47 @@ class _SectionCard extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Text(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final narrow = constraints.maxWidth < 460;
+            final header = Text(
               '$icon  $title',
+              maxLines: narrow ? 2 : 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: _muted,
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
               ),
-            ),
-            const Spacer(),
-            if (trailing != null) trailing!,
-          ],
+            );
+            if (trailing == null) return header;
+            if (narrow) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  header,
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: trailing!,
+                  ),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(flex: 5, child: header),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 4,
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: trailing!,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 12),
         child,

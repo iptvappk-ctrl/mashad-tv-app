@@ -135,6 +135,7 @@ object CatalogDiskCache {
     }
 
     fun saveSeasonBundle(key: String, bundle: ArabseedSeasonBundle) {
+        if (root == null) return
         val seasons = JSONArray().apply {
             bundle.seasons.forEach { season ->
                 val episodes = JSONArray().apply {

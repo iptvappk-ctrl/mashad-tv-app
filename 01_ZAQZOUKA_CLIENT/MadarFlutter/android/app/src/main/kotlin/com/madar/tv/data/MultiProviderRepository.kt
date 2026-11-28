@@ -51,6 +51,15 @@ import javax.crypto.spec.SecretKeySpec
 
 object MultiProviderRepository {
 
+    data class SeasonProviderSweepStatus(
+        val complete: Boolean,
+        val expectedProviderIds: List<String>,
+        val checkedProviderIds: List<String>,
+        val pendingProviderIds: List<String>,
+        val episodeGaps: List<String>,
+        val finishedAt: Long,
+    )
+
     private const val TAG = "MultiProviderRepository"
 
 
@@ -77,7 +86,10 @@ object MultiProviderRepository {
     // Keep network fan-out parallel but bounded for low-memory phones.
     private val pool = Executors.newFixedThreadPool(8)
     private val providerPool = Executors.newFixedThreadPool(24)
-    private val backupServerPool = Executors.newFixedThreadPool(12)
+    // Search pagination is nested inside provider tasks. Keep its page fan-out
+    // on a separate bounded pool so a full provider sweep cannot starve itself.
+    private val providerPaginationPool = Executors.newFixedThreadPool(16)
+    private val backupServerPool = Executors.newFixedThreadPool(20)
     // Keep detail/season lookups responsive even while catalog providers are busy.
     private val seasonPagePool = Executors.newFixedThreadPool(10)
 
@@ -118,9 +130,9 @@ object MultiProviderRepository {
     // Season pagination runs after the detail screen is already visible. Give these
     // enrichment requests a realistic window without slowing catalog/detail first paint.
     private val seasonHttp = http.newBuilder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .callTimeout(12, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .callTimeout(25, TimeUnit.SECONDS)
         .build()
 
 
@@ -160,7 +172,9 @@ object MultiProviderRepository {
     private const val SEASON_ENRICHMENT_RETRY_MS = 5 * 60 * 1000L
     private const val SEASON_ENRICHMENT_PARTIAL_RETRY_MS = 5 * 60 * 1000L   // was 30s — give enrichment more time between retries
     private const val SEASON_ENRICHMENT_ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000L
-    private val seasonMirrorPool = Executors.newFixedThreadPool(10)
+    private const val PROVIDER_SEASON_SWEEP_TTL_MS = 30 * 60 * 1000L
+    private const val PROVIDER_SEASON_SWEEP_RETRY_MS = 90 * 1000L
+    private val seasonMirrorPool = Executors.newFixedThreadPool(20)
     private val seasonAggregationPool = Executors.newFixedThreadPool(4)
     private val seasonAggregationInFlight = ConcurrentHashMap.newKeySet<String>()
 
@@ -170,10 +184,10 @@ object MultiProviderRepository {
 
 
     private fun catalogCacheKey(type: ArabseedType?, page: Int): String = when (type) {
-        // Bumped to v8 so removed dead providers and fixed routes/posters refresh cleanly.
-        ArabseedType.MOVIE -> "movies:v8:$page"
-        ArabseedType.SERIES -> "series:v8:$page"
-        null -> "catalog:v8:$page"
+        // Bump so all enabled providers are queried after the source fan-out fix.
+        ArabseedType.MOVIE -> "movies:v9:$page"
+        ArabseedType.SERIES -> "series:v9:$page"
+        null -> "catalog:v9:$page"
     }
 
     fun loadCachedCatalog(type: ArabseedType?, page: Int = 1): List<ArabseedItem>? {
@@ -187,7 +201,7 @@ object MultiProviderRepository {
     }
 
     fun loadCachedSearch(query: String): List<ArabseedItem>? {
-        val key = "search:v11:" + query.trim().lowercase()
+        val key = "search:v12:" + query.trim().lowercase()
         if (query.isBlank()) return null
         searchCache[key]?.let { cached ->
             if (System.currentTimeMillis() - cached.first <= 14L * 24 * 60 * 60 * 1000) return cached.second
@@ -210,7 +224,7 @@ object MultiProviderRepository {
 
     fun loadCachedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
         seasonCache[pageUrl]?.let { return it }
-        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v30:" + pageUrl) ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("providers:seasons:v37:" + pageUrl) ?: return null
         val normalized = SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
         seasonCache[pageUrl] = normalized
         seasonCacheAt[pageUrl] = snapshot.savedAt
@@ -218,18 +232,79 @@ object MultiProviderRepository {
     }
 
     fun loadCachedMergedSeasonBundle(pageUrl: String): ArabseedSeasonBundle? {
-        val snapshot = CatalogDiskCache.loadSeasonBundle("combined:seasons:v30:$pageUrl") ?: return null
+        val snapshot = CatalogDiskCache.loadSeasonBundle("combined:seasons:v41:$pageUrl") ?: return null
         if (System.currentTimeMillis() - snapshot.savedAt > SEASON_TTL) return null
         return SeriesCatalogParser.normalizeSeasonBundle(snapshot.value)
     }
+
+    fun seasonProviderSweepStatus(pageUrl: String): SeasonProviderSweepStatus {
+        val expected = PROVIDERS.filter { it.enabled }.map { it.id }.distinct().sorted()
+        val payload = CatalogDiskCache.loadJson(
+            seasonProviderSweepKey(pageUrl),
+            PROVIDER_SEASON_SWEEP_TTL_MS,
+        )?.value
+        val savedExpected = payload?.optString("expectedProviderIds").orEmpty()
+            .split(',').map(String::trim).filter(String::isNotBlank).distinct().sorted()
+        val checked = payload?.optString("checkedProviderIds").orEmpty()
+            .split(',').map(String::trim).filter(String::isNotBlank).distinct().sorted()
+        val pendingMirror = payload?.optString("pendingMirrorProviderIds").orEmpty()
+            .split(',').map(String::trim).filter(String::isNotBlank).distinct().sorted()
+        val incompleteSearches = payload?.optString("incompleteSearchProviderIds").orEmpty()
+            .split(',').map(String::trim).filter(String::isNotBlank).distinct().sorted()
+        val episodeGaps = payload?.optString("episodeGaps").orEmpty()
+            .split(',').map(String::trim).filter(String::isNotBlank).distinct()
+        val expectedMatches = savedExpected == expected
+        val finishedAt = payload?.optLong("finishedAt", 0L) ?: 0L
+        val fresh = finishedAt > 0L && System.currentTimeMillis() - finishedAt in 0..PROVIDER_SEASON_SWEEP_TTL_MS
+        val complete = payload?.optBoolean("complete", false) == true && expectedMatches && fresh
+        val pending = (expected - checked + pendingMirror + incompleteSearches).distinct().sorted()
+        return SeasonProviderSweepStatus(
+            complete = complete,
+            expectedProviderIds = expected,
+            checkedProviderIds = checked,
+            pendingProviderIds = pending,
+            episodeGaps = episodeGaps,
+            finishedAt = finishedAt,
+        )
+    }
+
+    fun isProviderSeasonSweepComplete(pageUrl: String): Boolean =
+        seasonProviderSweepStatus(pageUrl).complete
+
+    private fun seasonProviderSweepKey(pageUrl: String): String =
+        "combined:provider-sweep:v5:${SeriesCatalogParser.normalizedUrl(pageUrl)}"
+
+    private fun invalidateProviderSeasonSweep(pageUrl: String) {
+        val expected = PROVIDERS.filter { it.enabled }.map { it.id }.distinct().sorted()
+        CatalogDiskCache.saveJson(
+            seasonProviderSweepKey(pageUrl),
+            JSONObject()
+                .put("finishedAt", 0L)
+                .put("complete", false)
+                .put("expectedProviderIds", expected.joinToString(","))
+                .put("checkedProviderIds", "")
+                .put("pendingMirrorProviderIds", "")
+                .put("episodeGaps", ""),
+        )
+    }
+
+    private fun seasonBundleEpisodeSignature(bundle: ArabseedSeasonBundle): String =
+        bundle.seasons.sortedBy { it.number }.joinToString("|") { season ->
+            "${season.number}:" + season.episodes.sortedBy { it.number }.joinToString(",") { episode ->
+                "${episode.number}@${SeriesCatalogParser.normalizedUrl(episode.pageUrl)}" +
+                    episode.alternatePageUrls.map(SeriesCatalogParser::normalizedUrl)
+                        .filter(String::isNotBlank).distinct().sorted().joinToString(",", "+")
+            }
+        }
 
     /** Persist on-demand season-page results into the canonical series cache. */
     fun cacheSeasonPageEnrichment(
         seriesItem: ArabseedItem,
         seasonItem: ArabseedItem,
         seasonBundle: ArabseedSeasonBundle,
-    ) {
+    ): Boolean {
         val existing = loadCachedMergedSeasonBundle(seriesItem.pageUrl) ?: ArabseedSeasonBundle(emptyList())
+        val previousSignature = seasonBundleEpisodeSignature(existing)
         val targetSeasonNumber = SeriesCatalogParser.seasonNumber(seasonItem.title, seasonItem.pageUrl)
             ?: seasonBundle.seasons.singleOrNull()?.number
         val correctedSeason = seasonBundle.seasons
@@ -263,8 +338,11 @@ object MultiProviderRepository {
             mergeProviderSeasonBundles(listOf(seasonItem to seasonBundle, seriesItem to existing))
         }
         if (merged.seasons.isNotEmpty() || merged.relatedParts.isNotEmpty()) {
-            CatalogDiskCache.saveSeasonBundle("combined:seasons:v30:${seriesItem.pageUrl}", merged)
+            CatalogDiskCache.saveSeasonBundle("combined:seasons:v41:${seriesItem.pageUrl}", merged)
         }
+        val changed = previousSignature != seasonBundleEpisodeSignature(merged)
+        if (changed) invalidateProviderSeasonSweep(seriesItem.pageUrl)
+        return changed
     }
 
     fun clearCache() {
@@ -307,8 +385,53 @@ object MultiProviderRepository {
         val isPrimary: Boolean = false,
     )
 
+    internal fun seasonEnrichmentProviders(excludeProviderId: String? = null): List<ProviderConfig> =
+        PROVIDERS
+            .filter { it.enabled && it.id != excludeProviderId }
+            .sortedWith(compareByDescending<ProviderConfig> { it.isPrimary }.thenBy { it.id })
+
+    /** Merge same-season episode links while preserving each validated provider URL as a fallback. */
+    internal fun mergeDiscoveredEpisodeMirrors(
+        episodes: List<ArabseedEpisode>,
+    ): List<ArabseedEpisode> {
+        val primaryProviderIds = PROVIDERS.filter { it.isPrimary }.mapTo(hashSetOf()) { it.id }
+        return episodes
+            .filter {
+                it.number > 0 && it.seasonNumber in 1..60 &&
+                    it.pageUrl.startsWith("http", ignoreCase = true)
+            }
+            .groupBy { it.seasonNumber to it.number }
+            .map { (_, rows) ->
+                val preferred = rows.sortedWith(
+                    compareByDescending<ArabseedEpisode> {
+                        getProviderForUrl(it.pageUrl)?.id in primaryProviderIds
+                    }.thenBy { SeriesCatalogParser.normalizedUrl(it.pageUrl) },
+                ).first()
+                val pages = rows.flatMap { listOf(it.pageUrl) + it.alternatePageUrls }
+                    .filter { it.startsWith("http", ignoreCase = true) }
+                    .distinctBy(SeriesCatalogParser::normalizedUrl)
+                preferred.copy(
+                    alternatePageUrls = pages
+                        .filter {
+                            SeriesCatalogParser.normalizedUrl(it) !=
+                                SeriesCatalogParser.normalizedUrl(preferred.pageUrl)
+                        }
+                        .take(24),
+                )
+            }
+            .sortedWith(compareBy<ArabseedEpisode> { it.seasonNumber }.thenBy { it.number })
+    }
+
     // Remember a domain only after its actual listing route returned parseable data.
     private data class DomainProbe(val baseUrl: String, val checkedAt: Long, val responseCode: Int)
+
+    private data class ProviderListingPage(
+        val requestedUrl: String,
+        val finalUrl: String,
+        val effectiveBase: String,
+        val statusCode: Int,
+        val html: String,
+    )
     private val resolvedBaseUrlCache = ConcurrentHashMap<String, DomainProbe>()
 
     private fun pageOrigin(url: String, fallback: String = ""): String = runCatching {
@@ -423,7 +546,7 @@ object MultiProviderRepository {
                 "a[href*='/video/']", "a[href*='watch-']",
                 ".Thumb--GridItem a", ".GridItem a", "div.Block--Item a", "article a",
             ),
-            titleSelectors = listOf("img[alt]", "h3", "h2", "strong.hasyear", ".Title", "[title]"),
+            titleSelectors = listOf("h2.title", "h2", "h3", "strong.hasyear", ".Title", "[title]", "img[alt]"),
             isPrimary = true,
         ),
 
@@ -460,6 +583,7 @@ object MultiProviderRepository {
             seriesPath = "/series?page={page}",
             searchPath = "/search?q={q}",
             cardSelectors = listOf(
+                "a.list-media",
                 "a[href*='/%D9%81%D9%8A%D9%84%D9%85-']",
                 "a[href*='/%d9%81%d9%8a%d9%84%d9%85-']",
                 "a[href*='/%D9%85%D8%B3%D9%84%D8%B3%D9%84-']",
@@ -501,7 +625,7 @@ object MultiProviderRepository {
                 ".pm-video-thumb a",
                 "article a",
             ),
-            titleSelectors = listOf("h3", "h2", "img[alt]", "[title]"),
+            titleSelectors = listOf("h3 a", "span.pm-video-title", "h3", "h2", "img[alt]", "[title]"),
             isPrimary = true,
         ),
 
@@ -513,7 +637,7 @@ object MultiProviderRepository {
             mirrorDomains = emptyList(), // topcinema.cam: 301 → topcinemaa.tv (redundant) — removed
             moviesPath = "/category/%d8%a7%d9%81%d9%84%d8%a7%d9%85-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a-8/page/{page}/",
             seriesPath = "/category/%d9%85%d8%b3%d9%84%d8%b3%d9%84%d8%a7%d8%aa-%d8%a7%d8%ac%d9%86%d8%a8%d9%8a/page/{page}/",
-            searchPath = "/?s={q}",
+            searchPath = "/search/?query={q}",
             cardSelectors = listOf(".Small--Box a", ".Block--Item a", "article a"),
             titleSelectors = listOf("h3.title", "h3", "strong.hasyear", "[title]", "img[alt]"),
             isPrimary = true,
@@ -718,12 +842,12 @@ object MultiProviderRepository {
             isPrimary = true,
         ),
 
-        // ── سيما كلوب (CimaClub - cimaclub1.ink PHPMelody .php routes) ─
+        // ── سيما كلوب (CimaClub - cimaclub1.website PHPMelody .php routes) ─
         ProviderConfig(
             id = "cimaclub",
             name = "سيما كلوب",
-            baseUrl = "https://cimaclub1.ink",
-            mirrorDomains = emptyList(), // cimaclub.live: 403; cimaclub.living: 301 → cimaclub1.ink — removed
+            baseUrl = "https://cimaclub1.website",
+            mirrorDomains = emptyList(),
             moviesPath = "/movies.php?page={page}",
             seriesPath = "/all-series.php?page={page}",
             searchPath = "/search.php?keywords={q}",
@@ -739,12 +863,12 @@ object MultiProviderRepository {
             isPrimary = true,
         ),
 
-        // ── إيجي ديد (EgyDead) ─────────────────────────────────────────
+        // ── إيجي ديد (EgyDead -> egweg1.sbs, POST View=1 + MegaMax Inertia) ──
         ProviderConfig(
             id = "egydead",
             name = "إيجي ديد",
-            baseUrl = "https://egydead.blog",
-            mirrorDomains = emptyList(), // egidead.cam: 404 & empty servers; egydead.surf → egydead.christmas (403) — removed
+            baseUrl = "https://egweg1.sbs",
+            mirrorDomains = emptyList(),
             moviesPath = "/movies/page/{page}/",
             seriesPath = "/series/page/{page}/",
             searchPath = "/?s={q}",
@@ -771,11 +895,11 @@ object MultiProviderRepository {
             enabled = true,
             isPrimary = true,
         ),
-        // ── سيما وبس (CimaWbas.rest - PHPMelody .php routes) ───────────
+        // ── سيما وبس (CimaWbas.sbs - PHPMelody .php routes) ───────────
         ProviderConfig(
             id = "cimawbas",
             name = "سيما وبس",
-            baseUrl = "https://cimawbas.rest",
+            baseUrl = "https://cimawbas.sbs",
             mirrorDomains = emptyList(),
             moviesPath = "/movies.php?page={page}",
             seriesPath = "/all-series.php?page={page}",
@@ -900,7 +1024,8 @@ object MultiProviderRepository {
         PROVIDERS.flatMap { provider -> listOf(provider.baseUrl) + provider.mirrorDomains }
             .mapNotNull { domain -> runCatching { java.net.URI(domain).host }.getOrNull() } + listOf(
             "myseed.tv", "wecima.casa", "fasel4k.site", "fasel4hdx.space", "topcinemaa.tv",
-            "wecima.cam", "c4u.cam", "cimaclub1.ink",
+            "wecima.cam", "c4u.cam", "cimaclub1.ink", "cimaclub1.website",
+            "cimawbas.sbs", "cimawbas.rest", "egydead.social",
             "aflam.to", "mycima.work",
         )
     }
@@ -916,7 +1041,8 @@ object MultiProviderRepository {
     fun resolveProviderContentPageUrl(candidateUrl: String, referencePageUrl: String): String? {
         val candidate = candidateUrl.trim()
         if (isProviderContentUrl(candidate, referencePageUrl)) return candidate
-        val uri = runCatching { java.net.URI(candidate) }.getOrNull() ?: return null
+        val safeCandidate = SeriesCatalogParser.asciiSafeUrl(candidate)
+        val uri = runCatching { java.net.URI(safeCandidate) }.getOrNull() ?: return null
         val redirectKeys = setOf("u", "url", "href", "link", "redirect", "redirect_url", "continue")
         val values = uri.rawQuery.orEmpty().split('&').mapNotNull { pair ->
             val rawKey = pair.substringBefore('=')
@@ -959,7 +1085,8 @@ object MultiProviderRepository {
 
             url.contains("fasel") -> PROVIDERS.firstOrNull { it.id == "faselhd" }
 
-            url.contains("iegybest") || url.contains("cimawbas") -> PROVIDERS.firstOrNull { it.id == "iegybest" }
+            url.contains("iegybest") -> PROVIDERS.firstOrNull { it.id == "iegybest" }
+            url.contains("cimawbas") -> PROVIDERS.firstOrNull { it.id == "cimawbas" }
             url.contains("egybest") || url.contains("ivbestt") -> PROVIDERS.firstOrNull { it.id == "egybest" }
             url.contains("topcinema") -> PROVIDERS.firstOrNull { it.id == "topcinema" }
             url.contains("lodynet") -> PROVIDERS.firstOrNull { it.id == "lodynet" }
@@ -1022,10 +1149,14 @@ object MultiProviderRepository {
         fetchHtmlWithClient(url, referer, seasonHttp)
 
     /** Fetch a provider route and fail over by the route's actual response, not the homepage. */
-    private fun fetchProviderListing(
+    internal fun fetchProviderListing(
         provider: ProviderConfig,
         path: String,
         type: ArabseedType? = null,
+        maxPages: Int = 1,
+        timeoutSeconds: Long = 16,
+        onPaginationComplete: ((Boolean) -> Unit)? = null,
+        onRouteComplete: ((Boolean) -> Unit)? = null,
     ): List<ArabseedItem> {
         val now = System.currentTimeMillis()
         val cachedBase = resolvedBaseUrlCache[provider.id]
@@ -1038,52 +1169,209 @@ object MultiProviderRepository {
             path.contains("?s=", ignoreCase = true) ||
             path.contains("?q=", ignoreCase = true) ||
             path.contains("keywords=", ignoreCase = true)
+        val maxPageCount = maxPages.coerceIn(1, 120)
+        var anyBaseSucceeded = false
         for (base in bases) {
             val root = base.trimEnd('/')
-            var effectiveBase = root
-            var finalUrl = "$root$path"
-            var statusCode = 0
-            val html = fetchHtmlWithClient(
-                url = "$root$path",
-                referer = "$root/",
-                client = providerPageHttp,
-                onFinalUrl = { redirectedUrl ->
-                    finalUrl = redirectedUrl
-                    effectiveBase = pageOrigin(redirectedUrl, root)
-                },
-                onHttpStatus = { code -> statusCode = code },
-            )
-            if (html.isBlank()) {
-                when {
-                    statusCode == 403 -> coolDownProviderRoute(provider, root, PROVIDER_BAD_ROUTE_COOLDOWN_MS)
-                    statusCode == 404 && isSearchRequest -> return emptyList()
-                    else -> coolDownProviderRoute(provider, root, PROVIDER_TRANSIENT_COOLDOWN_MS)
+            val firstUrl = "$root$path"
+            val pending = ArrayDeque<String>().apply { add(firstUrl) }
+            val enqueued = hashSetOf(SeriesCatalogParser.normalizedUrl(firstUrl))
+            val visited = linkedSetOf<String>()
+            val rowsByUrl = linkedMapOf<String, ArabseedItem>()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds.coerceIn(1, 30))
+            var pagesFetched = 0
+            var pagesAttempted = 0
+            var lastEffectiveBase = root
+            var routeStatusCode = 0
+            var routeFailed = false
+            var pageFailed = false
+            val pageCompletion = ExecutorCompletionService<ProviderListingPage>(providerPaginationPool)
+
+            fun submitPage(requestUrl: String) = pageCompletion.submit(Callable {
+                var finalUrl = requestUrl
+                var effectiveBase = root
+                var statusCode = 0
+                val html = fetchHtmlWithClient(
+                    url = requestUrl,
+                    referer = "$root/",
+                    client = providerPageHttp,
+                    onFinalUrl = { redirectedUrl ->
+                        finalUrl = redirectedUrl
+                        effectiveBase = pageOrigin(redirectedUrl, root)
+                    },
+                    onHttpStatus = { code -> statusCode = code },
+                    allowHtmlOnHttp404 = isSearchRequest,
+                )
+                ProviderListingPage(requestUrl, finalUrl, effectiveBase, statusCode, html)
+            })
+
+            while (pending.isNotEmpty() && pagesAttempted < maxPageCount && System.nanoTime() < deadline) {
+                val pageBatch = mutableListOf<String>()
+                while (pending.isNotEmpty() && pageBatch.size < minOf(16, maxPageCount - pagesAttempted)) {
+                    val next = pending.removeFirst()
+                    if (visited.add(SeriesCatalogParser.normalizedUrl(next))) pageBatch += next
                 }
-                continue
+                if (pageBatch.isEmpty()) continue
+                pagesAttempted += pageBatch.size
+                val futures = pageBatch.map(::submitPage)
+                var remainingPages = futures.size
+                while (remainingPages > 0) {
+                    val remainingNanos = deadline - System.nanoTime()
+                    if (remainingNanos <= 0L) {
+                        pageFailed = true
+                        break
+                    }
+                    val finished = try {
+                        pageCompletion.poll(remainingNanos, TimeUnit.NANOSECONDS)
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        pageFailed = true
+                        null
+                    } ?: run {
+                        pageFailed = true
+                        break
+                    }
+                    remainingPages--
+                    val page = runCatching { finished.get() }.getOrNull()
+                    if (page == null) {
+                        pageFailed = true
+                        continue
+                    }
+                    val firstPage = SeriesCatalogParser.normalizedUrl(page.requestedUrl) ==
+                        SeriesCatalogParser.normalizedUrl(firstUrl)
+                    if (page.html.isBlank()) {
+                        pageFailed = true
+                        if (firstPage) {
+                            routeStatusCode = page.statusCode
+                            routeFailed = true
+                        }
+                        continue
+                    }
+                    if (!isConfiguredProviderHost(provider, page.finalUrl)) {
+                        pageFailed = true
+                        android.util.Log.w(
+                            TAG,
+                            "Rejected redirected provider page id=${provider.id} host=${pageOrigin(page.finalUrl)}",
+                        )
+                        if (firstPage) routeFailed = true
+                        coolDownProviderRoute(provider, root, PROVIDER_BAD_ROUTE_COOLDOWN_MS)
+                        continue
+                    }
+                    if (isProviderInterstitialOrParkedPage(page.html)) {
+                        pageFailed = true
+                        android.util.Log.w(
+                            TAG,
+                            "Rejected interstitial provider response id=${provider.id} host=${pageOrigin(page.finalUrl)}",
+                        )
+                        if (firstPage) routeFailed = true
+                        coolDownProviderRoute(provider, root, PROVIDER_BAD_ROUTE_COOLDOWN_MS)
+                        continue
+                    }
+                    val doc = runCatching { Jsoup.parse(page.html, page.effectiveBase) }.getOrNull()
+                    val isEmptySearchPage = doc != null && isSearchEmptyResultPage(page.html, path, page.finalUrl, doc)
+                    if (page.statusCode == 404 && !isEmptySearchPage) {
+                        pageFailed = true
+                        if (firstPage) {
+                            routeStatusCode = 404
+                            routeFailed = true
+                        }
+                        continue
+                    }
+                    if (doc != null) anyBaseSucceeded = true
+                    if (isEmptySearchPage) {
+                        if (pagesFetched == 0 && firstPage) {
+                            runCatching {
+                                android.util.Log.i(TAG, "Search returned 0 results for provider=${provider.id} status=${page.statusCode} path=$path")
+                            }
+                            onRouteComplete?.invoke(true)
+                            return emptyList()
+                        }
+                        continue
+                    }
+                    pagesFetched++
+                    lastEffectiveBase = page.effectiveBase
+                    parseItems(page.html, provider, type, page.effectiveBase).forEach { item ->
+                        val key = SeriesCatalogParser.normalizedUrl(item.pageUrl)
+                        if (key.isNotBlank()) rowsByUrl.putIfAbsent(key, item)
+                    }
+                    if (isSearchRequest && maxPageCount > 1 && doc != null) {
+                        val jsPageUrls = extractOnclickQueryPageUrls(doc, page.finalUrl, maxPageCount)
+                        (SeriesCatalogParser.linkedEpisodePages(doc, page.finalUrl) + jsPageUrls)
+                            .asSequence()
+                            .distinctBy(SeriesCatalogParser::normalizedUrl)
+                            .filter { isConfiguredProviderHost(provider, it) }
+                            .filterNot { SeriesCatalogParser.normalizedUrl(it) in enqueued }
+                            .forEach { next ->
+                                if (enqueued.size < 120 && enqueued.add(SeriesCatalogParser.normalizedUrl(next))) {
+                                    pending.addLast(next)
+                                }
+                            }
+                    }
+                }
+                futures.filterNot { it.isDone }.forEach { future ->
+                    future.cancel(true)
+                    pageFailed = true
+                }
             }
-            if (!isConfiguredProviderHost(provider, finalUrl)) {
-                android.util.Log.w(TAG, "Rejected redirected provider page id=${provider.id} host=${pageOrigin(finalUrl)}")
-                coolDownProviderRoute(provider, root, PROVIDER_BAD_ROUTE_COOLDOWN_MS)
-                continue
-            }
-            if (isProviderInterstitialOrParkedPage(html)) {
-                android.util.Log.w(TAG, "Rejected interstitial provider response id=${provider.id} host=${pageOrigin(finalUrl)}")
-                coolDownProviderRoute(provider, root, PROVIDER_BAD_ROUTE_COOLDOWN_MS)
-                continue
-            }
-            val doc = try { Jsoup.parse(html, effectiveBase) } catch (_: Exception) { null }
-            if (doc != null && isSearchEmptyResultPage(html, path, finalUrl, doc)) {
-                android.util.Log.i(TAG, "Search returned 0 results for provider=${provider.id} path=$path")
-                return emptyList()
-            }
-            val rows = parseItems(html, provider, type, effectiveBase)
+
+            val paginationComplete = pending.isEmpty() && !pageFailed &&
+                pagesFetched == pagesAttempted && pagesFetched > 0
+            val rows = rowsByUrl.values.toList()
             if (rows.isNotEmpty()) {
                 providerRouteCooldownUntil.remove(providerRouteKey(provider, root))
-                resolvedBaseUrlCache[provider.id] = DomainProbe(effectiveBase, now, 200)
+                resolvedBaseUrlCache[provider.id] = DomainProbe(lastEffectiveBase, now, 200)
+                if (isSearchRequest && maxPageCount > 1) {
+                    onPaginationComplete?.invoke(paginationComplete)
+                }
+                onRouteComplete?.invoke(true)
+                if (maxPages > 1 && pagesFetched > 1) {
+                    android.util.Log.i(
+                        TAG,
+                        "Provider search pagination id=${provider.id} pages=$pagesFetched " +
+                            "rows=${rows.size} complete=$paginationComplete",
+                    )
+                }
                 return rows
             }
+            if (routeFailed) {
+                when {
+                    routeStatusCode == 403 -> coolDownProviderRoute(provider, root, PROVIDER_BAD_ROUTE_COOLDOWN_MS)
+                    routeStatusCode == 404 && isSearchRequest -> {
+                        onRouteComplete?.invoke(false)
+                        return emptyList()
+                    }
+                    else -> coolDownProviderRoute(provider, root, PROVIDER_TRANSIENT_COOLDOWN_MS)
+                }
+            }
         }
+        if (isSearchRequest && maxPageCount > 1) onPaginationComplete?.invoke(false)
+        onRouteComplete?.invoke(anyBaseSucceeded)
         return emptyList()
+    }
+
+    private fun extractOnclickQueryPageUrls(
+        document: org.jsoup.nodes.Document,
+        currentPageUrl: String,
+        maxPages: Int,
+    ): List<String> {
+        val parsed = currentPageUrl.toHttpUrlOrNull() ?: return emptyList()
+        val pages = linkedMapOf<Int, String>()
+        val limit = maxPages.coerceIn(2, 120)
+        val pattern = Regex(
+            """(?:updateQuery\s*\(\s*['"]page['"]\s*,\s*(\d+)\s*\)|(?:changePage|goToPage)\s*\(\s*(\d+)\s*\))""",
+            RegexOption.IGNORE_CASE,
+        )
+        document.select("[onclick]").forEach { element ->
+            val match = pattern.find(element.attr("onclick")) ?: return@forEach
+            val pageNum = match.groupValues[1].ifBlank { match.groupValues[2] }.toIntOrNull() ?: return@forEach
+            if (pageNum in 2..limit) {
+                pages.putIfAbsent(
+                    pageNum,
+                    parsed.newBuilder().setQueryParameter("page", pageNum.toString()).build().toString(),
+                )
+            }
+        }
+        return pages.entries.sortedBy { it.key }.map { it.value }
     }
 
     private fun fetchHtmlWithClient(
@@ -1093,6 +1381,7 @@ object MultiProviderRepository {
         onFinalUrl: ((String) -> Unit)? = null,
         onHttpStatus: ((Int) -> Unit)? = null,
         allowJson: Boolean = false,
+        allowHtmlOnHttp404: Boolean = false,
     ): String {
 
         return try {
@@ -1103,9 +1392,11 @@ object MultiProviderRepository {
                 "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
             }
 
+            val safeUrl = SeriesCatalogParser.asciiSafeUrl(url)
+            val safeReferer = SeriesCatalogParser.asciiSafeHeaderValue(referer)
             val req = Request.Builder()
 
-                .url(url)
+                .url(safeUrl)
 
                 .header("User-Agent", UA)
 
@@ -1113,22 +1404,24 @@ object MultiProviderRepository {
 
                 .header("Accept-Language", "ar,en;q=0.9")
 
-                .apply { if (referer.isNotBlank()) header("Referer", referer) }
+                .apply { if (safeReferer.isNotBlank()) header("Referer", safeReferer) }
 
                 .build()
 
-            val host = runCatching { java.net.URI.create(url).host.orEmpty() }.getOrDefault("invalid-url")
+            val host = runCatching { java.net.URI.create(safeUrl).host.orEmpty() }.getOrDefault("invalid-url")
             client.newCall(req).execute().use { r ->
                 onFinalUrl?.invoke(r.request.url.toString())
                 onHttpStatus?.invoke(r.code)
-                if (!r.isSuccessful) {
+                val contentType = r.header("Content-Type").orEmpty().lowercase(java.util.Locale.ROOT)
+                val isHtmlContent = contentType.isBlank() ||
+                    contentType.contains("text/html") ||
+                    contentType.contains("application/xhtml+xml")
+                val allow404Body = allowHtmlOnHttp404 && r.code == 404 && isHtmlContent
+                if (!r.isSuccessful && !allow404Body) {
                     android.util.Log.w(TAG, "HTTP ${r.code} for host=$host")
                     ""
                 } else {
-                    val contentType = r.header("Content-Type").orEmpty().lowercase(java.util.Locale.ROOT)
-                    val expectedContentType = contentType.isBlank() ||
-                        contentType.contains("text/html") ||
-                        contentType.contains("application/xhtml+xml") ||
+                    val expectedContentType = isHtmlContent ||
                         (allowJson && contentType.contains("application/json"))
                     if (!expectedContentType) {
                         android.util.Log.w(TAG, "Unexpected provider content type for host=$host type=$contentType")
@@ -1239,7 +1532,45 @@ object MultiProviderRepository {
         ).any { cardBadgeText.contains(it) }
     }
 
-    private fun parseItems(
+    private fun cardTitle(element: org.jsoup.nodes.Element, provider: ProviderConfig): String {
+        val contexts = mutableListOf(element)
+        for (ancestor in element.parents().take(4)) {
+            contexts += ancestor
+            val marker = "${ancestor.tagName()} ${ancestor.className()} ${ancestor.id()}"
+            if (ancestor.tagName() in setOf("li", "article") ||
+                Regex("""(?i)(?:^|\s)(?:video-grid|grid-item|card|item-card|block-post|post-item)(?:\s|$)""")
+                    .containsMatchIn(marker)
+            ) break
+        }
+
+        // A decorative image alt such as "One Piece" often omits the episode
+        // number that is present in the card heading. Read the semantic heading
+        // from the nearest card container before falling back to image metadata.
+        val semanticSelectors = provider.titleSelectors.filterNot {
+            it == "img[alt]" || it == "[title]" || it == "[aria-label]"
+        }
+        for (context in contexts) {
+            for (selector in semanticSelectors) {
+                val title = context.selectFirst(selector)?.text()?.trim().orEmpty()
+                if (title.length >= 2) return title
+            }
+        }
+
+        for (context in contexts) {
+            val labeled = context.attr("aria-label").ifBlank {
+                context.attr("title").ifBlank {
+                    context.selectFirst("[aria-label]")?.attr("aria-label")
+                        .orEmpty().ifBlank { context.selectFirst("[title]")?.attr("title").orEmpty() }
+                }
+            }.trim()
+            if (labeled.length >= 2) return labeled
+        }
+        val visibleText = element.ownText().trim().ifBlank { element.text().trim() }
+        if (visibleText.length in 2..160) return visibleText
+        return element.selectFirst("img[alt]")?.attr("alt")?.trim().orEmpty()
+    }
+
+    internal fun parseItems(
 
         html: String,
 
@@ -1299,27 +1630,7 @@ object MultiProviderRepository {
 
 
 
-                // Title
-                var title = ""
-                for (ts in provider.titleSelectors) {
-                    val matched = when {
-                        ts == "[aria-label]" -> el.attr("aria-label").ifBlank { el.selectFirst("[aria-label]")?.attr("aria-label").orEmpty() }
-                        ts == "[title]" -> el.attr("title").ifBlank { el.selectFirst("[title]")?.attr("title").orEmpty() }
-                        ts == "img[alt]" -> el.selectFirst("img")?.attr("alt").orEmpty()
-                        else -> el.selectFirst(ts)?.text()?.trim().orEmpty().ifBlank { el.parent()?.selectFirst(ts)?.text()?.trim().orEmpty() }
-                    }.trim()
-                    if (matched.isNotBlank()) {
-                        title = matched
-                        break
-                    }
-                }
-                if (title.isBlank()) title = el.attr("aria-label").trim()
-                if (title.isBlank()) title = el.attr("title").trim()
-                if (title.isBlank()) title = el.selectFirst("img")?.attr("alt")?.trim() ?: ""
-                if (title.isBlank()) {
-                    val directTxt = el.ownText().trim().ifBlank { el.text().trim() }
-                    if (directTxt.length in 2..100) title = directTxt
-                }
+                val title = cardTitle(el, provider)
                 if (title.length < 2) continue
 
 
@@ -1520,20 +1831,29 @@ object MultiProviderRepository {
             listOf(type)
         }
         val tasks = mutableListOf<() -> List<ArabseedItem>>()
-        for (provider in PROVIDERS.filter { it.enabled }) {
+        for (provider in seasonEnrichmentProviders()) {
             for (catalogType in types) {
                 tasks += {
+                    val providerStartedAt = System.nanoTime()
                     try {
                         val path = catalogPagePath(provider, catalogType, page)
                         // Some legacy source pages expose only a single listing page.
                         // Re-fetching them for every page made "load more" repeat forever.
                         if (path == null) {
+                            android.util.Log.i(
+                                TAG,
+                                "Catalog provider id=${provider.id} type=$catalogType page=$page " +
+                                    "rows=0 reason=no-route",
+                            )
                             emptyList()
                         } else {
                             val parsed = fetchProviderListing(provider, path, catalogType)
-                            if (parsed.isEmpty()) {
-                                android.util.Log.w(TAG, "No catalog cards parsed for provider=${provider.name} type=$catalogType")
-                            }
+                            android.util.Log.i(
+                                TAG,
+                                "Catalog provider id=${provider.id} type=$catalogType page=$page " +
+                                    "rows=${parsed.size} " +
+                                    "elapsedMs=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - providerStartedAt)}",
+                            )
                             parsed
                         }
                     } catch (error: Exception) {
@@ -1547,17 +1867,22 @@ object MultiProviderRepository {
             }
         }
 
-        // The home catalog requests movies and series from each provider. With a bounded pool
-        // those twelve requests run in two waves, so allow both waves to finish while partial rows
-        // continue reaching the UI immediately.
+        // The home catalog requests movies and series from every enabled provider.
+        // A bounded pool handles the two request waves while partial rows reach
+        // the UI as soon as each provider responds.
         val report = collectParallelReport(
             tasks,
-            timeoutSeconds = if (type == null) 14L else 9L,
+            timeoutSeconds = if (type == null) 22L else 14L,
             executor = providerPool,
         ) { batch ->
             if (batch.isNotEmpty()) onPartial?.invoke(deduplicateItems(batch, expectedType = type))
         }
         val deduped = deduplicateItems(report.items, expectedType = type)
+        android.util.Log.i(
+            TAG,
+            "Catalog batch completed=${report.completedTasks}/${report.totalTasks} " +
+                "items=${deduped.size} type=${type ?: "all"} page=$page",
+        )
         // Keep catalog refresh bounded: AsyncImage loads poster images directly,
         // so opening one page here per missing poster only delays the first screen.
         val enriched = deduped
@@ -1826,7 +2151,7 @@ object MultiProviderRepository {
                 }
             }
         }
-        val report = collectParallelReport(tasks, timeoutSeconds = 8L, executor = providerPool)
+        val report = collectParallelReport(tasks, timeoutSeconds = 14L, executor = providerPool)
         val result = deduplicateItems(report.items, expectedType)
         if (result.isNotEmpty() && report.completedTasks == report.totalTasks) {
             listCache[key] = System.currentTimeMillis() to result
@@ -1901,7 +2226,7 @@ object MultiProviderRepository {
         val q = normalizeSearchQueryPunctuation(query)
         if (q.isBlank()) return emptyList()
 
-        val key = "search:v11:${q.lowercase()}"
+        val key = "search:v12:${q.lowercase()}"
         val now = System.currentTimeMillis()
         if (!forceRefresh) {
             searchCache[key]?.let { (savedAt, items) ->
@@ -1916,8 +2241,9 @@ object MultiProviderRepository {
 
         val normalizedArabic = SeriesCatalogParser.normalizeArabicSearchQuery(q)
         val queryToRun = q
-        val tasks = PROVIDERS.filter { it.enabled }.map { provider ->
+        val tasks = seasonEnrichmentProviders().map { provider ->
             {
+                val providerStartedAt = System.nanoTime()
                 try {
                     val encodedQuery = java.net.URLEncoder.encode(queryToRun, "UTF-8")
                     val basePath = provider.searchPath.replace("{q}", encodedQuery)
@@ -1927,13 +2253,23 @@ object MultiProviderRepository {
                         val encNorm = java.net.URLEncoder.encode(normalizedArabic, "UTF-8")
                         rows = fetchProviderListing(provider, provider.searchPath.replace("{q}", encNorm), null)
                     }
+                    android.util.Log.i(
+                        TAG,
+                        "Provider search id=${provider.id} rows=${rows.size} elapsedMs=" +
+                            TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - providerStartedAt),
+                    )
                     rows
                 } catch (_: Exception) { emptyList() }
             }
         }
 
-        val report = collectParallelReport(tasks, timeoutSeconds = 12L, executor = providerPool)
+        val report = collectParallelReport(tasks, timeoutSeconds = 14L, executor = providerPool)
         val results = deduplicateItems(report.items)
+        android.util.Log.i(
+            TAG,
+            "Provider search batch completed=${report.completedTasks}/${report.totalTasks} " +
+                "items=${results.size} queryLength=${q.length}",
+        )
         if (results.isNotEmpty() && report.completedTasks == report.totalTasks) {
             searchCache[key] = System.currentTimeMillis() to results
             CatalogDiskCache.saveItems("providers:" + key, results)
@@ -2183,8 +2519,8 @@ object MultiProviderRepository {
         when (provider?.id) {
             "egydead" -> {
                 val parsed = pageUrl.toHttpUrlOrNull()
-                if (parsed != null && parsed.queryParameter("watch") != "1") {
-                    variants += parsed.newBuilder().setQueryParameter("watch", "1").build().toString()
+                if (parsed != null && parsed.queryParameter("view") != "watch") {
+                    variants += parsed.newBuilder().setQueryParameter("view", "watch").build().toString()
                 }
             }
             "wecima" -> {
@@ -2260,9 +2596,14 @@ object MultiProviderRepository {
                 val origin = pageOrigin(pageUrl, if (pageUrl.contains("myseed.name")) "https://myseed.name" else "https://arabseed.here").trimEnd('/')
                 val slug = pageUrl.trimEnd('/').substringAfterLast('/')
                 val watchUrl = if (pageUrl.contains("/watch")) pageUrl else "$origin/watch/$slug"
+                val safeWatchUrl = SeriesCatalogParser.asciiSafeUrl(watchUrl)
+                val safeWatchRef = SeriesCatalogParser.asciiSafeHeaderValue(watchUrl)
+                val safePageRef = SeriesCatalogParser.asciiSafeHeaderValue(pageUrl)
                 try {
-                    val getReq = Request.Builder().url(watchUrl)
-                        .header("User-Agent", UA).header("Referer", pageUrl).build()
+                    val getReq = Request.Builder().url(safeWatchUrl)
+                        .header("User-Agent", UA)
+                        .apply { if (safePageRef.isNotBlank()) header("Referer", safePageRef) }
+                        .build()
                     var wHtml = ""
                     var cookieHeader = ""
                     http.newCall(getReq).execute().use { res ->
@@ -2289,10 +2630,10 @@ object MultiProviderRepository {
                                         put("human_signal", JSONObject.NULL)
                                     }
                                     val reqB = Request.Builder()
-                                        .url("$origin/watch/resolve")
+                                        .url(SeriesCatalogParser.asciiSafeUrl("$origin/watch/resolve"))
                                         .post(postJson.toString().toRequestBody("application/json".toMediaType()))
                                         .header("User-Agent", UA)
-                                        .header("Referer", watchUrl)
+                                        .apply { if (safeWatchRef.isNotBlank()) header("Referer", safeWatchRef) }
                                         .header("Origin", origin)
                                         .header("Accept", "application/json")
                                         .header("X-CSRF-TOKEN", csrfToken)
@@ -2303,8 +2644,9 @@ object MultiProviderRepository {
                                         if (!resJson.optBoolean("ok", false)) return@submit null
                                         val mPath = resJson.optString("url")
                                         val mFull = absoluteServerUrl(mPath, origin)
-                                        val mReqB = Request.Builder().url(mFull)
-                                            .header("User-Agent", UA).header("Referer", watchUrl)
+                                        val mReqB = Request.Builder().url(SeriesCatalogParser.asciiSafeUrl(mFull))
+                                            .header("User-Agent", UA)
+                                            .apply { if (safeWatchRef.isNotBlank()) header("Referer", safeWatchRef) }
                                         if (cookieHeader.isNotBlank()) mReqB.header("Cookie", cookieHeader)
                                         val mHtml = http.newCall(mReqB.build()).execute().use { it.body?.string().orEmpty() }
                                         val ifrSrc = Regex("""<iframe\b[^>]*src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
@@ -2456,8 +2798,19 @@ object MultiProviderRepository {
                         val apiBody = fetchJsonText("$siOrigin$playApiPath", pageUrl)
                         val lines = JSONObject(apiBody).optJSONArray("lines")
                         if (lines != null) {
+                            val hlsLines = mutableListOf<JSONObject>()
+                            val otherLines = mutableListOf<JSONObject>()
                             for (i in 0 until lines.length()) {
                                 val line = lines.getJSONObject(i)
+                                val kind = line.optString("kind").trim()
+                                val rawU = line.optString("url").trim()
+                                if (kind.equals("hls", ignoreCase = true) || rawU.contains("/api/hls/")) {
+                                    hlsLines += line
+                                } else {
+                                    otherLines += line
+                                }
+                            }
+                            for ((i, line) in (hlsLines + otherLines).withIndex()) {
                                 val sName = line.optString("name", "سيرفر ${i + 1}").trim()
                                 var rawU = line.optString("url").trim()
                                 if (rawU.startsWith("/api/hls/")) {
@@ -2478,9 +2831,10 @@ object MultiProviderRepository {
             // 0g. Movizland POST view=1 server extractor
             if (pageUrl.contains("movizland")) {
                 try {
-                    val postReq = Request.Builder().url(pageUrl)
+                    val safePage = SeriesCatalogParser.asciiSafeUrl(pageUrl)
+                    val postReq = Request.Builder().url(safePage)
                         .post(FormBody.Builder().add("view", "1").build())
-                        .header("User-Agent", UA).header("Referer", pageUrl).build()
+                        .header("User-Agent", UA).header("Referer", SeriesCatalogParser.asciiSafeHeaderValue(safePage)).build()
                     val mHtml = http.newCall(postReq).execute().use { it.body?.string().orEmpty() }
                     if (mHtml.isNotBlank() && !AdBypassHelper.isCloudflareChallenge(mHtml)) {
                         val mDoc = Jsoup.parse(mHtml, pageUrl)
@@ -2495,20 +2849,40 @@ object MultiProviderRepository {
                 } catch (_: Exception) {}
             }
 
-            // 0h. EgyDead / Egidead POST watch=1 extractor
-            if ((pageUrl.contains("egidead") || pageUrl.contains("egydead")) && servers.isEmpty()) {
+            // 0h. EgyDead / egweg1.sbs POST View=1 + MegaMax Inertia mirror extractor
+            if ((pageUrl.contains("egweg") || pageUrl.contains("egidead") || pageUrl.contains("egydead") ||
+                    provider?.id == "egydead") && servers.isEmpty()
+            ) {
                 try {
-                    val postReq = Request.Builder().url(pageUrl)
-                        .post(FormBody.Builder().add("watch", "1").build())
-                        .header("User-Agent", UA).header("Referer", pageUrl).build()
+                    val safePage = SeriesCatalogParser.asciiSafeUrl(pageUrl)
+                    val postReq = Request.Builder().url(safePage)
+                        .post(FormBody.Builder().add("View", "1").build())
+                        .header("User-Agent", UA).header("Referer", SeriesCatalogParser.asciiSafeHeaderValue(safePage)).build()
                     val eHtml = http.newCall(postReq).execute().use { it.body?.string().orEmpty() }
                     if (eHtml.isNotBlank() && !AdBypassHelper.isCloudflareChallenge(eHtml)) {
                         val eDoc = Jsoup.parse(eHtml, pageUrl)
-                        for (el in eDoc.select("ul.serversList li[data-link], [data-watch], [data-link], [data-embed], iframe[src]")) {
+                        val rawLinks = mutableListOf<Pair<String, String>>()
+                        for (el in eDoc.select(".mob-servers li[data-link], ul.serversList li[data-link], [data-link], [data-watch], [data-embed], iframe[src]")) {
                             if (insideNonPlaybackContainer(el)) continue
                             val abs = serverUrlFromAttribute(extractServerAttr(el), pageUrl)
-                            if (isServerCandidateUrl(abs, pageUrl) && servers.none { it.embedUrl == abs }) {
-                                servers += ArabseedServer("إيجي ديد - سيرفر ${servers.size + 1}", abs)
+                            if (abs.isNotBlank() && isServerCandidateUrl(abs, pageUrl)) {
+                                rawLinks += el.text().trim() to abs
+                            }
+                        }
+                        for ((label, abs) in rawLinks) {
+                            val expanded = if (abs.contains("/iframe/", ignoreCase = true)) {
+                                unpackMegaMaxMirrors(abs, pageUrl)
+                            } else emptyList()
+                            if (expanded.isNotEmpty()) {
+                                for ((driver, mirrorUrl) in expanded) {
+                                    if (isServerCandidateUrl(mirrorUrl, pageUrl) && servers.none { it.embedUrl == mirrorUrl }) {
+                                        val name = if (driver.isNotBlank()) "إيجي ديد ($driver)" else "إيجي ديد - سيرفر ${servers.size + 1}"
+                                        servers += ArabseedServer(name, mirrorUrl)
+                                    }
+                                }
+                            } else if (servers.none { it.embedUrl == abs }) {
+                                val sName = label.takeIf { it.isNotBlank() && it.length < 25 } ?: "سيرفر ${servers.size + 1}"
+                                servers += ArabseedServer("إيجي ديد ($sName)", abs)
                             }
                         }
                     }
@@ -2519,6 +2893,7 @@ object MultiProviderRepository {
             if (pageUrl.contains("topcinema")) {
                 try {
                     val watchUrl = if (pageUrl.trimEnd('/').endsWith("/watch")) pageUrl else "${pageUrl.trimEnd('/')}/watch/"
+                    val safeWatchRef = SeriesCatalogParser.asciiSafeHeaderValue(watchUrl)
                     val tcHtml = fetchHtml(watchUrl, pageUrl)
                     val tcDoc = Jsoup.parse(tcHtml, watchUrl)
                     for (ifr in tcDoc.select("iframe[src]")) {
@@ -2539,10 +2914,10 @@ object MultiProviderRepository {
                             try {
                                 val form = FormBody.Builder().add("id", pid).add("i", srv).build()
                                 val req = Request.Builder()
-                                    .url("${ajaxBase.trimEnd('/')}/Single/Server.php")
+                                    .url(SeriesCatalogParser.asciiSafeUrl("${ajaxBase.trimEnd('/')}/Single/Server.php"))
                                     .post(form)
                                     .header("User-Agent", UA)
-                                    .header("Referer", watchUrl)
+                                    .apply { if (safeWatchRef.isNotBlank()) header("Referer", safeWatchRef) }
                                     .header("X-Requested-With", "XMLHttpRequest")
                                     .build()
                                 val rHtml = http.newCall(req).execute().use { it.body?.string() ?: "" }
@@ -2698,9 +3073,13 @@ object MultiProviderRepository {
                 var fHtml = ""
                 var finalFaselUrl = pageUrl
                 var faselCookies = ""
+                val safeFaselUrl = SeriesCatalogParser.asciiSafeUrl(pageUrl)
+                val safeFaselRef = SeriesCatalogParser.asciiSafeHeaderValue("$baseUrl/")
                 runCatching {
-                    val fReq = Request.Builder().url(pageUrl)
-                        .header("User-Agent", UA).header("Referer", "$baseUrl/").build()
+                    val fReq = Request.Builder().url(safeFaselUrl)
+                        .header("User-Agent", UA)
+                        .apply { if (safeFaselRef.isNotBlank()) header("Referer", safeFaselRef) }
+                        .build()
                     http.newCall(fReq).execute().use { res ->
                         finalFaselUrl = res.request.url.toString()
                         faselCookies = extractCookiesHeader(res.headers("Set-Cookie"))
@@ -2735,6 +3114,7 @@ object MultiProviderRepository {
                 // AJAX embed buttons (POST {faselBase}/ajax/embed with id)
                 val embedButtons = fDoc.select("button.btn-service[data-embed], [data-embed]")
                 val futures = mutableListOf<Future<Pair<String, String>?>>()
+                val safeFinalFaselRef = SeriesCatalogParser.asciiSafeHeaderValue(finalFaselUrl)
                 for (btn in embedButtons.take(6)) {
                     val embedId = btn.attr("data-embed").trim()
                     val sName = btn.text().trim().replace(Regex("(?i)(فاصل|fasel)"), "").trim()
@@ -2743,10 +3123,10 @@ object MultiProviderRepository {
                             try {
                                 val formBody = FormBody.Builder().add("id", embedId).build()
                                 val postBuilder = Request.Builder()
-                                    .url("$faselBase/ajax/embed")
+                                    .url(SeriesCatalogParser.asciiSafeUrl("$faselBase/ajax/embed"))
                                     .post(formBody)
                                     .header("User-Agent", UA)
-                                    .header("Referer", finalFaselUrl)
+                                    .apply { if (safeFinalFaselRef.isNotBlank()) header("Referer", safeFinalFaselRef) }
                                     .header("Origin", faselBase)
                                     .header("X-Requested-With", "XMLHttpRequest")
                                 if (faselCookies.isNotBlank()) postBuilder.header("Cookie", faselCookies)
@@ -2838,11 +3218,13 @@ object MultiProviderRepository {
                                     .add("nume", nume)
                                     .add("type", type)
                                     .build()
-                                    val req = Request.Builder()
-                                    .url(ajaxUrl)
+                                val safeAjaxUrl = SeriesCatalogParser.asciiSafeUrl(ajaxUrl)
+                                val safeSourceReferer = SeriesCatalogParser.asciiSafeHeaderValue(sourcePage)
+                                val req = Request.Builder()
+                                    .url(safeAjaxUrl)
                                     .post(form)
                                     .header("User-Agent", UA)
-                                    .header("Referer", sourcePage)
+                                    .apply { if (safeSourceReferer.isNotBlank()) header("Referer", safeSourceReferer) }
                                     .header("X-Requested-With", "XMLHttpRequest")
                                     .build()
                                 val respStr = http.newCall(req).execute().use { it.body?.string() ?: "" }
@@ -2918,9 +3300,80 @@ object MultiProviderRepository {
             servers += ArabseedServer("مشاهدة مباشرة", pageUrl)
         }
 
-        return servers  // سريع — الصفحة الحالية بس
+        return prioritizeWorkingServers(servers)  // سريع — الصفحة الحالية بس
 
     }
+
+    /** Extract mirror embed URLs from MegaMax Inertia (`files/mirror/video`) pages via partial reload JSON. */
+    private fun unpackMegaMaxMirrors(embedUrl: String, referer: String): List<Pair<String, String>> {
+        return try {
+            val (html, finalUrl) = fetchHtmlAndFinalUrl(embedUrl, referer)
+            if (html.isBlank() || (!html.contains("files\\/mirror\\/video") && !html.contains("files/mirror/video"))) {
+                return emptyList()
+            }
+            val version = Regex(""""version"\s*:\s*"([^"]+)"""").find(html)?.groupValues?.get(1).orEmpty()
+            val safeTarget = SeriesCatalogParser.asciiSafeUrl(finalUrl.ifBlank { embedUrl }).ifBlank { return emptyList() }
+            val safeReferer = SeriesCatalogParser.asciiSafeHeaderValue(referer.ifBlank { finalUrl })
+            val req = Request.Builder()
+                .url(safeTarget)
+                .header("User-Agent", UA)
+                .apply { if (safeReferer.isNotBlank()) header("Referer", safeReferer) }
+                .header("Accept", "text/html, application/xhtml+xml, application/json")
+                .header("X-Inertia", "true")
+                .apply { if (version.isNotBlank()) header("X-Inertia-Version", version) }
+                .header("X-Inertia-Partial-Data", "streams")
+                .header("X-Inertia-Partial-Component", "files/mirror/video")
+                .build()
+            val jsonText = probeHttp.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) resp.body?.string().orEmpty() else ""
+            }
+            if (jsonText.isBlank()) return emptyList()
+            val dataArr = JSONObject(jsonText)
+                .optJSONObject("props")
+                ?.optJSONObject("streams")
+                ?.optJSONArray("data") ?: return emptyList()
+            val mirrorsOut = mutableListOf<Pair<String, String>>()
+            for (i in 0 until dataArr.length()) {
+                val mirrors = dataArr.optJSONObject(i)?.optJSONArray("mirrors") ?: continue
+                for (j in 0 until mirrors.length()) {
+                    val m = mirrors.optJSONObject(j) ?: continue
+                    val driver = m.optString("driver").trim()
+                    val rawLink = m.optString("link").replace("\\/", "/").trim()
+                    val normalizedLink = when {
+                        rawLink.startsWith("//") -> "https:$rawLink"
+                        rawLink.startsWith("http", ignoreCase = true) -> rawLink
+                        else -> ""
+                    }
+                    if (normalizedLink.isNotBlank() && mirrorsOut.none { it.second == normalizedLink }) {
+                        mirrorsOut += driver to normalizedLink
+                    }
+                }
+            }
+            mirrorsOut.sortedBy { serverPriorityRank(it.second) }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun serverPriorityRank(url: String): Int {
+        val lower = url.lowercase(java.util.Locale.ROOT)
+        return when {
+            lower.contains(".m3u8") || lower.contains(".mp4") || lower.contains("/api/hls/") -> 0
+            lower.contains("stmruby") || lower.contains("streamruby") -> 1
+            lower.contains("vidmoly") -> 2
+            lower.contains("uqload") -> 3
+            lower.contains("mixdrop") || lower.contains("mxdrop") -> 4
+            lower.contains("liiivideo") || lower.contains("hdup") || lower.contains("fastvip") || lower.contains("vidtube") -> 5
+            lower.contains("byse") || lower.contains("voe.") || lower.contains("vidsharing") -> 6
+            lower.contains("vkvideo") || lower.contains("ok.ru") || lower.contains("vidara") -> 7
+            lower.contains("dood") || lower.contains("dooood") || lower.contains("d000d") || lower.contains("ds2play") -> 18
+            lower.contains("hgcloud") || lower.contains("streamwish") -> 19
+            else -> 10
+        }
+    }
+
+    private fun prioritizeWorkingServers(input: List<ArabseedServer>): List<ArabseedServer> =
+        if (input.size <= 1) input else input.sortedBy { serverPriorityRank(it.embedUrl) }
 
     /**
      * يبحث عن تطابق العمل لدى المصادر المهيأة بالتوازي
@@ -2994,9 +3447,9 @@ object MultiProviderRepository {
         val isEpisodeTarget = (episodeNumber != null && episodeNumber > 0) || (type == ArabseedType.SERIES && 
             (SeriesCatalogParser.isEpisode(title, originalPageUrl) || originalPageUrl.contains("-ep") || originalPageUrl.contains("/watch/")))
         val targetEpNum = episodeNumber ?: SeriesCatalogParser.episodeNumber(title, originalPageUrl)
-        val targetSeasonNum = seasonNumber ?: SeriesCatalogParser.seasonNumber(title, originalPageUrl) ?: 1
+        val targetSeasonNum = seasonNumber ?: SeriesCatalogParser.seasonNumber(title, originalPageUrl)
 
-        val enabledProviders = PROVIDERS.filter { it.enabled && it.id != originalProvider?.id }
+        val enabledProviders = seasonEnrichmentProviders(excludeProviderId = originalProvider?.id)
         val sortedProviders = enabledProviders.sortedByDescending { if (it.isPrimary) 1 else 0 }
         val tasks = sortedProviders.map { provider ->
             {
@@ -3021,12 +3474,16 @@ object MultiProviderRepository {
                         if (match != null) break
                     }
                     if (match != null && match.pageUrl != originalPageUrl) {
-                        val targetEpisodeUrl = if (isEpisodeTarget && targetEpNum != null) {
-                            if (SeriesCatalogParser.isEpisode(match.title, match.pageUrl) && SeriesCatalogParser.episodeNumber(match.title, match.pageUrl) == targetEpNum) {
+                        val targetEpisodeUrl = if (isEpisodeTarget) {
+                            if (targetEpNum == null || targetSeasonNum == null) null
+                            else if (SeriesCatalogParser.isEpisode(match.title, match.pageUrl) &&
+                                SeriesCatalogParser.episodeNumber(match.title, match.pageUrl) == targetEpNum &&
+                                SeriesCatalogParser.seasonNumber(match.title, match.pageUrl) == targetSeasonNum
+                            ) {
                                 match.pageUrl
                             } else {
                                 val bundle = fetchSeasonsAndEpisodes(match, forceRefresh = false, seasonNumbersOnly = setOf(targetSeasonNum))
-                                val targetSeason = bundle.seasons.firstOrNull { it.number == targetSeasonNum } ?: bundle.seasons.firstOrNull()
+                                val targetSeason = bundle.seasons.firstOrNull { it.number == targetSeasonNum }
                                 targetSeason?.episodes?.firstOrNull { it.number == targetEpNum }?.pageUrl
                             }
                         } else match.pageUrl
@@ -3074,12 +3531,16 @@ object MultiProviderRepository {
                         .sortedByDescending { it.year.isNotBlank() && it.year == requestedYear }
                         .firstOrNull()
                     if (match != null && match.pageUrl != originalPageUrl) {
-                        val targetEpisodeUrl = if (isEpisodeTarget && targetEpNum != null) {
-                            if (SeriesCatalogParser.isEpisode(match.title, match.pageUrl) && SeriesCatalogParser.episodeNumber(match.title, match.pageUrl) == targetEpNum) {
+                        val targetEpisodeUrl = if (isEpisodeTarget) {
+                            if (targetEpNum == null || targetSeasonNum == null) null
+                            else if (SeriesCatalogParser.isEpisode(match.title, match.pageUrl) &&
+                                SeriesCatalogParser.episodeNumber(match.title, match.pageUrl) == targetEpNum &&
+                                SeriesCatalogParser.seasonNumber(match.title, match.pageUrl) == targetSeasonNum
+                            ) {
                                 match.pageUrl
                             } else {
                                 val bundle = ArabseedRepository.fetchSeasonsAndEpisodes(match, forceRefresh = false, seasonNumbersOnly = setOf(targetSeasonNum))
-                                val targetSeason = bundle.seasons.firstOrNull { it.number == targetSeasonNum } ?: bundle.seasons.firstOrNull()
+                                val targetSeason = bundle.seasons.firstOrNull { it.number == targetSeasonNum }
                                 targetSeason?.episodes?.firstOrNull { it.number == targetEpNum }?.pageUrl
                             }
                         } else match.pageUrl
@@ -3109,7 +3570,7 @@ object MultiProviderRepository {
 
         val completion = ExecutorCompletionService<Unit>(backupServerPool)
         val futures = lookupTasks.map { task -> completion.submit(Callable { task() }) }
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(25)
         var completedTasks = 0
         for (ignored in lookupTasks.indices) {
             val remaining = deadline - System.nanoTime()
@@ -3284,12 +3745,12 @@ object MultiProviderRepository {
 
     private fun matchesProviderTitle(targetTitle: String, candidate: ArabseedItem): Boolean {
         if (targetTitle.isBlank()) return false
-        val candidateTitles = listOfNotNull(
-            candidate.parentSeriesTitle,
-            candidate.title,
-            candidate.arabicTitle,
+        return SeriesCatalogParser.pageBelongsToSeries(
+            targetTitles = listOf(targetTitle),
+            targetPageUrls = emptyList(),
+            candidateTitles = listOfNotNull(candidate.parentSeriesTitle, candidate.title, candidate.arabicTitle),
+            candidatePageUrls = listOf(candidate.pageUrl),
         )
-        return candidateTitles.any { cand -> titlesStrictlyMatch(targetTitle, cand) }
     }
 
     /** تحقق مما إذا كانت الصفحة هي الصفحة الرئيسية أو صفحة تصنيفات بدلاً من صفحة المادة المطلوبة */
@@ -3342,9 +3803,14 @@ object MultiProviderRepository {
         val finalPath = finalUri?.path.orEmpty().trim('/')
         if (!hasQuery && (finalPath.isEmpty() || finalPath == "home" || finalPath == "main")) return true
 
-        val text = doc.body()?.text().orEmpty()
+        fun normalizeEmptyMarker(value: String): String =
+            SeriesCatalogParser.normalizeArabicSearchQuery(value).replace('ة', 'ه')
+        val text = normalizeEmptyMarker(doc.body().text())
         val emptyMarkers = listOf(
             "لم يتم العثور على أي نتائج",
+            "لم يتم العثور على أي نتيجة",
+            "لا توجد نتائج مطابقة للبحث",
+            "لا توجد فيديوهات مطابقة للبحث",
             "لا توجد نتائج",
             "لم نجد أي نتائج",
             "0 نتائج",
@@ -3352,10 +3818,13 @@ object MultiProviderRepository {
             "no results found",
             "not found any",
             "عذرا لا توجد نتائج",
+            "عذراً لا توجد نتائج",
+            "عذراً، لا توجد فيديوهات مطابقة",
             "عذراً، لم يتم العثور",
             "لا يوجد نتائج للبحث",
             "لا توجد اي نتائج تطابق",
-        )
+            "البحث المباشر غير متاح",
+        ).map(::normalizeEmptyMarker)
         return emptyMarkers.any { text.contains(it, ignoreCase = true) }
     }
 
@@ -3674,9 +4143,11 @@ object MultiProviderRepository {
      * only briefly because many providers issue expiring stream URLs.
      */
     fun isVerifiedPlayableStream(streamUrl: String, referer: String): Boolean {
-        val parsed = streamUrl.toHttpUrlOrNull() ?: return false
-        if (parsed.scheme !in setOf("http", "https") || isAdServerUrl(streamUrl)) return false
-        val cacheKey = "$streamUrl\n$referer"
+        val safeStreamUrl = SeriesCatalogParser.asciiSafeUrl(streamUrl)
+        val parsed = safeStreamUrl.toHttpUrlOrNull() ?: return false
+        if (parsed.scheme !in setOf("http", "https") || isAdServerUrl(safeStreamUrl)) return false
+        val safeReferer = SeriesCatalogParser.asciiSafeHeaderValue(referer)
+        val cacheKey = "$safeStreamUrl\n$safeReferer"
         val now = System.currentTimeMillis()
         streamProbeCache[cacheKey]?.let { cached ->
             if (now - cached.checkedAt < STREAM_PROBE_TTL_MS) return cached.playable
@@ -3688,7 +4159,7 @@ object MultiProviderRepository {
             .header("User-Agent", UA)
             .header("Accept", "video/*,application/vnd.apple.mpegurl,application/x-mpegURL,*/*;q=0.8")
             .header("Range", "bytes=0-2047")
-            .apply { if (referer.isNotBlank()) header("Referer", referer) }
+            .apply { if (safeReferer.isNotBlank()) header("Referer", safeReferer) }
             .build()
         val playable = try {
             probeHttp.newCall(request).execute().use { response ->
@@ -3763,9 +4234,11 @@ object MultiProviderRepository {
      * 404/5xx, parked, homepage, or CPA trap page before falling back to WebView playback.
      */
     fun isEmbedUrlAlive(embedUrl: String, referer: String): Boolean {
-        val parsed = embedUrl.toHttpUrlOrNull() ?: return false
-        if (parsed.scheme !in setOf("http", "https") || !isServerCandidateUrl(embedUrl)) return false
-        val cacheKey = "$embedUrl\n$referer"
+        val safeEmbedUrl = SeriesCatalogParser.asciiSafeUrl(embedUrl)
+        val parsed = safeEmbedUrl.toHttpUrlOrNull() ?: return false
+        if (parsed.scheme !in setOf("http", "https") || !isServerCandidateUrl(safeEmbedUrl)) return false
+        val safeReferer = SeriesCatalogParser.asciiSafeHeaderValue(referer)
+        val cacheKey = "$safeEmbedUrl\n$safeReferer"
         val now = System.currentTimeMillis()
         embedAliveCache[cacheKey]?.let { cached ->
             if (now - cached.checkedAt < STREAM_PROBE_TTL_MS) return cached.playable
@@ -3776,7 +4249,7 @@ object MultiProviderRepository {
             .get()
             .header("User-Agent", UA)
             .header("Accept", "text/html,application/xhtml+xml,video/*,*/*;q=0.8")
-            .apply { if (referer.isNotBlank()) header("Referer", referer) }
+            .apply { if (safeReferer.isNotBlank()) header("Referer", safeReferer) }
             .build()
 
         val alive = try {
@@ -3820,8 +4293,12 @@ object MultiProviderRepository {
         val code = embedUrl.substringBefore('?').trimEnd('/').substringAfterLast('/')
         if (origin.isBlank() || code.isBlank() || code.length < 4) return null
         return runCatching {
+            val safeReferer = SeriesCatalogParser.asciiSafeHeaderValue(embedUrl)
             val req = Request.Builder().url("$origin/api/videos/$code")
-                .header("User-Agent", UA).header("Referer", embedUrl).header("Accept", "application/json").build()
+                .header("User-Agent", UA)
+                .apply { if (safeReferer.isNotBlank()) header("Referer", safeReferer) }
+                .header("Accept", "application/json")
+                .build()
             val apiJson = probeHttp.newCall(req).execute().use { it.body?.string().orEmpty() }
             if (apiJson.isBlank()) return@runCatching null
             val playback = JSONObject(apiJson).optJSONObject("playback") ?: return@runCatching null
@@ -3936,6 +4413,14 @@ object MultiProviderRepository {
             decodeByseStream(finalEmbedUrl)?.let { return hit(it) }
         }
 
+        // MegaMax Inertia mirror wrapper (files/mirror/video -> stmruby / vidmoly / uqload)
+        if (html.contains("files\\/mirror\\/video") || html.contains("files/mirror/video")) {
+            val mirrors = unpackMegaMaxMirrors(finalEmbedUrl, referer)
+            for ((_, mirrorUrl) in mirrors) {
+                resolveEmbedToStreamWithMeta(mirrorUrl, finalEmbedUrl, depth + 1)?.let { return it }
+            }
+        }
+
         // MyCima-MY ArtPlayer (shahid4u.bid data-watch)
         Regex("""videoUrl\s*=\s*["']([^"']+\.(?:mp4|m3u8)[^"']*)["']""", RegexOption.IGNORE_CASE)
             .find(searchScope)?.groupValues?.get(1)?.let(::normalizeStreamCandidate)?.let { return hit(it) }
@@ -3974,8 +4459,12 @@ object MultiProviderRepository {
                 val baseHost = pageOrigin(finalEmbedUrl).ifBlank { pageOrigin(targetUrl) }
                 if (baseHost.isNotBlank()) {
                     try {
-                        val passReq = Request.Builder().url("$baseHost$passPath")
-                            .header("User-Agent", UA).header("Referer", finalEmbedUrl).build()
+                        val safePassUrl = SeriesCatalogParser.asciiSafeUrl("$baseHost$passPath")
+                        val safeReferer = SeriesCatalogParser.asciiSafeHeaderValue(finalEmbedUrl)
+                        val passReq = Request.Builder().url(safePassUrl)
+                            .header("User-Agent", UA)
+                            .apply { if (safeReferer.isNotBlank()) header("Referer", safeReferer) }
+                            .build()
                         val passResult = probeHttp.newCall(passReq).execute().use { it.body?.string() ?: "" }
                         if (passResult.trim().startsWith("http")) {
                             val nowMs = System.currentTimeMillis()
@@ -4025,9 +4514,12 @@ object MultiProviderRepository {
             if (fileCode.isNotBlank()) {
                 try {
                     val body = """{"filecode":"$fileCode","device":"android"}"""
+                    val safeReferer = SeriesCatalogParser.asciiSafeHeaderValue(finalEmbedUrl)
                     val req = Request.Builder().url("https://vidara.to/api/stream")
                         .post(body.toRequestBody("application/json".toMediaType()))
-                        .header("User-Agent", UA).header("Referer", finalEmbedUrl).build()
+                        .header("User-Agent", UA)
+                        .apply { if (safeReferer.isNotBlank()) header("Referer", safeReferer) }
+                        .build()
                     probeHttp.newCall(req).execute().use { r ->
                         Regex(""""streaming_url"\s*:\s*"([^"]+)"""").find(r.body?.string() ?: "")
                             ?.groupValues?.get(1)?.replace("\\/", "/")?.takeIf { it.startsWith("http") }
@@ -4129,6 +4621,8 @@ object MultiProviderRepository {
 
             val rawEpisodes = mutableListOf<Triple<String, String, Int?>>()
             val pageSeasonNumber = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                val targetIdentityTitles = listOfNotNull(item.parentSeriesTitle, item.title, item.arabicTitle)
+                val targetIdentityUrls = listOfNotNull(item.parentSeriesPageUrl, item.pageUrl)
             val requestedSeasonPageNumber = seasonNumbersOnly?.singleOrNull()
                 ?.takeIf { pageSeasonNumber == it }
             fun collectEpisodes(d: org.jsoup.nodes.Document): List<Triple<String, String, Int?>> {
@@ -4154,12 +4648,21 @@ object MultiProviderRepository {
                                     val unwrapped = SeriesCatalogParser.unwrapRedirectUrl(candidate)
                                     resolveProviderContentPageUrl(unwrapped, item.pageUrl)
                                 }.orEmpty()
-                            val txt = el.text().trim().ifBlank { el.attr("title").trim() }
+                            val txt = SeriesCatalogParser.episodeLinkText(el)
+                            if (SeriesCatalogParser.hasConflictingSeasonNumbers(txt, href)) continue
                             val episodeNumber = SeriesCatalogParser.episodeNumber(
                                 title = txt,
                                 url = href,
                                 allowNumericTitle = SeriesCatalogParser.isEpisodeListElement(el),
                             )
+                            if (episodeNumber != null && !SeriesCatalogParser.episodeBelongsToSeries(
+                                    targetTitles = targetIdentityTitles,
+                                    targetPageUrls = targetIdentityUrls,
+                                    episodeTitle = txt,
+                                    episodeUrl = href,
+                                    allowEpisodeListContext = SeriesCatalogParser.isEpisodeListElement(el),
+                                )
+                            ) continue
                             val linkSeason = SeriesCatalogParser.seasonNumber(txt, href)
                                 ?: SeriesCatalogParser.seasonNumberFromElement(el, txt, href)
                             if (seasonNumbersOnly != null && linkSeason != null &&
@@ -4204,8 +4707,16 @@ object MultiProviderRepository {
                         pageHtml.takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
                     },
                     parseEpisodes = ::collectEpisodes,
-                    maxPages = if (forceRefresh) 30 else 15,
-                    timeoutSeconds = if (forceRefresh) 16 else 9,
+                    maxPages = when {
+                        seasonNumbersOnly != null -> 1
+                        forceRefresh -> 20
+                        else -> 6
+                    },
+                    timeoutSeconds = when {
+                        seasonNumbersOnly != null -> 4
+                        forceRefresh -> 10
+                        else -> 6
+                    },
                 )
                 for (ep in paginated) {
                     val existingIndex = rawEpisodes.indexOfFirst {
@@ -4227,29 +4738,11 @@ object MultiProviderRepository {
             if ((rawEpisodes.size <= 4 || isEpisodePage) &&
                 !(seasonNumbersOnly != null && SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) != null)
             ) {
-                val parentSelectors = listOf(
-                    "a[href*='/series/']", "a[href*='/season/']", "a[href*='الموسم']",
-                    ".br-breadcrumb a", ".sh-single-breadcrumb a", ".myseed-single-breadcrumbs a",
-                    ".SeriesTitle a", ".series-title a",
-                    ".breadcrumb a", "ol.breadcrumb a", ".entry-breadcrumb a", "nav a"
+                val selectorParents = SeriesCatalogParser.linkedSeriesParentPages(
+                    document = doc,
+                    currentPageUrl = item.pageUrl,
+                    isAllowedContentUrl = { href -> isProviderContentUrl(href, item.pageUrl) },
                 )
-                val selectorParents = parentSelectors.flatMap { selector ->
-                    doc.select(selector).mapNotNull { el ->
-                        val href = el.attr("abs:href").ifBlank { el.attr("href") }
-                        val txt = el.text().trim()
-                        val validCategory = !href.contains("/category/", ignoreCase = true) ||
-                            SeriesCatalogParser.isSpecificSeriesArchiveUrl(href)
-                        val validTag = !href.contains("/tag/", ignoreCase = true) &&
-                            (!href.contains("tag.php", ignoreCase = true) || txt.contains("حلقات"))
-                        val valid = href.startsWith("http") && href != item.pageUrl
-                            && validCategory
-                            && validTag
-                            && !txt.contains("الرئيسية") && !txt.contains("home", ignoreCase = true)
-                            && !SeriesCatalogParser.isEpisode(txt, href)
-                            && !SeriesCatalogParser.isInsideUnrelatedContentContainer(el)
-                        if (valid) href to txt else null
-                    }
-                }
                 val archiveParents = SeriesCatalogParser.findSeriesEpisodeArchiveUrls(doc, item.pageUrl)
                 val parents = (archiveParents + selectorParents)
                     .distinctBy { SeriesCatalogParser.normalizedUrl(it.first) }
@@ -4277,7 +4770,7 @@ object MultiProviderRepository {
                     })
                 }
                 val parentResults = mutableListOf<Triple<String, String, org.jsoup.nodes.Document>>()
-                val parentDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+                val parentDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6)
                 repeat(parentFutures.size) {
                     val remaining = parentDeadline - System.nanoTime()
                     if (remaining <= 0L) return@repeat
@@ -4299,6 +4792,13 @@ object MultiProviderRepository {
                     }.thenByDescending { collectEpisodes(it.third).size },
                 )
                 for ((parentHref, parentTitle, parentDoc) in orderedParents) {
+                    if (!SeriesCatalogParser.pageBelongsToSeries(
+                            targetTitles = listOfNotNull(item.parentSeriesTitle, item.title, item.arabicTitle),
+                            targetPageUrls = listOfNotNull(item.parentSeriesPageUrl, item.pageUrl),
+                            candidateTitles = listOf(parentTitle),
+                            candidatePageUrls = listOf(parentHref),
+                        )
+                    ) continue
                     var parentEps = collectEpisodes(parentDoc)
                     val parentContainsCurrentEpisode = parentEps.any {
                         SeriesCatalogParser.normalizedUrl(it.second) == currentPage
@@ -4320,8 +4820,8 @@ object MultiProviderRepository {
                                 pHtml.takeIf(String::isNotBlank)?.let { Jsoup.parse(it, pageUrl) }
                             },
                             parseEpisodes = ::collectEpisodes,
-                            maxPages = if (forceRefresh) 24 else 12,
-                            timeoutSeconds = if (forceRefresh) 12 else 8,
+                            maxPages = if (forceRefresh) 16 else 6,
+                            timeoutSeconds = if (forceRefresh) 10 else 6,
                         )
                         if (paginated.size > parentEps.size) {
                             parentEps = paginated
@@ -4363,19 +4863,29 @@ object MultiProviderRepository {
             val seasonPageUrlByNumber = seasonPages.groupBy { it.first }
                 .mapValues { (_, rows) -> rows.first().second }
             val visibleEpisodeNumbers = rawEpisodes.mapNotNull { (title, href, seasonNumber) ->
-                val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: return@mapNotNull null
+                val episodeNumber = SeriesCatalogParser.episodeNumber(
+                    title,
+                    href,
+                    allowNumericTitle = seasonNumber != null,
+                ) ?: return@mapNotNull null
                 val resolvedSeason = SeriesCatalogParser.seasonNumber(title, href)
                     ?: seasonNumber ?: return@mapNotNull null
                 resolvedSeason to episodeNumber
             }.groupBy({ it.first }, { it.second })
             val seasonPagesToFetch = seasonPages
                 .filter { (number, _) ->
-                    (seasonNumbersOnly == null || number in seasonNumbersOnly) &&
+                    number != requestedSeasonPageNumber &&
+                        (seasonNumbersOnly == null || number in seasonNumbersOnly) &&
                         (forceRefresh || SeriesCatalogParser.needsEpisodeSequenceRepair(
                             visibleEpisodeNumbers[number].orEmpty(),
                         ))
                 }
-                .take(50)
+                .take(
+                    when {
+                        seasonNumbersOnly != null -> 1
+                        else -> 50
+                    },
+                )
             val seasonPageCompletion = ExecutorCompletionService<Pair<Int, List<Triple<String, String, Int?>>>>(seasonPagePool)
             val seasonPageFutures = seasonPagesToFetch.map { (seasonNumber, seasonUrl) ->
                 seasonPageCompletion.submit(Callable {
@@ -4397,19 +4907,28 @@ object MultiProviderRepository {
                                 Triple(title, href, number ?: seasonNumber)
                             }
                         },
-                        maxPages = if (forceRefresh) 24 else 12,
-                        timeoutSeconds = if (forceRefresh) 14 else 9,
+                        maxPages = when {
+                            seasonNumbersOnly != null -> 1
+                            forceRefresh -> 12
+                            else -> 4
+                        },
+                        timeoutSeconds = when {
+                            seasonNumbersOnly != null -> 4
+                            forceRefresh -> 10
+                            else -> 6
+                        },
                     )
                     seasonNumber to paginated
                 })
             }
             // A series page is on the first paint path, so keep short series fast while
-            // giving 12+ season shows enough budget to collect all seasons cleanly.
+            // giving 12+ season shows enough headroom without blocking the user screen.
             val seasonPageWaitSeconds = when {
-                seasonPagesToFetch.size >= 12 -> 16L
-                seasonPagesToFetch.size >= 4 -> 12L
-                seasonNumbersOnly != null -> 10L
-                else -> 9L
+                seasonNumbersOnly != null -> 4L
+                forceRefresh && seasonPagesToFetch.size >= 12 -> 12L
+                seasonPagesToFetch.size >= 12 -> 8L
+                seasonPagesToFetch.size >= 4 -> 7L
+                else -> 5L
             }
             val seasonPageDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seasonPageWaitSeconds)
             val seasonPageAssignments = mutableSetOf<String>()
@@ -4427,7 +4946,11 @@ object MultiProviderRepository {
                 val result = runCatching { finished.get() }.getOrNull() ?: continue
                 val (linkedSeasonNumber, linkedEpisodes) = result
                 for ((title, href, parsedSeason) in linkedEpisodes) {
-                    val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: continue
+                    val episodeNumber = SeriesCatalogParser.episodeNumber(
+                        title,
+                        href,
+                        allowNumericTitle = parsedSeason != null,
+                    ) ?: continue
                     val urlKey = SeriesCatalogParser.normalizedUrl(href)
                     val explicitSeason = SeriesCatalogParser.seasonNumber(title, href) ?: parsedSeason
                     if (explicitSeason != null && explicitSeason != linkedSeasonNumber) continue
@@ -4451,7 +4974,11 @@ object MultiProviderRepository {
                     SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
                 } else null
             val parsedEpisodes = rawEpisodes.mapNotNull { (title, href, domSeasonNumber) ->
-                val episodeNumber = SeriesCatalogParser.episodeNumber(title, href) ?: return@mapNotNull null
+                val episodeNumber = SeriesCatalogParser.episodeNumber(
+                    title,
+                    href,
+                    allowNumericTitle = domSeasonNumber != null,
+                ) ?: return@mapNotNull null
                 val seasonNumber = domSeasonNumber
                     ?: SeriesCatalogParser.seasonNumber(title, href)
                 Triple(seasonNumber, episodeNumber, href)
@@ -4463,14 +4990,13 @@ object MultiProviderRepository {
                 requestedSeasonPageNumber != null -> requestedSeasonPageNumber
                 seasonNumbersOnly != null -> null
                 expectedSeasonNumber != null -> expectedSeasonNumber
-                !isEpisodePage && seasonPages.isEmpty() -> 1
                 else -> null
             }
             val numberedEpisodes = parsedEpisodes.mapNotNull { (seasonNumber, episodeNumber, href) ->
                 (seasonNumber ?: inferredSeasonNumber)?.takeIf { resolvedSeason ->
                     (seasonNumbersOnly == null || resolvedSeason in seasonNumbersOnly) &&
                         (seasonPages.isEmpty() || resolvedSeason in seasonPageUrlByNumber ||
-                            pageSeasonNumber == resolvedSeason)
+                            pageSeasonNumber == resolvedSeason || seasonNumber != null)
                 }?.let { Triple(it, episodeNumber, href) }
             }
             val finalEpisodeLimits = rawEpisodes.mapNotNull { (title, href, domSeason) ->
@@ -4506,21 +5032,20 @@ object MultiProviderRepository {
                     seasonNumber,
                     SeriesCatalogParser.seasonTitle(seasonNumber),
                     episodes,
-                    seasonPageUrlByNumber[seasonNumber].orEmpty(),
+                    seasonPageUrlByNumber[seasonNumber].orEmpty().ifBlank {
+                        item.pageUrl.takeIf { pageSeasonNumber == seasonNumber }.orEmpty()
+                    },
                 )
             }
-            val baseSeasonsWithLinks = (seasons + seasonPages.mapNotNull { (number, url) ->
-                if (seasons.any { it.number == number }) null
-                else ArabseedSeason(number, SeriesCatalogParser.seasonTitle(number), emptyList(), url)
-            }).map { season ->
+            val baseSeasonsWithLinks = seasons.map { season ->
                 if (season.pageUrl.isNotBlank()) season
                 else season.copy(pageUrl = seasonPageUrlByNumber[season.number].orEmpty())
             }
 
             val seasonsWithLinks = if ((baseSeasonsWithLinks.isEmpty() || baseSeasonsWithLinks.all { it.episodes.isEmpty() }) && isEpisodePage) {
-                val epNum = SeriesCatalogParser.episodeNumber(item.title, item.pageUrl) ?: 1
-                val sNum = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl) ?: 1
-                listOf(
+                val epNum = SeriesCatalogParser.episodeNumber(item.title, item.pageUrl)
+                val sNum = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                if (epNum != null && sNum != null) listOf(
                     ArabseedSeason(
                         number = sNum,
                         title = SeriesCatalogParser.seasonTitle(sNum),
@@ -4535,7 +5060,7 @@ object MultiProviderRepository {
                         ),
                         pageUrl = item.pageUrl,
                     )
-                )
+                ) else baseSeasonsWithLinks
             } else baseSeasonsWithLinks
 
             val relatedParts = linkedMapOf<String, ArabseedItem>()
@@ -4596,7 +5121,7 @@ object MultiProviderRepository {
             if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
                 seasonCache[item.pageUrl] = bundle
                 seasonCacheAt[item.pageUrl] = System.currentTimeMillis()
-                CatalogDiskCache.saveSeasonBundle("providers:seasons:v30:" + item.pageUrl, bundle)
+                CatalogDiskCache.saveSeasonBundle("providers:seasons:v37:" + item.pageUrl, bundle)
             }
             bundle
         } catch (_: Exception) {
@@ -4620,7 +5145,7 @@ object MultiProviderRepository {
         val seasonUri = runCatching { java.net.URI(seasonUrl.trim()) }.getOrNull()
             ?: return ArabseedSeasonBundle(emptyList()) to null
         val provider = getProviderForUrl(seasonUrl) ?: return ArabseedSeasonBundle(emptyList()) to null
-        if (seasonNumber <= 0 || seasonUri.scheme !in setOf("http", "https") || seasonUri.host.isNullOrBlank()) {
+        if (seasonNumber !in 1..60 || seasonUri.scheme !in setOf("http", "https") || seasonUri.host.isNullOrBlank()) {
             return ArabseedSeasonBundle(emptyList()) to null
         }
 
@@ -4630,8 +5155,12 @@ object MultiProviderRepository {
         var pageUrl = cursorUrl.trim().ifBlank { seasonUrl.trim() }
         var pagesFetched = 0
         var nextPageUrl: String? = null
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(18)
 
-        while (pagesFetched < pageLimit.coerceIn(1, 8) && addedByUrl.size < episodeLimit.coerceIn(1, 120)) {
+        while (pagesFetched < pageLimit.coerceIn(1, 8) &&
+            addedByUrl.size < episodeLimit.coerceIn(1, 120) &&
+            System.nanoTime() < deadline
+        ) {
             val normalizedPage = SeriesCatalogParser.normalizedUrl(pageUrl)
             if (!visitedPages.add(normalizedPage)) break
             val uri = runCatching { java.net.URI(pageUrl) }.getOrNull() ?: break
@@ -4699,9 +5228,9 @@ object MultiProviderRepository {
         primaryBundle: ArabseedSeasonBundle,
         forceRefresh: Boolean = false,
     ): ArabseedSeasonBundle {
-        val cacheKey = "combined:seasons:v30:${item.pageUrl}"
+        val cacheKey = "combined:seasons:v41:${item.pageUrl}"
         if (!forceRefresh) loadCachedMergedSeasonBundle(item.pageUrl)?.let { cached ->
-            if (!needsSeasonEnrichment(item, cached) &&
+            if (isProviderSeasonSweepComplete(item.pageUrl) && !needsSeasonEnrichment(item, cached) &&
                 (primaryBundle.seasons.isEmpty() ||
                     cached.seasons.sumOf { it.episodes.size } >= primaryBundle.seasons.sumOf { it.episodes.size })
             ) {
@@ -4715,84 +5244,132 @@ object MultiProviderRepository {
         val titleKey = seriesIdentityKey(title)
         if (titleKey.length < 3 || !item.pageUrl.startsWith("http", ignoreCase = true)) return primaryBundle
 
-        // Persist the selected source's result before searching every mirror.
-        // The detail screen can render these seasons immediately while the
-        // slower cross-provider repair continues in the background.
+        // Keep intermediate data on disk for recovery, but gate cache reads on
+        // the all-provider sweep marker before exposing a season list.
         if (primaryBundle.seasons.isNotEmpty() || primaryBundle.relatedParts.isNotEmpty()) {
             CatalogDiskCache.saveSeasonBundle(cacheKey, primaryBundle)
         }
 
         // Build robust multi-query variants across Arabic & Latin parts, stripping colons,
         // subtitles, and trailing season numbers so sites with strict search return results.
-        val colonPrefix = title.substringBefore(':').trim()
-        val dashPrefix = title.substringBefore('-').trim()
         val arTitle = item.arabicTitle.takeIf { it.isNotBlank() && it != title }
         val candidateSearchQueries = buildSeriesSearchQueries(
             cleanTitle = title,
             rawTitle = item.parentSeriesTitle?.takeIf(String::isNotBlank) ?: item.title,
             arabicTitle = arTitle.orEmpty(),
-        ).take(4)
+        ).take(2)
 
         val targetIdentityKeys = buildList {
             add(titleKey)
-            if (!item.parentSeriesTitle.isNullOrBlank()) add(seriesIdentityKey(item.parentSeriesTitle!!))
+            item.parentSeriesTitle?.takeIf(String::isNotBlank)?.let { add(seriesIdentityKey(it)) }
             if (arTitle != null) add(seriesIdentityKey(arTitle))
-            if (colonPrefix.length >= 3 && colonPrefix.length >= (titleKey.length * 0.8).toInt()) add(seriesIdentityKey(colonPrefix))
-            if (dashPrefix.length >= 3 && dashPrefix.length >= (titleKey.length * 0.8).toInt()) add(seriesIdentityKey(dashPrefix))
         }.filter { it.length >= 3 }.distinct()
+        val primarySeasonNumbers = primaryBundle.seasons.map { it.number }.filter { it > 0 }.distinct()
+        val cameFromEpisodePage = SeriesCatalogParser.isEpisode(item.title, item.pageUrl)
+        val parentSeasonNumber = if (cameFromEpisodePage) null else {
+            SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+        }
 
         val directDiscoveredEpisodes = java.util.concurrent.ConcurrentLinkedQueue<ArabseedEpisode>()
         val year = releaseYear(item)
         val originalProviderId = getProviderForUrl(item.pageUrl)?.id
-        val allEnabledProviders = PROVIDERS.filter { it.enabled && it.id != originalProviderId }
-        val primaryProviders = allEnabledProviders.filter { it.isPrimary }
-        val backupProviders = allEnabledProviders.filter { !it.isPrimary }
+        val allEnabledProviders = seasonEnrichmentProviders(excludeProviderId = originalProviderId)
+        val expectedProviderIds = PROVIDERS.filter { it.enabled }.map { it.id }.distinct().sorted()
+        val completedSearchProviderIds = ConcurrentHashMap.newKeySet<String>()
+        val incompleteSearchProviderIds = ConcurrentHashMap.newKeySet<String>()
+        originalProviderId?.takeIf { it in expectedProviderIds }?.let(completedSearchProviderIds::add)
 
         fun makeSearchTask(provider: ProviderConfig): () -> List<ArabseedItem> = {
+            var providerRouteResponded = false
             try {
                 var providerCandidates = emptyList<ArabseedItem>()
                 for (query in candidateSearchQueries) {
                     val encoded = java.net.URLEncoder.encode(query, "UTF-8")
-                    val results = fetchProviderListing(
-                        provider,
-                        provider.searchPath.replace("{q}", encoded),
-                        ArabseedType.SERIES,
-                    )
-                    val seriesPages = mutableListOf<ArabseedItem>()
-                    for (candidate in results) {
-                        val titleMatch = targetIdentityKeys.any { key -> matchesSeriesTitle(key, candidate) }
-                        if (!titleMatch) continue
-                        val isEp = SeriesCatalogParser.isEpisode(candidate.title, candidate.pageUrl)
-                        if (isEp) {
-                            val strictlyMatches = titlesStrictlyMatch(item.title, candidate.title) ||
-                                (!item.parentSeriesTitle.isNullOrBlank() && titlesStrictlyMatch(item.parentSeriesTitle!!, candidate.title))
-                            if (!strictlyMatches) continue
-                            val epNum = SeriesCatalogParser.episodeNumber(candidate.title, candidate.pageUrl)
-                            if (epNum != null && epNum > 0) {
-                                val sNum = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl)
-                                    ?: SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
-                                    ?: 1
-                                directDiscoveredEpisodes.add(
-                                    ArabseedEpisode(
-                                        number = epNum,
-                                        title = "الحلقة $epNum",
-                                        pageUrl = candidate.pageUrl,
-                                        seasonNumber = sNum,
-                                        providerName = provider.name,
-                                    )
+                    val searchPath = provider.searchPath.replace("{q}", encoded)
+
+                    fun collectMatches(rows: List<ArabseedItem>): List<ArabseedItem> {
+                        val seriesPages = mutableListOf<ArabseedItem>()
+                        for (candidate in rows) {
+                            val titleMatch = targetIdentityKeys.any { key -> matchesSeriesTitle(key, candidate) }
+                            if (!titleMatch) continue
+                            val isEp = SeriesCatalogParser.isEpisode(candidate.title, candidate.pageUrl)
+                            if (isEp) {
+                                val candidateTitles = listOfNotNull(
+                                    candidate.parentSeriesTitle,
+                                    candidate.title,
+                                    candidate.arabicTitle,
                                 )
-                            }
-                        } else {
-                            val candidateYear = releaseYear(candidate)
-                            val isSeasonPage = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl) != null
-                            val compatibleYear = year.isBlank() || year == candidateYear ||
-                                (candidateYear.isBlank() && isSeasonPage)
-                            if (candidate.type == ArabseedType.SERIES && compatibleYear) {
-                                seriesPages.add(candidate)
+                                if (!SeriesCatalogParser.pageBelongsToSeries(
+                                        targetTitles = targetIdentityKeys,
+                                        targetPageUrls = listOf(item.pageUrl),
+                                        candidateTitles = candidateTitles,
+                                        candidatePageUrls = listOf(candidate.pageUrl),
+                                    )
+                                ) continue
+                                val epNum = SeriesCatalogParser.episodeNumber(candidate.title, candidate.pageUrl)
+                                if (epNum != null && epNum > 0) {
+                                    val sNum = SeriesCatalogParser.directEpisodeSeasonNumber(
+                                        title = candidate.title,
+                                        url = candidate.pageUrl,
+                                        parentSeasonNumber = parentSeasonNumber,
+                                    ) ?: continue
+                                    directDiscoveredEpisodes.add(
+                                        ArabseedEpisode(
+                                            number = epNum,
+                                            title = "الحلقة $epNum",
+                                            pageUrl = candidate.pageUrl,
+                                            seasonNumber = sNum,
+                                            providerName = provider.name,
+                                        )
+                                    )
+                                }
+                            } else {
+                                val candidateYear = releaseYear(candidate)
+                                val isSeasonPage = SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl) != null
+                                val compatibleYear = year.isBlank() || year == candidateYear ||
+                                    (candidateYear.isBlank() && isSeasonPage)
+                                if (candidate.type == ArabseedType.SERIES && compatibleYear) {
+                                    seriesPages.add(candidate)
+                                }
                             }
                         }
+                        return seriesPages
                     }
+
+                    val results = fetchProviderListing(
+                        provider = provider,
+                        path = searchPath,
+                        type = ArabseedType.SERIES,
+                        timeoutSeconds = 8,
+                        onRouteComplete = { reachable ->
+                            if (reachable) providerRouteResponded = true
+                        },
+                    )
+                    var seriesPages = collectMatches(results)
                     val foundDirect = directDiscoveredEpisodes.any { it.providerName == provider.name }
+                    if (foundDirect) {
+                        // Anime and long series often appear as episode cards in search,
+                        // with older episodes on later result pages. Scan those pages
+                        // only for providers that already matched this exact series.
+                        val paginated = fetchProviderListing(
+                            provider = provider,
+                            path = searchPath,
+                            type = ArabseedType.SERIES,
+                            maxPages = 20,
+                            timeoutSeconds = 8,
+                            onRouteComplete = { reachable ->
+                                if (reachable) providerRouteResponded = true
+                            },
+                            onPaginationComplete = { complete ->
+                                if (!complete) incompleteSearchProviderIds.add(provider.id)
+                            },
+                        )
+                        if (paginated.size > results.size) {
+                            seriesPages = (seriesPages + collectMatches(paginated))
+                                .distinctBy { SeriesCatalogParser.normalizedUrl(it.pageUrl) }
+                        }
+                    }
                     if (seriesPages.isNotEmpty() || foundDirect) {
                         android.util.Log.i(
                             TAG,
@@ -4802,8 +5379,10 @@ object MultiProviderRepository {
                         break
                     }
                 }
+                if (!providerRouteResponded) incompleteSearchProviderIds.add(provider.id)
                 providerCandidates
             } catch (error: Exception) {
+                if (!providerRouteResponded) incompleteSearchProviderIds.add(provider.id)
                 android.util.Log.w(
                     TAG,
                     "Season search skipped provider=${provider.id} error=${error.javaClass.simpleName}",
@@ -4812,22 +5391,40 @@ object MultiProviderRepository {
             }
         }
 
-        // Fast Stage 1: Parallel priority search across active primary providers
-        val primaryTasks = primaryProviders.map { makeSearchTask(it) }
-        val primaryDiscovered = collectParallel(primaryTasks, timeoutSeconds = 3)
-
-        // Stage 2: Only fallback to backup providers if primary providers returned zero results
-        val discovered = if (primaryDiscovered.isNotEmpty() || directDiscoveredEpisodes.isNotEmpty()) {
-            primaryDiscovered
-        } else {
-            val backupTasks = backupProviders.map { makeSearchTask(it) }
-            collectParallel(backupTasks, timeoutSeconds = 3)
+        // Search every enabled provider in parallel. A primary hit must not
+        // prevent secondary sources from filling missing seasons or episodes.
+        val providerSearchTasks = allEnabledProviders.map { provider ->
+            {
+                val startedAt = System.nanoTime()
+                try {
+                    val rows = makeSearchTask(provider).invoke()
+                    android.util.Log.i(
+                        TAG,
+                        "Season provider scan id=${provider.id} pages=${rows.size} " +
+                            "episodes=${directDiscoveredEpisodes.count { it.providerName == provider.name }} " +
+                            "elapsedMs=${TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)}",
+                    )
+                    rows
+                } finally {
+                    completedSearchProviderIds.add(provider.id)
+                }
+            }
         }
+        val providerSearchReport = collectParallelReport(
+            providerSearchTasks,
+            timeoutSeconds = 10L,
+            executor = providerPool,
+        )
+        val discovered = providerSearchReport.items
+        android.util.Log.i(
+            TAG,
+            "Season provider search completed=${providerSearchReport.completedTasks}/${providerSearchReport.totalTasks} " +
+                "results=${discovered.size} directEpisodes=${directDiscoveredEpisodes.size}",
+        )
         val primaryUrl = SeriesCatalogParser.normalizedUrl(item.pageUrl)
         val candidates = selectSeriesPages(discovered)
             .filter { SeriesCatalogParser.normalizedUrl(it.pageUrl) != primaryUrl }
             .distinctBy { SeriesCatalogParser.normalizedUrl(it.pageUrl) }
-        val primarySeasonNumbers = primaryBundle.seasons.map { it.number }.filter { it > 0 }.distinct()
         val seasonPagesByNumber = candidates
             .mapNotNull { candidate ->
                 SeriesCatalogParser.seasonNumber(candidate.title, candidate.pageUrl)?.let { it to candidate }
@@ -4837,18 +5434,6 @@ object MultiProviderRepository {
         // episode identity scoped to its season and number.
         val knownSeasonNumbers = primarySeasonNumbers.sorted()
         val seasonsToRepair = knownSeasonNumbers
-        val localSeasonMirrors = primaryBundle.seasons
-            .filter { it.number in seasonsToRepair && it.pageUrl.startsWith("http", ignoreCase = true) }
-            .sortedBy { it.number }
-            .map { season ->
-                item.copy(
-                    id = "${item.id}_season_${season.number}",
-                    pageUrl = season.pageUrl,
-                    parentSeriesTitle = item.parentSeriesTitle ?: item.title,
-                    parentSeriesPageUrl = item.pageUrl,
-                    latestEpisodeLabel = "",
-                ) to setOf(season.number)
-            }
         val seasonPageMirrors = seasonsToRepair.flatMap { seasonNumber ->
             seasonPagesByNumber[seasonNumber].orEmpty()
                 .groupBy { getProviderForUrl(it.pageUrl)?.id ?: it.providerName }
@@ -4864,10 +5449,8 @@ object MultiProviderRepository {
             .mapNotNull { rows -> rows.maxByOrNull(::catalogMetadataScore) }
             .take(PROVIDERS.count { it.enabled })
             .map { it to null }
-        // Prioritize external canonical mirrors first (e.g. Shahid4U.si, WeCima, Esheeq)
-        // before local season-tab fallback links so one provider's extra season tabs never
-        // crowd out complete multi-season mirrors.
-        val mirrorLimit = 8
+        // Give each enabled provider at most one page-parsing slot. A provider
+        // with many season tabs must not consume the slots of the other sources.
         val primaryMirrorHost = runCatching { java.net.URI.create(item.pageUrl).host.orEmpty().lowercase().removePrefix("www.") }.getOrDefault("")
         val externalMirrors = (canonicalMirrors + seasonPageMirrors)
             .distinctBy { SeriesCatalogParser.normalizedUrl(it.first.pageUrl) }
@@ -4882,10 +5465,12 @@ object MultiProviderRepository {
                     catalogMetadataScore(mirror)
                 }
             )
-        val remainingSlots = (mirrorLimit - externalMirrors.size).coerceAtLeast(1)
-        val mirrors = (externalMirrors.take(mirrorLimit) + localSeasonMirrors.take(remainingSlots))
-            .distinctBy { SeriesCatalogParser.normalizedUrl(it.first.pageUrl) }
-            .take(mirrorLimit)
+        val externalMirrorsByProvider = externalMirrors.groupBy { (mirror, _) ->
+            getProviderForUrl(mirror.pageUrl)?.id ?: mirror.providerName
+        }
+        val mirrors = allEnabledProviders.mapNotNull { provider ->
+            externalMirrorsByProvider[provider.id]?.firstOrNull()
+        }.distinctBy { SeriesCatalogParser.normalizedUrl(it.first.pageUrl) }
 
         val discoveredProviders = discovered
             .groupBy { getProviderForUrl(it.pageUrl)?.id ?: it.providerName }
@@ -4898,14 +5483,21 @@ object MultiProviderRepository {
         )
 
         val bundles = mutableListOf(item to primaryBundle)
+        val maxPrimarySeason = primarySeasonNumbers.maxOrNull() ?: 0
         if (directDiscoveredEpisodes.isNotEmpty()) {
-            val directEpisodesList = directDiscoveredEpisodes.toList()
-            val directSeasons = directEpisodesList.groupBy { it.seasonNumber }
+            val directEpisodesList = directDiscoveredEpisodes.toList().filter { episode ->
+                primarySeasonNumbers.isEmpty() ||
+                    episode.seasonNumber in primarySeasonNumbers ||
+                    (maxPrimarySeason > 1 && episode.seasonNumber in 1..maxPrimarySeason) ||
+                    cameFromEpisodePage
+            }
+            val mergedDirectEpisodes = mergeDiscoveredEpisodeMirrors(directEpisodesList)
+            val directSeasons = mergedDirectEpisodes.groupBy { it.seasonNumber }
                 .map { (sNum, eps) ->
                     ArabseedSeason(
                         number = sNum,
                         title = SeriesCatalogParser.seasonTitle(sNum),
-                        episodes = eps.distinctBy { it.number }.sortedBy { it.number },
+                        episodes = eps,
                         pageUrl = "",
                     )
                 }
@@ -4917,9 +5509,8 @@ object MultiProviderRepository {
             bundles += syntheticItem to directBundle
             android.util.Log.i(TAG, "Injected directDiscoveredEpisodes: totalEpisodes=${directEpisodesList.size} seasons=${directSeasons.size}")
         }
-        // Publish the primary source immediately. The UI can show its current
-        // season/episode list while mirror providers continue to repair older
-        // seasons in parallel, even when a secondary site is slow or offline.
+        // Keep the source result in cache while the remaining providers run.
+        // Flutter's cache path stays closed until the terminal sweep marker is saved.
         if (primaryBundle.seasons.isNotEmpty() || primaryBundle.relatedParts.isNotEmpty()) {
             CatalogDiskCache.saveSeasonBundle(cacheKey, primaryBundle)
         }
@@ -4933,6 +5524,10 @@ object MultiProviderRepository {
                 )
             })
         }
+        val mirrorProviderByFuture = futures.zip(mirrors).associate { (future, mirror) ->
+            future to (getProviderForUrl(mirror.first.pageUrl)?.id ?: mirror.first.providerName)
+        }
+        val completedMirrorProviderIds = ConcurrentHashMap.newKeySet<String>()
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
         var unfinished = futures.size
         while (unfinished > 0) {
@@ -4945,17 +5540,28 @@ object MultiProviderRepository {
                 break
             }
             unfinished--
+            mirrorProviderByFuture[finished]?.let(completedMirrorProviderIds::add)
             val completedBundle = runCatching { finished.get() }.getOrNull() ?: continue
             val (sourceItem, sourceBundle) = completedBundle
+            val reconciledBundle = reconcileMirrorSeasonBundle(
+                targetItem = item,
+                primaryBundle = primaryBundle,
+                sourceItem = sourceItem,
+                sourceBundle = sourceBundle,
+            )
             val sourceCounts = sourceBundle.seasons.joinToString(",") {
+                "${it.number}:${it.episodes.size}"
+            }
+            val acceptedCounts = reconciledBundle.seasons.joinToString(",") {
                 "${it.number}:${it.episodes.size}"
             }
             android.util.Log.i(
                 TAG,
                 "Season mirror parsed provider=${getProviderForUrl(sourceItem.pageUrl)?.id ?: "unknown"} " +
-                    "seasonCounts=$sourceCounts relatedParts=${sourceBundle.relatedParts.size}",
+                    "seasonCounts=$sourceCounts acceptedCounts=$acceptedCounts",
             )
-            bundles += completedBundle
+            if (reconciledBundle.seasons.isEmpty()) continue
+            bundles += sourceItem to reconciledBundle
             val existingCached = loadCachedMergedSeasonBundle(item.pageUrl)
             val partialBundles = if (existingCached != null && existingCached.seasons.isNotEmpty()) {
                 bundles + (item.copy(id = "${item.id}_cached_preserved") to existingCached)
@@ -4966,12 +5572,17 @@ object MultiProviderRepository {
             if (partial.seasons.isNotEmpty() || partial.relatedParts.isNotEmpty()) {
                 CatalogDiskCache.saveSeasonBundle(cacheKey, partial)
             }
-            val allSeasonsContiguous = partial.seasons.isNotEmpty() && !needsSeasonEnrichment(item, partial)
-            if (allSeasonsContiguous) {
-                android.util.Log.i(TAG, "Early break in season enrichment: contiguous seasons ready")
-                break
-            }
+            // Continue through every discovered provider, even if the first
+            // mirrors look complete; another provider can carry missing playback URLs.
         }
+        android.util.Log.i(
+            TAG,
+            "Season mirrors finished=${futures.size - unfinished}/${futures.size} " +
+                "acceptedBundles=${bundles.size - 1}",
+        )
+        val pendingMirrorProviderIds = mirrors.map { (mirror, _) ->
+            getProviderForUrl(mirror.pageUrl)?.id ?: mirror.providerName
+        }.distinct().filterNot { it in completedMirrorProviderIds }.sorted()
         futures.filterNot { it.isDone }.forEach { it.cancel(true) }
 
         val existingCached = loadCachedMergedSeasonBundle(item.pageUrl)
@@ -4987,10 +5598,60 @@ object MultiProviderRepository {
         // A sparse newest season is still incomplete: it may simply be the
         // latest season currently airing, but internal gaps must be retried.
         val unresolvedSparseSeason = merged.seasons.any {
-            SeriesCatalogParser.needsEpisodeSequenceRepair(
-                it.episodes.map { episode -> episode.number },
-            )
+            SeriesCatalogParser.needsEpisodeSequenceRepair(it.episodes.map { episode -> episode.number })
         }
+        // An episode detail page provides a hard lower bound for its season. A
+        // provider may return a locally contiguous but stale subset (for example
+        // 1..891 while the selected page is episode 1178), so continuity alone
+        // cannot certify the season as complete.
+        val expectedEpisodeNumber = if (cameFromEpisodePage) {
+            SeriesCatalogParser.episodeNumber(item.title, item.pageUrl)
+        } else null
+        val expectedEpisodeSeasonNumber = expectedEpisodeNumber?.let {
+            SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+                ?: primaryBundle.seasons.singleOrNull { season ->
+                    season.episodes.any { episode ->
+                        SeriesCatalogParser.normalizedUrl(episode.pageUrl) ==
+                            SeriesCatalogParser.normalizedUrl(item.pageUrl)
+                    }
+                }?.number
+                ?: primaryBundle.seasons.singleOrNull()?.number
+        }
+        val emptySeasonGaps = merged.seasons.filter { it.episodes.isEmpty() }.map { "S${it.number}:empty" }
+        val episodeGaps = merged.seasons.flatMap { season ->
+            SeriesCatalogParser.episodeSequenceCoverageGaps(
+                season.episodes.map { it.number },
+                expectedLastEpisode = expectedEpisodeNumber.takeIf {
+                    season.number == expectedEpisodeSeasonNumber
+                },
+            ).map { gap ->
+                "S${season.number}:${gap.first}-${gap.last}"
+            }
+        }
+        val missingExpectedSeasonGap = if (
+            expectedEpisodeNumber != null && expectedEpisodeSeasonNumber != null &&
+            merged.seasons.none { it.number == expectedEpisodeSeasonNumber }
+        ) {
+            listOf("S$expectedEpisodeSeasonNumber:1-$expectedEpisodeNumber")
+        } else {
+            emptyList()
+        }
+        val sortedSeasonNumbers = merged.seasons.map { it.number }.distinct().sorted()
+        val seasonNumberGaps = buildList {
+            sortedSeasonNumbers.firstOrNull()?.takeIf { it > 1 }?.let { first ->
+                add("S1-S${first - 1}")
+            }
+            sortedSeasonNumbers.zipWithNext().forEach { (previous, next) ->
+                if (next - previous > 1) add("S${previous + 1}-S${next - 1}")
+            }
+        }
+        val expectedSeason = SeriesCatalogParser.seasonNumber(item.title, item.pageUrl)
+            ?: SeriesCatalogParser.seasonNumber(item.latestEpisodeLabel, "")
+        val expectedSeasonGap = expectedSeason?.takeIf { it > 0 && it !in sortedSeasonNumbers }
+            ?.let { listOf("S$it") }.orEmpty()
+        val sequenceGaps = (
+            seasonNumberGaps + expectedSeasonGap + emptySeasonGaps + episodeGaps + missingExpectedSeasonGap
+        ).distinct().sorted()
         val episodeCounts = merged.seasons.joinToString(",") { season ->
             "${season.number}:${season.episodes.size}"
         }
@@ -4998,6 +5659,50 @@ object MultiProviderRepository {
             TAG,
             "Season enrichment complete sources=${bundles.size} seasons=${merged.seasons.size} " +
                 "episodeCounts=$episodeCounts unresolvedSparse=$unresolvedSparseSeason",
+        )
+        val checkedProviderIds = completedSearchProviderIds.toList().distinct().sorted()
+        val maxMergedSeason = merged.seasons.maxOfOrNull { it.number } ?: 0
+        val onlyNewestSeasonIsNewlyAiring = merged.seasons.isNotEmpty() && merged.seasons.all { season ->
+            val nums = season.episodes.map { it.number }.distinct().sorted()
+            if (nums.isEmpty() || nums.first() != 1 || SeriesCatalogParser.episodeSequenceGaps(nums).isNotEmpty()) {
+                false
+            } else {
+                nums.size >= 3 || season.number == maxMergedSeason
+            }
+        }
+        val reachableSearchCountOk = incompleteSearchProviderIds.isEmpty() ||
+            (checkedProviderIds.size >= (expectedProviderIds.size - 3).coerceAtLeast(1) && !unresolvedSparseSeason)
+        val enoughMirrorsCompleted = pendingMirrorProviderIds.isEmpty() ||
+            (mirrors.isNotEmpty() && completedMirrorProviderIds.size >= (mirrors.size * 2 / 3).coerceAtLeast(1))
+        val allProviderAttemptsFinished =
+            merged.seasons.isNotEmpty() &&
+                sequenceGaps.isEmpty() &&
+                (
+                    (expectedProviderIds.all { it in checkedProviderIds } &&
+                        providerSearchReport.completedTasks == providerSearchReport.totalTasks &&
+                        pendingMirrorProviderIds.isEmpty() &&
+                        completedMirrorProviderIds.size == mirrors.size) ||
+                    (reachableSearchCountOk && enoughMirrorsCompleted && !unresolvedSparseSeason)
+                ) &&
+                (!unresolvedSparseSeason || onlyNewestSeasonIsNewlyAiring)
+        CatalogDiskCache.saveJson(
+            seasonProviderSweepKey(item.pageUrl),
+            JSONObject()
+                .put("finishedAt", System.currentTimeMillis())
+                .put("complete", allProviderAttemptsFinished)
+                .put("expectedProviderIds", expectedProviderIds.joinToString(","))
+                .put("checkedProviderIds", checkedProviderIds.joinToString(","))
+                .put("pendingMirrorProviderIds", pendingMirrorProviderIds.joinToString(","))
+                .put("incompleteSearchProviderIds", incompleteSearchProviderIds.joinToString(","))
+                .put("episodeGaps", sequenceGaps.joinToString(",")),
+        )
+        android.util.Log.i(
+            TAG,
+            "Season provider sweep complete=$allProviderAttemptsFinished " +
+                "checked=${checkedProviderIds.size}/${expectedProviderIds.size} " +
+                "mirrors=${completedMirrorProviderIds.size}/${mirrors.size} pending=$pendingMirrorProviderIds " +
+                "incompleteSearchPages=$incompleteSearchProviderIds " +
+                "sequenceGaps=$sequenceGaps",
         )
         return merged
     }
@@ -5011,7 +5716,9 @@ object MultiProviderRepository {
         val cached = loadCachedMergedSeasonBundle(item.pageUrl)
         val combinedCurrent = cached?.let { mergeProviderSeasonBundles(listOf(item to it, item to primaryBundle)) }
             ?: primaryBundle
-        if (!forceRefresh && combinedCurrent.seasons.isNotEmpty() && !needsSeasonEnrichment(item, combinedCurrent)) {
+        if (!forceRefresh && isProviderSeasonSweepComplete(item.pageUrl) &&
+            combinedCurrent.seasons.isNotEmpty() && !needsSeasonEnrichment(item, combinedCurrent)
+        ) {
             return combinedCurrent
         }
         val key = SeriesCatalogParser.normalizedUrl(item.pageUrl)
@@ -5040,6 +5747,19 @@ object MultiProviderRepository {
                 ?: primaryBundle
         }
 
+        // Persist the selected source's usable rows before slower mirrors start.
+        // Cold detail screens can render these rows immediately and keep them
+        // available across process restarts while repair continues in the pool.
+        val immediateBundle = cached?.let {
+            mergeProviderSeasonBundles(listOf(item to it, item to primaryBundle))
+        } ?: primaryBundle
+        if (immediateBundle.seasons.isNotEmpty() || immediateBundle.relatedParts.isNotEmpty()) {
+            CatalogDiskCache.saveSeasonBundle(
+                "combined:seasons:v41:${item.pageUrl}",
+                immediateBundle,
+            )
+        }
+
         val key = SeriesCatalogParser.normalizedUrl(item.pageUrl)
         if (key.isNotBlank() && seasonAggregationInFlight.add(key)) {
             seasonAggregationPool.submit {
@@ -5055,9 +5775,7 @@ object MultiProviderRepository {
             }
         }
 
-        val latestCached = loadCachedMergedSeasonBundle(item.pageUrl) ?: cached
-        return latestCached?.let { mergeProviderSeasonBundles(listOf(item to it, item to primaryBundle)) }
-            ?: primaryBundle
+        return immediateBundle
     }
 
     /**
@@ -5109,7 +5827,7 @@ object MultiProviderRepository {
 
     fun cacheCompletePrimarySeasonBundle(item: ArabseedItem, bundle: ArabseedSeasonBundle): ArabseedSeasonBundle {
         if (bundle.seasons.isNotEmpty() || bundle.relatedParts.isNotEmpty()) {
-            CatalogDiskCache.saveSeasonBundle("combined:seasons:v30:${item.pageUrl}", bundle)
+            CatalogDiskCache.saveSeasonBundle("combined:seasons:v41:${item.pageUrl}", bundle)
             recordSeasonEnrichmentAttempt(item, bundle)
         }
         return bundle
@@ -5119,6 +5837,11 @@ object MultiProviderRepository {
         if (item.type != ArabseedType.SERIES) return false
         val normalizedPage = SeriesCatalogParser.normalizedUrl(item.pageUrl)
         if (normalizedPage in seasonAggregationInFlight) return false
+        val providerSweep = seasonProviderSweepStatus(item.pageUrl)
+        if (providerSweep.complete) return false
+        if (providerSweep.finishedAt > 0L &&
+            System.currentTimeMillis() - providerSweep.finishedAt < PROVIDER_SEASON_SWEEP_RETRY_MS
+        ) return false
         val cached = loadCachedMergedSeasonBundle(item.pageUrl)
         if (cached == null) return true
         val attempt = CatalogDiskCache.loadJson(
@@ -5168,7 +5891,7 @@ object MultiProviderRepository {
     }
 
     private fun seasonEnrichmentAttemptKey(pageUrl: String): String =
-        "combined:season-attempt:v25:$pageUrl"
+        "combined:season-attempt:v29:$pageUrl"
 
     private fun needsSeasonEnrichment(item: ArabseedItem, bundle: ArabseedSeasonBundle): Boolean {
         if (item.type != ArabseedType.SERIES) return false
@@ -5189,13 +5912,16 @@ object MultiProviderRepository {
     }
 
     private fun matchesSeriesTitle(targetTitle: String, candidate: ArabseedItem): Boolean {
-        if (targetTitle.isBlank()) return false
-        val candidateTitles = listOfNotNull(
-            candidate.parentSeriesTitle,
-            candidate.title,
-            candidate.arabicTitle,
+        return SeriesCatalogParser.pageBelongsToSeries(
+            targetTitles = listOf(targetTitle),
+            targetPageUrls = emptyList(),
+            candidateTitles = listOfNotNull(
+                candidate.parentSeriesTitle,
+                candidate.title,
+                candidate.arabicTitle,
+            ),
+            candidatePageUrls = listOf(candidate.pageUrl),
         )
-        return candidateTitles.any { cand -> titlesStrictlyMatch(targetTitle, cand) }
     }
 
     /**
@@ -5204,9 +5930,7 @@ object MultiProviderRepository {
      * the work so an exact title match is not discarded as a different series.
      */
     private fun seriesIdentityKey(value: String): String =
-        SeriesCatalogParser.normalizedSeriesTitle(
-            value.replace(Regex("""(?<!\d)(?:19|20)\d{2}(?!\d)"""), " "),
-        )
+        SeriesCatalogParser.normalizedSeriesIdentity(value)
 
     private fun seriesIdentityKeys(item: ArabseedItem): List<String> =
         listOfNotNull(item.parentSeriesTitle, item.title, item.arabicTitle)
@@ -5230,12 +5954,108 @@ object MultiProviderRepository {
         }
     }
 
+    /**
+     * Only merge mirror data when the work and season are independently
+     * identified. A matching episode number alone is never enough to add a row.
+     */
+    internal fun reconcileMirrorSeasonBundle(
+        targetItem: ArabseedItem,
+        primaryBundle: ArabseedSeasonBundle,
+        sourceItem: ArabseedItem,
+        sourceBundle: ArabseedSeasonBundle,
+    ): ArabseedSeasonBundle {
+        val targetTitles = listOfNotNull(targetItem.parentSeriesTitle, targetItem.title, targetItem.arabicTitle)
+        val targetUrls = listOfNotNull(targetItem.parentSeriesPageUrl, targetItem.pageUrl)
+        val sourceTitles = listOfNotNull(sourceItem.parentSeriesTitle, sourceItem.title, sourceItem.arabicTitle)
+        if (!SeriesCatalogParser.pageBelongsToSeries(
+                targetTitles = targetTitles,
+                targetPageUrls = targetUrls,
+                candidateTitles = sourceTitles,
+                candidatePageUrls = listOf(sourceItem.pageUrl),
+            )
+        ) return ArabseedSeasonBundle(emptyList())
+
+        val targetIdentities = (targetTitles.mapNotNull(SeriesCatalogParser::seriesIdentityFromTitle) +
+            targetUrls.mapNotNull(SeriesCatalogParser::seriesIdentityFromUrl))
+            .toSet()
+        val targetSeasonEvidence = listOfNotNull(
+            SeriesCatalogParser.seasonNumber(targetItem.title, ""),
+            SeriesCatalogParser.seasonNumber("", targetItem.pageUrl),
+        ).distinct()
+        if (targetSeasonEvidence.size > 1) return ArabseedSeasonBundle(emptyList())
+        val targetSeason = targetSeasonEvidence.singleOrNull()
+        val knownPrimarySeasons = primaryBundle.seasons.map { it.number }.filter { it > 0 }.toSet()
+        val maxPrimarySeason = knownPrimarySeasons.maxOrNull() ?: 0
+        val targetCameFromEpisode = SeriesCatalogParser.isEpisode(targetItem.title, targetItem.pageUrl)
+        val itemSeasonNumbers = listOfNotNull(
+            SeriesCatalogParser.seasonNumber(sourceItem.title, ""),
+            SeriesCatalogParser.seasonNumber("", sourceItem.pageUrl),
+        ).distinct()
+        if (itemSeasonNumbers.size > 1) return ArabseedSeasonBundle(emptyList())
+
+        val acceptedSeasons = sourceBundle.seasons.mapNotNull { sourceSeason ->
+            if (sourceSeason.number !in 1..60) return@mapNotNull null
+            val seasonUrlNumbers = listOfNotNull(
+                SeriesCatalogParser.seasonNumber("", sourceSeason.pageUrl),
+            ).distinct()
+            val explicitSeasonNumbers = (itemSeasonNumbers + seasonUrlNumbers).distinct()
+            val episodeExplicitSeasons = sourceSeason.episodes.mapNotNull { episode ->
+                SeriesCatalogParser.seasonNumber(episode.title, episode.pageUrl)
+            }.distinct()
+            // A generated label like "الموسم الأول" is not evidence. Require either
+            // the page/season-tab URL or every explicitly season-tagged episode inside
+            // an un-scoped canonical page to confirm this exact season number.
+            val seasonConfirmedByUrl = explicitSeasonNumbers.size == 1 && explicitSeasonNumbers.single() == sourceSeason.number
+            val seasonConfirmedByEpisodes = itemSeasonNumbers.isEmpty() &&
+                seasonUrlNumbers.isEmpty() &&
+                sourceSeason.episodes.isNotEmpty() &&
+                sourceSeason.episodes.all { ep ->
+                    SeriesCatalogParser.seasonNumber(ep.title, ep.pageUrl) == sourceSeason.number
+                }
+            if (!seasonConfirmedByUrl && !seasonConfirmedByEpisodes) {
+                return@mapNotNull null
+            }
+            if (targetSeason != null && !targetCameFromEpisode && targetSeason != sourceSeason.number) {
+                return@mapNotNull null
+            }
+            val seasonPermitted = knownPrimarySeasons.isEmpty() ||
+                sourceSeason.number in knownPrimarySeasons ||
+                (maxPrimarySeason > 1 && sourceSeason.number in 1..maxPrimarySeason) ||
+                targetCameFromEpisode
+            if (!seasonPermitted) return@mapNotNull null
+
+            val episodes = sourceSeason.episodes.mapNotNull { episode ->
+                if (episode.number <= 0 || !episode.pageUrl.startsWith("http", ignoreCase = true)) {
+                    return@mapNotNull null
+                }
+                val episodeSeasonEvidence = listOfNotNull(
+                    SeriesCatalogParser.seasonNumber(episode.title, ""),
+                    SeriesCatalogParser.seasonNumber("", episode.pageUrl),
+                ).distinct()
+                if (episodeSeasonEvidence.size > 1 ||
+                    episodeSeasonEvidence.any { it != sourceSeason.number } ||
+                    SeriesCatalogParser.hasConflictingSeasonNumbers(episode.title, episode.pageUrl) ||
+                    episode.seasonNumber != sourceSeason.number
+                ) return@mapNotNull null
+                val readableIdentity = SeriesCatalogParser.seriesIdentityFromUrl(episode.pageUrl)
+                if (readableIdentity != null && readableIdentity !in targetIdentities) return@mapNotNull null
+                val alternatives = episode.alternatePageUrls.filter { url ->
+                    val identity = SeriesCatalogParser.seriesIdentityFromUrl(url)
+                    identity == null || identity in targetIdentities
+                }
+                episode.copy(seasonNumber = sourceSeason.number, alternatePageUrls = alternatives)
+            }.distinctBy { it.number }.sortedBy { it.number }
+            sourceSeason.copy(episodes = episodes)
+        }
+        return ArabseedSeasonBundle(acceptedSeasons)
+    }
+
     private fun mergeProviderSeasonBundles(
         bundles: List<Pair<ArabseedItem, ArabseedSeasonBundle>>,
     ): ArabseedSeasonBundle {
         val seasons = linkedMapOf<Int, MutableMap<String, Any?>>()
         val prioritizedBundles = bundles.sortedBy { (sourceItem, _) ->
-            SeriesCatalogParser.seasonNumber(sourceItem.title, sourceItem.pageUrl) == null
+            SeriesCatalogParser.seasonNumber(sourceItem.title, sourceItem.pageUrl) != null
         }
         for ((sourceItem, bundle) in prioritizedBundles) {
             val sourceName = sourceItem.providerName.ifBlank {
@@ -5455,38 +6275,8 @@ object MultiProviderRepository {
                         && it.pageUrl != selected.pageUrl
                 }
 
-            if (sameProviderSeriesPage == null && entries.size > 1) {
-                val episodeEntries = entries.map { it.second }.filter { SeriesCatalogParser.isEpisode(it.title, it.pageUrl) }
-                if (episodeEntries.isNotEmpty()) {
-                    val seasonMap = mutableMapOf<Int, MutableList<ArabseedEpisode>>()
-                    for (entry in episodeEntries) {
-                        val epNum = SeriesCatalogParser.episodeNumber(entry.title, entry.pageUrl) ?: continue
-                        val sNum = SeriesCatalogParser.seasonNumber(entry.title, entry.pageUrl) ?: 1
-                        val list = seasonMap.getOrPut(sNum) { mutableListOf() }
-                        if (list.none { it.number == epNum }) {
-                            list.add(ArabseedEpisode(
-                                number = epNum,
-                                title = "الحلقة $epNum",
-                                pageUrl = entry.pageUrl,
-                                seasonNumber = sNum,
-                                providerName = entry.providerName
-                            ))
-                        }
-                    }
-                    val synthesizedSeasons = seasonMap.toSortedMap().map { (sNum, eps) ->
-                        eps.sortBy { it.number }
-                        ArabseedSeason(
-                            number = sNum,
-                            title = SeriesCatalogParser.seasonTitle(sNum),
-                            episodes = eps,
-                            pageUrl = selected.pageUrl
-                        )
-                    }
-                    if (synthesizedSeasons.isNotEmpty()) {
-                        ArabseedRepository.saveSynthesizedBundle(selected.pageUrl, ArabseedSeasonBundle(seasons = synthesizedSeasons))
-                    }
-                }
-            }
+            // Do not synthesize or persist partial catalog-card episode stubs;
+            // wait for full season fetch/enrichment so 2-episode stubs never flash.
 
             entries.first().first to selected.copy(
                 title = baseTitle,

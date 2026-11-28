@@ -126,17 +126,31 @@ class FlutterMediaBridge(context: Context) {
             }
             bundle?.toMap()?.let { mapped ->
                 if (method.endsWith("cached")) mapped
-                else mapped + ("backgroundRefreshing" to
-                    MultiProviderRepository.isSeasonAggregationRunning(seriesItem.pageUrl))
+                else {
+                    val sweep = if (seriesItem.isExplicitSeriesOrEpisode()) {
+                        MultiProviderRepository.seasonProviderSweepStatus(seriesItem.pageUrl)
+                    } else null
+                    mapped + mapOf(
+                        "backgroundRefreshing" to
+                            MultiProviderRepository.isSeasonAggregationRunning(seriesItem.pageUrl),
+                        "providerSweepComplete" to (sweep?.complete ?: true),
+                        "pendingProviderIds" to sweep?.pendingProviderIds.orEmpty(),
+                        "episodeGaps" to sweep?.episodeGaps.orEmpty(),
+                    )
+                }
             }
         }
         "media.seasons.status" -> {
             val item = call.argument<Map<String, Any?>>("item")?.toItem()
                 ?: throw IllegalArgumentException("المسلسل غير صالح")
             val seriesItem = item.asParentSeries()
+            val sweep = MultiProviderRepository.seasonProviderSweepStatus(seriesItem.pageUrl)
             mapOf(
                 "backgroundRefreshing" to
                     MultiProviderRepository.isSeasonAggregationRunning(seriesItem.pageUrl),
+                "providerSweepComplete" to sweep.complete,
+                "pendingProviderIds" to sweep.pendingProviderIds,
+                "episodeGaps" to sweep.episodeGaps,
             )
         }
         "media.season.page.fetch" -> {
@@ -149,7 +163,7 @@ class FlutterMediaBridge(context: Context) {
                 ?: throw IllegalArgumentException("رابط الموسم غير صالح")
             val host = uri.host?.lowercase().orEmpty()
             val isArabseed = isArabseedUrl(seasonUrl)
-            if (seasonNumber <= 0 || uri.scheme !in setOf("http", "https") || host.isBlank() ||
+            if (seasonNumber !in 1..60 || uri.scheme !in setOf("http", "https") || host.isBlank() ||
                 (!isArabseed && !MultiProviderRepository.isMultiProvider(seasonUrl))
             ) throw IllegalArgumentException("رابط الموسم غير تابع لمصدر مدعوم")
 
@@ -179,13 +193,23 @@ class FlutterMediaBridge(context: Context) {
                     seasonNumbersOnly = setOf(seasonNumber),
                 )
             }
-            val bundle = MultiProviderRepository.fetchSeasonBundleAcrossProviders(
-                seriesItem,
-                rawBundle,
-                forceRefresh = false,
+            val scopedBundle = rawBundle.copy(
+                seasons = rawBundle.seasons.map { season ->
+                    if (season.number == seasonNumber) season.copy(pageUrl = seasonUrl) else season
+                },
             )
-            MultiProviderRepository.cacheSeasonPageEnrichment(seriesItem, seasonItem, bundle)
-            bundle.toMap()
+            val seasonCacheChanged = MultiProviderRepository.cacheSeasonPageEnrichment(
+                seriesItem,
+                seasonItem,
+                scopedBundle,
+            )
+            val immediateBundle = MultiProviderRepository.fetchSeasonBundleWithBackgroundMerge(
+                seriesItem,
+                scopedBundle,
+                forceRefresh = seasonCacheChanged,
+            )
+            immediateBundle.toMap() + ("backgroundRefreshing" to
+                MultiProviderRepository.isSeasonAggregationRunning(seriesItem.pageUrl))
         }
         "media.season.episodes.more" -> {
             val seasonUrl = call.argument<String>("seasonUrl").orEmpty().trim()
@@ -195,28 +219,12 @@ class FlutterMediaBridge(context: Context) {
                 ?.map(String::trim)?.filter(String::isNotBlank)?.toSet().orEmpty()
 
             val (bundle, nextPageUrl) = if (isArabseedUrl(seasonUrl) || isArabseedUrl(cursorUrl)) {
-                val rawSlug = cursorUrl.trimEnd('/').substringAfterLast('/')
-                    .replace('-', ' ')
-                    .replace('_', ' ')
-                val cleanTitle = SeriesCatalogParser.cleanSeriesTitle(rawSlug)
-                val dummyItem = ArabseedItem(
-                    id = "season_$seasonNumber",
-                    title = cleanTitle,
-                    arabicTitle = cleanTitle,
-                    posterUrl = null,
-                    year = "",
-                    quality = "",
-                    rating = "",
-                    type = ArabseedType.SERIES,
-                    pageUrl = seasonUrl,
-                    parentSeriesTitle = cleanTitle,
-                    parentSeriesPageUrl = seasonUrl,
-                    category = "",
-                    providerName = "عرب سيد",
+                ArabseedRepository.fetchMoreSeasonEpisodes(
+                    seasonUrl = seasonUrl,
+                    cursorUrl = cursorUrl,
+                    seasonNumber = seasonNumber,
+                    knownEpisodeUrls = knownEpisodeUrls,
                 )
-                val primary = ArabseedRepository.fetchSeasonsAndEpisodes(dummyItem, forceRefresh = true)
-                val enriched = MultiProviderRepository.fetchSeasonBundleAcrossProviders(dummyItem, primary, forceRefresh = true)
-                enriched to null
             } else {
                 if (!MultiProviderRepository.isMultiProvider(seasonUrl) ||
                     !MultiProviderRepository.isMultiProvider(cursorUrl)
@@ -411,6 +419,13 @@ class FlutterMediaBridge(context: Context) {
             val partsOnly = raw?.relatedParts.orEmpty()
             return if (partsOnly.isEmpty()) null else ArabseedSeasonBundle(emptyList(), partsOnly)
         }
+        val seriesItem = item.asParentSeries().copy(type = com.madar.tv.data.ArabseedType.SERIES)
+        if (raw != null) {
+            val totalEps = raw.seasons.sumOf { it.episodes.size }
+            if (totalEps <= 2 && MultiProviderRepository.shouldRefreshSeasonBundle(seriesItem)) {
+                return null
+            }
+        }
         return raw
     }
 
@@ -427,27 +442,22 @@ class FlutterMediaBridge(context: Context) {
         }
 
         val seriesItem = item.asParentSeries().copy(type = com.madar.tv.data.ArabseedType.SERIES)
-        val cached = MultiProviderRepository.loadCachedMergedSeasonBundle(seriesItem.pageUrl)
-            ?: if (seriesItem.isArabseedSource()) ArabseedRepository.loadCachedSeasonBundle(seriesItem.pageUrl)
-            else MultiProviderRepository.loadCachedSeasonBundle(seriesItem.pageUrl)
-        val cachedEpisodeCount = cached?.seasons?.sumOf { it.episodes.size } ?: 0
-        val minSeason = cached?.seasons?.minOfOrNull { it.number } ?: 0
-        val maxSeason = cached?.seasons?.maxOfOrNull { it.number } ?: 0
-        val detectedSeason = SeriesCatalogParser.seasonNumber(seriesItem.title, seriesItem.pageUrl)
-            ?: SeriesCatalogParser.seasonNumber(seriesItem.latestEpisodeLabel, "")
-        val hasSeasonGaps = cached?.seasons?.map { it.number }?.sorted()?.zipWithNext()?.any { (a, b) -> b - a > 1 } ?: false
-        val isMissingLower = minSeason > 1
-        val isMissingDetected = detectedSeason != null && cached?.seasons?.none { it.number == detectedSeason } == true
-        val isMissingIntermediate = maxSeason > (cached?.seasons?.size ?: 0)
-        val hasEpisodeGaps = cached?.seasons?.any { season ->
-            SeriesCatalogParser.needsEpisodeSequenceRepair(season.episodes.map { it.number })
-        } ?: false
-        val isCacheIncomplete = cached == null || isMissingLower || isMissingDetected || isMissingIntermediate || hasSeasonGaps || hasEpisodeGaps
-
-        if (!forceRefresh && cached != null && cachedEpisodeCount >= 1 &&
-            (!isCacheIncomplete || !MultiProviderRepository.shouldRefreshSeasonBundle(seriesItem))
-        ) {
-            return cached
+        if (!forceRefresh) {
+            val cached = MultiProviderRepository.loadCachedMergedSeasonBundle(seriesItem.pageUrl)
+                ?: if (seriesItem.isArabseedSource()) ArabseedRepository.loadCachedSeasonBundle(seriesItem.pageUrl)
+                else MultiProviderRepository.loadCachedSeasonBundle(seriesItem.pageUrl)
+            val cachedTotal = cached?.seasons?.sumOf { it.episodes.size } ?: 0
+            val cachedNums = cached?.seasons?.flatMap { s -> s.episodes.map { it.number } }.orEmpty()
+            val cachedNeedsFullSync = cachedTotal <= 2 || SeriesCatalogParser.needsEpisodeSequenceRepair(cachedNums)
+            if (cached != null && cached.seasons.any { it.episodes.isNotEmpty() } &&
+                !(cachedNeedsFullSync && MultiProviderRepository.shouldRefreshSeasonBundle(seriesItem))
+            ) {
+                return MultiProviderRepository.fetchSeasonBundleWithBackgroundMerge(
+                    seriesItem,
+                    cached,
+                    forceRefresh = false,
+                )
+            }
         }
 
         val primary = if (seriesItem.isArabseedSource()) {
@@ -455,22 +465,18 @@ class FlutterMediaBridge(context: Context) {
         } else {
             MultiProviderRepository.fetchSeasonsAndEpisodes(seriesItem, forceRefresh = forceRefresh)
         }
-        val primarySeasons = primary.seasons
-        val primaryCount = primarySeasons.sumOf { it.episodes.size }
-        val pMinSeason = primarySeasons.minOfOrNull { it.number } ?: 0
-        val pMaxSeason = primarySeasons.maxOfOrNull { it.number } ?: 0
-        val pSeasonGaps = primarySeasons.map { it.number }.sorted().zipWithNext().any { (a, b) -> b - a > 1 }
-        val pMissingDetected = detectedSeason != null && primarySeasons.none { it.number == detectedSeason }
-        val pEpisodeGaps = primarySeasons.any { season ->
+        val primaryTotal = primary.seasons.sumOf { it.episodes.size }
+        val primaryNeedsFullSync = primaryTotal <= 2 || primary.seasons.any { season ->
             SeriesCatalogParser.needsEpisodeSequenceRepair(season.episodes.map { it.number })
         }
-        val primaryIncomplete = primarySeasons.isEmpty() || pMinSeason > 1 ||
-            pMissingDetected || pMaxSeason > primarySeasons.size || pSeasonGaps || pEpisodeGaps
-
-        return if (!forceRefresh && !primaryIncomplete && primaryCount >= 1) {
-            MultiProviderRepository.cacheCompletePrimarySeasonBundle(seriesItem, primary)
-        } else {
+        return if (primaryNeedsFullSync) {
             MultiProviderRepository.fetchFullSeasonBundleSync(
+                seriesItem,
+                primary,
+                forceRefresh = forceRefresh,
+            )
+        } else {
+            MultiProviderRepository.fetchSeasonBundleWithBackgroundMerge(
                 seriesItem,
                 primary,
                 forceRefresh = forceRefresh,

@@ -170,11 +170,12 @@ object AdBypassHelper {
                 .add("post",   postId)
                 .add("nonce",  nonce)
                 .build()
+            val safeBaseUrl = SeriesCatalogParser.asciiSafeHeaderValue(baseUrl)
             val req = Request.Builder()
-                .url("${baseUrl.trimEnd('/')}/wp-admin/admin-ajax.php")
+                .url(SeriesCatalogParser.asciiSafeUrl("${baseUrl.trimEnd('/')}/wp-admin/admin-ajax.php"))
                 .post(body)
                 .header("X-Requested-With", "XMLHttpRequest")
-                .header("Referer",           baseUrl)
+                .apply { if (safeBaseUrl.isNotEmpty()) header("Referer", safeBaseUrl) }
                 .header("User-Agent",        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
                 .build()
 
@@ -219,11 +220,12 @@ object AdBypassHelper {
     ): String? = withContext(Dispatchers.IO) {
         try {
             val body = FormBody.Builder().add("id", embedId).build()
+            val safeRef = SeriesCatalogParser.asciiSafeHeaderValue(baseUrl)
             val req  = Request.Builder()
-                .url("${baseUrl.trimEnd('/')}/ajax/embed")
+                .url(SeriesCatalogParser.asciiSafeUrl("${baseUrl.trimEnd('/')}/ajax/embed"))
                 .post(body)
                 .header("X-Requested-With", "XMLHttpRequest")
-                .header("Referer", baseUrl)
+                .apply { if (safeRef.isNotEmpty()) header("Referer", safeRef) }
                 .build()
             val resp = client.newCall(req).execute()
             val json = JSONObject(resp.body?.string() ?: return@withContext null)
@@ -252,11 +254,12 @@ object AdBypassHelper {
                 .add("id",     serverId)
                 .add("nonce",  nonce)
                 .build()
+            val safeRef = SeriesCatalogParser.asciiSafeHeaderValue(baseUrl)
             val req  = Request.Builder()
-                .url("${baseUrl.trimEnd('/')}/wp-admin/admin-ajax.php")
+                .url(SeriesCatalogParser.asciiSafeUrl("${baseUrl.trimEnd('/')}/wp-admin/admin-ajax.php"))
                 .post(body)
                 .header("X-Requested-With", "XMLHttpRequest")
-                .header("Referer", baseUrl)
+                .apply { if (safeRef.isNotEmpty()) header("Referer", safeRef) }
                 .build()
             val resp    = client.newCall(req).execute()
             val jsonStr = resp.body?.string() ?: return@withContext null
